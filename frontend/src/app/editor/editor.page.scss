@@ -1,0 +1,205 @@
+:host {
+  display: block;
+  height: 100%;
+}
+
+.layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ---- side panels ---- */
+.panel {
+  overflow-y: auto;
+  background: var(--ion-color-step-50, #f6f7f9);
+  flex: 0 0 auto;
+}
+.palette {
+  width: 196px;
+  border-right: 1px solid var(--ion-color-step-150, #e2e4e8);
+}
+.inspector {
+  width: 304px;
+  border-left: 1px solid var(--ion-color-step-150, #e2e4e8);
+}
+
+.panel-h {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 9px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  background: var(--ion-color-step-100, #eef0f3);
+  border-bottom: 1px solid var(--ion-color-step-150, #e2e4e8);
+}
+
+.pad {
+  padding: 10px 12px;
+}
+.block {
+  display: block;
+}
+.muted {
+  opacity: 0.65;
+  font-size: 12px;
+}
+
+.l-name {
+  font-size: 14px;
+}
+.l-cat {
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+/* ---- canvas ---- */
+.canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background-color: var(--ion-background-color, #fff);
+  background-image: radial-gradient(circle, rgba(127, 127, 127, 0.18) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.canvas-wrap:active {
+  cursor: grabbing;
+}
+
+.canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+.edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.edge {
+  fill: none;
+  stroke: var(--ion-color-primary, #3880ff);
+  stroke-width: 2;
+  opacity: 0.85;
+}
+
+.node {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 10px 12px 16px;
+  border: 1.5px solid var(--ion-color-step-250, #c7ccd4);
+  border-radius: 11px;
+  background: var(--ion-card-background, var(--ion-background-color, #fff));
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.13);
+  cursor: grab;
+  user-select: none;
+}
+.node.sel {
+  border-color: var(--ion-color-primary, #3880ff);
+  box-shadow: 0 0 0 2px rgba(56, 128, 255, 0.35), 0 2px 7px rgba(0, 0, 0, 0.13);
+}
+.node-h {
+  font-size: 14px;
+  font-weight: 600;
+}
+.node-id {
+  font-size: 11px;
+  opacity: 0.5;
+}
+.shape {
+  margin-top: 7px;
+  font-size: 11px;
+  --background: var(--ion-color-step-150, #e2e4e8);
+  --color: var(--ion-text-color, #222);
+}
+
+.port {
+  position: absolute;
+  left: 50%;
+  width: 15px;
+  height: 15px;
+  margin-left: -7.5px;
+  border-radius: 50%;
+  background: var(--ion-color-step-350, #a9b0ba);
+  border: 2px solid var(--ion-background-color, #fff);
+  cursor: crosshair;
+  z-index: 3;
+}
+.port.in {
+  top: -8px;
+}
+.port.out {
+  bottom: -8px;
+}
+.port.live {
+  background: var(--ion-color-success, #2dd36f);
+}
+.port.from {
+  background: var(--ion-color-primary, #3880ff);
+  transform: scale(1.2);
+}
+
+.hint,
+.zoomhint {
+  position: absolute;
+  bottom: 12px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  pointer-events: none;
+}
+.hint {
+  left: 12px;
+}
+.zoomhint {
+  right: 12px;
+  opacity: 0.6;
+}
+
+/* ---- result ---- */
+.insp-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.help {
+  font-size: 11px;
+  display: block;
+  margin-top: 2px;
+}
+.result .kv {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 14px;
+}
+.order {
+  margin-top: 6px;
+  font-size: 11px;
+  opacity: 0.6;
+  word-break: break-word;
+}
+.spark {
+  width: 100%;
+  height: 60px;
+  margin-top: 10px;
+  border: 1px solid var(--ion-color-step-150, #e2e4e8);
+  border-radius: 6px;
+}
+.spark polyline {
+  fill: none;
+  stroke: var(--ion-color-primary, #3880ff);
+  stroke-width: 1.5;
+}

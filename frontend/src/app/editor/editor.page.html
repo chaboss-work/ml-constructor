@@ -1,0 +1,169 @@
+<ion-header>
+  <ion-toolbar color="dark">
+    <ion-buttons slot="start">
+      <ion-button fill="clear" size="small" (click)="clearGraph()">Clear</ion-button>
+    </ion-buttons>
+    <ion-title>ML Constructor · node editor</ion-title>
+    <ion-buttons slot="end">
+      <ion-button fill="outline" [disabled]="busy() || !nodes().length" (click)="onBuild()">Build</ion-button>
+      <ion-button fill="solid" color="primary" [disabled]="busy() || !nodes().length" (click)="onTrain()">Train ▶</ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [scrollY]="false">
+  <div class="layout">
+    <!-- ===================== palette ===================== -->
+    <aside class="panel palette">
+      <div class="panel-h">Layers</div>
+      @if (layersError()) {
+        <ion-note color="danger" class="pad block">{{ layersError() }}</ion-note>
+      }
+      <ion-list lines="none">
+        @for (l of layers(); track l.type) {
+          <ion-item button detail="false" (click)="addNode(l)">
+            <ion-label>
+              <div class="l-name">{{ l.label }}</div>
+              <div class="l-cat">{{ l.category }}</div>
+            </ion-label>
+          </ion-item>
+        }
+      </ion-list>
+    </aside>
+
+    <!-- ===================== canvas ====================== -->
+    <main class="canvas-wrap" (pointerdown)="canvasDown($event)" (wheel)="onWheel($event)">
+      <div class="canvas" [style.transform]="canvasTransform()">
+        <svg class="edges" width="4000" height="4000">
+          @for (e of edgeViews(); track e.id) {
+            <path class="edge" [attr.d]="e.d"></path>
+          }
+        </svg>
+
+        @for (n of nodes(); track n.id) {
+          <div
+            class="node"
+            [class.sel]="n.id === selectedId()"
+            [style.left.px]="n.x"
+            [style.top.px]="n.y"
+            [style.width.px]="NODE_W"
+            (pointerdown)="nodePointerDown(n.id, $event)"
+          >
+            <div
+              class="port in"
+              [class.live]="connectFrom() && connectFrom() !== n.id"
+              (click)="finishConnect(n.id, $event)"
+            ></div>
+
+            <div class="node-h">{{ n.type }}</div>
+            <div class="node-id">{{ n.id }}</div>
+            @if (shapeById().get(n.id); as sh) {
+              <ion-badge class="shape">[{{ sh.join('×') }}]</ion-badge>
+            }
+
+            <div
+              class="port out"
+              [class.from]="connectFrom() === n.id"
+              (click)="startConnect(n.id, $event)"
+            ></div>
+          </div>
+        }
+      </div>
+
+      @if (connectFrom()) {
+        <div class="hint">Click another node's top port (input) to connect · click the canvas to cancel</div>
+      }
+      <div class="zoomhint">{{ zoom() * 100 | number: '1.0-0' }}%</div>
+    </main>
+
+    <!-- ==================== inspector ==================== -->
+    <aside class="panel inspector">
+      <div class="panel-h">Inspector</div>
+      @if (selectedNode(); as n) {
+        <div class="pad">
+          <div class="insp-title">{{ n.type }} <ion-note>· {{ n.id }}</ion-note></div>
+          @if (selectedInfo(); as info) {
+            <ion-list lines="none">
+              @for (p of info.params; track p.name) {
+                <ion-item>
+                  <ion-label position="stacked">{{ p.label || p.name }}</ion-label>
+                  @switch (p.type) {
+                    @case ('bool') {
+                      <ion-checkbox
+                        slot="start"
+                        [checked]="!!n.params[p.name]"
+                        (ionChange)="setParam(n.id, p, $any($event).detail.checked)"
+                      ></ion-checkbox>
+                    }
+                    @default {
+                      <ion-input
+                        [value]="paramDisplay(n, p)"
+                        [type]="p.type === 'int' || p.type === 'float' ? 'number' : 'text'"
+                        (ionInput)="setParam(n.id, p, $any($event).detail.value)"
+                      ></ion-input>
+                    }
+                  }
+                  @if (p.help) {
+                    <ion-note class="help">{{ p.help }}</ion-note>
+                  }
+                </ion-item>
+              }
+            </ion-list>
+          }
+          <ion-button expand="block" fill="outline" color="danger" size="small" (click)="deleteSelected()">
+            Delete node
+          </ion-button>
+        </div>
+      } @else {
+        <ion-note class="pad block muted">
+          Click a node to edit its parameters.<br />
+          To connect: click a node's bottom port (output), then another node's top port (input).
+        </ion-note>
+      }
+
+      <div class="panel-h">Training</div>
+      <ion-list lines="none" class="train-cfg">
+        <ion-item>
+          <ion-label position="stacked">Epochs</ion-label>
+          <ion-input type="number" [value]="epochs()" (ionInput)="epochs.set(+$any($event).detail.value)"></ion-input>
+        </ion-item>
+        <ion-item>
+          <ion-label position="stacked">Learning rate</ion-label>
+          <ion-input type="number" [value]="lr()" (ionInput)="lr.set(+$any($event).detail.value)"></ion-input>
+        </ion-item>
+        <ion-item>
+          <ion-label position="stacked">Batch size</ion-label>
+          <ion-input type="number" [value]="batchSize()" (ionInput)="batchSize.set(+$any($event).detail.value)"></ion-input>
+        </ion-item>
+        <ion-item>
+          <ion-label position="stacked">Samples</ion-label>
+          <ion-input type="number" [value]="samples()" (ionInput)="samples.set(+$any($event).detail.value)"></ion-input>
+        </ion-item>
+      </ion-list>
+
+      <div class="panel-h">Result</div>
+      <div class="pad result">
+        @if (busy()) {
+          <ion-note class="muted">Running…</ion-note>
+        }
+        @if (runError()) {
+          <ion-note color="danger" class="block">{{ runError() }}</ion-note>
+        }
+        @if (buildResult(); as b) {
+          <div class="kv"><span>Parameters</span><b>{{ b.total_params | number }}</b></div>
+          <div class="kv"><span>Layers</span><b>{{ b.layers.length }}</b></div>
+          <div class="order">{{ b.order.join(' → ') }}</div>
+        }
+        @if (trainResult(); as t) {
+          <div class="kv"><span>Accuracy</span><b>{{ t.final_accuracy | number: '1.3-3' }}</b></div>
+          <div class="kv"><span>Final loss</span><b>{{ t.final_loss | number: '1.4-4' }}</b></div>
+          <div class="kv"><span>Steps</span><b>{{ t.steps }}</b></div>
+          <svg class="spark" viewBox="0 0 220 60" preserveAspectRatio="none">
+            <polyline [attr.points]="lossPoints()"></polyline>
+          </svg>
+          <ion-note class="muted">loss curve · {{ t.device }}</ion-note>
+        }
+      </div>
+    </aside>
+  </div>
+</ion-content>

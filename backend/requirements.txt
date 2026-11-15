@@ -1,0 +1,10 @@
+# 05 ML Constructor — backend (FastAPI + PyTorch). Python 3.12.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+
+# PyTorch: the CPU build is enough for the v1 thin-slice training.
+#   CPU  : pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   CUDA : pip install torch --index-url https://download.pytorch.org/whl/cu126
+# (pinned loosely on purpose; see README for the exact install command)
+torch>=2.2

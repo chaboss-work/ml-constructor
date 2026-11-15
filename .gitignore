@@ -1,0 +1,26 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# --- Node / Angular (frontend, M2) ---
+node_modules/
+dist/
+.angular/
+
+# --- data / artifacts / logs ---
+backend/data/
+*.log
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- local-only, keep out of the public repo ---
+PLAN.md

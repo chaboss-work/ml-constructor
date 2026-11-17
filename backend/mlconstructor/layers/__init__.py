@@ -14,6 +14,7 @@ from . import (  # noqa: F401
     norm,
     pooling,
     regularization,
+    sequence,
     shaping,
 )
 
@@ -26,5 +27,6 @@ __all__ = [
     "norm",
     "pooling",
     "regularization",
+    "sequence",
     "shaping",
 ]

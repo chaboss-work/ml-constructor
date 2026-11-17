@@ -61,21 +61,24 @@ The whole pipeline end-to-end: node editor → PyTorch → train → result on t
 single linear chain, shape inference, synthetic-data training. Live demo reached
 accuracy 1.000. Hosted on the machine and linked from the dashboard.
 
-### Stage 1 — Branching & merges (DAG) · **IN PROGRESS**
+### Stage 1 — Branching & merges (DAG) · **DONE (2026-11-17)**
 Move from a single chain to a **directed acyclic graph**: a node's output can fan
 out to several nodes, and **merge nodes** (`Add`, `Concat`) combine several inputs.
 Enables skip/residual connections, parallel paths and multi-branch designs. The
 editor supports branches and guides merges; the builder compiles arbitrary DAGs
 with shape propagation through the merges.
 
-### Stage 2 — Richer layer catalogue
+### Stage 2 — Richer layer catalogue · **DONE (2026-11-17)**
 Dropout; pooling (MaxPool2d, AvgPool2d, AdaptiveAvgPool2d); more normalization
 (BatchNorm1d, LayerNorm, GroupNorm); more activations (GELU, LeakyReLU, Softmax);
 `ConvTranspose2d`. Fuller per-layer parameter control.
 
-### Stage 3 — Sequence models
-`Embedding`, `RNN`, `LSTM`, `GRU`, and the sequence-shaped tensors they need.
-Build and train a small sequence model in the editor.
+### Stage 3 — Sequence models · **DONE (2026-11-17)**
+`Embedding`, `RNN`, `LSTM`, `GRU` on the `(L, F)` sequence convention
+(`batch_first`). Embedding maps `(L,)` token ids to `(L, embedding_dim)`; the
+recurrent layers map `(L, input_size)` to the last step `(hidden_size,)` or the
+full sequence `(L, hidden_size)`. Build and train a small sequence model in the
+editor (e.g. Input → Embedding → LSTM → Linear).
 
 ### Stage 4 — Attention & Transformers
 `MultiheadAttention`, `TransformerEncoderLayer`, positional encoding, `LayerNorm` —
@@ -123,11 +126,13 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 
 * **Этап 0 — v1, сквозной срез · ГОТОВО (15.11):** редактор → PyTorch → обучение →
   результат; 9 слоёв, одна цепочка, вывод форм, accuracy 1.0 в живом демо.
-* **Этап 1 — Ветвление и слияния (DAG) · В РАБОТЕ:** от цепочки к направленному
+* **Этап 1 — Ветвление и слияния (DAG) · ГОТОВО (17.11):** от цепочки к направленному
   графу; ноды-слияния `Add`/`Concat`, ветки, skip/residual-связи, параллельные пути.
-* **Этап 2 — Богаче каталог слоёв:** Dropout, пулинг, доп. нормализации и активации,
-  `ConvTranspose2d`.
-* **Этап 3 — Последовательности:** `Embedding`, `RNN`/`LSTM`/`GRU`.
+* **Этап 2 — Богаче каталог слоёв · ГОТОВО (17.11):** Dropout, пулинг, доп. нормализации
+  и активации, `ConvTranspose2d`.
+* **Этап 3 — Последовательности · ГОТОВО (17.11):** `Embedding`, `RNN`/`LSTM`/`GRU` на
+  соглашении `(L, F)` (`batch_first`); выход — последний шаг `(hidden,)` или вся
+  последовательность `(L, hidden)`.
 * **Этап 4 — Внимание и трансформеры:** `MultiheadAttention`,
   `TransformerEncoderLayer`, позиционное кодирование.
 * **Этап 5 — Умные адаптеры:** авто-согласование форм/типов на стыках, подсказки и

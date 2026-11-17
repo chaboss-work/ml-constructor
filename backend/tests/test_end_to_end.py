@@ -57,6 +57,7 @@ def test_layer_catalog():
         "Dropout", "MaxPool2d", "AvgPool2d", "AdaptiveAvgPool2d", "GELU", "LeakyReLU",
         "Softmax", "BatchNorm1d", "LayerNorm", "GroupNorm", "ConvTranspose2d",
     } <= types, "Stage 2 layers should be in the catalogue"
+    assert {"Embedding", "RNN", "LSTM", "GRU"} <= types, "Stage 3 sequence layers should be in the catalogue"
     print(f"[catalog] {len(cat)} layers: {sorted(types)}")
 
 
@@ -228,6 +229,122 @@ def test_conv_transpose_upsamples():
     print(f"[ConvTranspose2d] (4,8,8) -> {out['up']}")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 3 — sequence models (Embedding, RNN, LSTM, GRU)
+# Shapes are per-sample (L, F): the batched tensor is (B, L, F), batch_first.
+# --------------------------------------------------------------------------- #
+SEQ_LSTM = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [8, 4]}},       # (L=8, F=4)
+        {"id": "lstm", "type": "LSTM", "params": {"hidden_size": 16}},     # last step -> (16,)
+        {"id": "fc", "type": "Linear", "params": {"out_features": 3}},
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [["in", "lstm"], ["lstm", "fc"], ["fc", "out"]],
+    "train": {"epochs": 4, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+}
+
+
+def test_lstm_sequence_trains():
+    spec = GraphSpec.model_validate(SEQ_LSTM)
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["lstm"] == [16] and out["fc"] == [3], out
+    in_shape = tuple(build.layers[0].out_shape)
+    res = mlc.train_model(model, in_shape, spec.train)
+    assert res.final_loss < res.loss_curve[0] and res.final_accuracy > 0.8
+    print(f"[LSTM] (8,4)->last(16)->3  acc={res.final_accuracy:.3f} loss {res.loss_curve[0]:.3f}->{res.final_loss:.3f}")
+
+
+def test_embedding_lstm_classifier_trains():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [6]}},                              # (L=6,) token ids
+            {"id": "emb", "type": "Embedding", "params": {"num_embeddings": 20, "embedding_dim": 8}},
+            {"id": "lstm", "type": "LSTM", "params": {"hidden_size": 16}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 4}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "emb"], ["emb", "lstm"], ["lstm", "fc"], ["fc", "out"]],
+        "train": {"epochs": 6, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+    })
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["emb"] == [6, 8] and out["lstm"] == [16] and out["fc"] == [4], out
+    in_shape = tuple(build.layers[0].out_shape)
+    res = mlc.train_model(model, in_shape, spec.train)
+    assert res.final_loss < res.loss_curve[0] and res.final_accuracy > 0.8
+    print(f"[Embedding+LSTM] (6,)->emb(6,8)->lstm(16)->4  acc={res.final_accuracy:.3f} loss {res.loss_curve[0]:.3f}->{res.final_loss:.3f}")
+
+
+def test_gru_return_sequence_then_flatten():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [5, 3]}},
+            {"id": "gru", "type": "GRU", "params": {"hidden_size": 7, "return_sequence": True}},   # -> (5,7)
+            {"id": "flat", "type": "Flatten", "params": {}},                                        # -> (35,)
+            {"id": "fc", "type": "Linear", "params": {"out_features": 2}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "gru"], ["gru", "flat"], ["flat", "fc"], ["fc", "out"]],
+    })
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["gru"] == [5, 7] and out["flat"] == [35] and out["fc"] == [2], out
+    y = model(torch.zeros(2, 5, 3))
+    assert tuple(y.shape) == (2, 2)
+    print("[GRU seq] (5,3)->gru(5,7)->flat(35)->2, forward ok")
+
+
+def test_rnn_relu_and_bad_nonlinearity():
+    ok = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [4, 3]}},
+            {"id": "rnn", "type": "RNN", "params": {"hidden_size": 5, "nonlinearity": "relu"}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 2}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "rnn"], ["rnn", "fc"], ["fc", "out"]],
+    })
+    model, build = mlc.build_model(ok)
+    assert {s.id: s.out_shape for s in build.layers}["rnn"] == [5]
+    assert tuple(model(torch.zeros(2, 4, 3)).shape) == (2, 2)
+
+    bad = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [4, 3]}},
+            {"id": "rnn", "type": "RNN", "params": {"nonlinearity": "swish"}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "rnn"], ["rnn", "out"]],
+    })
+    try:
+        mlc.build_model(bad)
+    except ShapeError as exc:
+        assert "rnn" in str(exc)
+        print(f"[validate] bad RNN nonlinearity rejected: {exc}")
+        return
+    raise AssertionError("expected a ShapeError for an unknown RNN nonlinearity")
+
+
+def test_embedding_needs_1d_sequence():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [3, 4]}},    # 2-D, not a (L,) index sequence
+            {"id": "emb", "type": "Embedding", "params": {"num_embeddings": 10}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "emb"], ["emb", "out"]],
+    })
+    try:
+        mlc.build_model(spec)
+    except ShapeError as exc:
+        assert "emb" in str(exc)
+        print(f"[validate] Embedding fed 2-D rejected: {exc}")
+        return
+    raise AssertionError("expected a ShapeError for an Embedding fed a 2-D shape")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -239,4 +356,9 @@ if __name__ == "__main__":
     test_merge_needs_two_inputs()
     test_stage2_layers()
     test_conv_transpose_upsamples()
-    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2)")
+    test_lstm_sequence_trains()
+    test_embedding_lstm_classifier_trains()
+    test_gru_return_sequence_then_flatten()
+    test_rnn_relu_and_bad_nonlinearity()
+    test_embedding_needs_1d_sequence()
+    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3)")

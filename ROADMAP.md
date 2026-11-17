@@ -80,9 +80,11 @@ recurrent layers map `(L, input_size)` to the last step `(hidden_size,)` or the
 full sequence `(L, hidden_size)`. Build and train a small sequence model in the
 editor (e.g. Input → Embedding → LSTM → Linear).
 
-### Stage 4 — Attention & Transformers
-`MultiheadAttention`, `TransformerEncoderLayer`, positional encoding, `LayerNorm` —
-enough to assemble and train a small transformer block from nodes.
+### Stage 4 — Attention & Transformers · **DONE (2026-11-17)**
+`MultiheadAttention` (self-attention), `TransformerEncoderLayer`, sinusoidal
+`PositionalEncoding` — all shape-preserving over the `(L, E)` convention — plus
+`LayerNorm` from Stage 2. Enough to assemble and train a small transformer, e.g.
+Input → Embedding → PositionalEncoding → TransformerEncoderLayer → Flatten → Linear.
 
 ### Stage 5 — Smart adapters
 Automatic shape/type reconciliation on connections (auto-insert Flatten/reshape,
@@ -133,8 +135,9 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 * **Этап 3 — Последовательности · ГОТОВО (17.11):** `Embedding`, `RNN`/`LSTM`/`GRU` на
   соглашении `(L, F)` (`batch_first`); выход — последний шаг `(hidden,)` или вся
   последовательность `(L, hidden)`.
-* **Этап 4 — Внимание и трансформеры:** `MultiheadAttention`,
-  `TransformerEncoderLayer`, позиционное кодирование.
+* **Этап 4 — Внимание и трансформеры · ГОТОВО (17.11):** `MultiheadAttention`
+  (self-attention), `TransformerEncoderLayer`, синусоидальное `PositionalEncoding`
+  — всё сохраняет форму `(L, E)`; собирается и обучается небольшой трансформер.
 * **Этап 5 — Умные адаптеры:** авто-согласование форм/типов на стыках, подсказки и
   починка в один клик (в духе Unsloth Studio).
 * **Этап 6 — Блоки и повторы:** группировка подграфа в блок и повтор N× («N×

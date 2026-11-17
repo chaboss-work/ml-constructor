@@ -58,6 +58,9 @@ def test_layer_catalog():
         "Softmax", "BatchNorm1d", "LayerNorm", "GroupNorm", "ConvTranspose2d",
     } <= types, "Stage 2 layers should be in the catalogue"
     assert {"Embedding", "RNN", "LSTM", "GRU"} <= types, "Stage 3 sequence layers should be in the catalogue"
+    assert {"MultiheadAttention", "TransformerEncoderLayer", "PositionalEncoding"} <= types, (
+        "Stage 4 attention layers should be in the catalogue"
+    )
     print(f"[catalog] {len(cat)} layers: {sorted(types)}")
 
 
@@ -345,6 +348,93 @@ def test_embedding_needs_1d_sequence():
     raise AssertionError("expected a ShapeError for an Embedding fed a 2-D shape")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 4 — attention & transformers (self-attention + encoder block + pos-enc)
+# All shape-preserving over the (L, E) sequence convention; a Flatten + Linear
+# turns the sequence into class logits.
+# --------------------------------------------------------------------------- #
+def test_multihead_attention_shape():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [6, 8]}},
+            {"id": "att", "type": "MultiheadAttention", "params": {"num_heads": 2}},   # -> (6,8)
+            {"id": "flat", "type": "Flatten", "params": {}},                            # -> (48,)
+            {"id": "fc", "type": "Linear", "params": {"out_features": 3}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "att"], ["att", "flat"], ["flat", "fc"], ["fc", "out"]],
+    })
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["att"] == [6, 8] and out["flat"] == [48] and out["fc"] == [3], out
+    y = model(torch.zeros(2, 6, 8))
+    assert tuple(y.shape) == (2, 3)
+    print("[MHA] (6,8) self-attn -> (6,8) -> flat(48) -> 3, forward ok")
+
+
+def test_transformer_encoder_trains():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [5, 8]}},
+            {"id": "pe", "type": "PositionalEncoding", "params": {}},
+            {"id": "enc", "type": "TransformerEncoderLayer",
+             "params": {"nhead": 2, "dim_feedforward": 16, "dropout": 0.0}},
+            {"id": "flat", "type": "Flatten", "params": {}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 3}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "pe"], ["pe", "enc"], ["enc", "flat"], ["flat", "fc"], ["fc", "out"]],
+        "train": {"epochs": 8, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+    })
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["pe"] == [5, 8] and out["enc"] == [5, 8] and out["flat"] == [40], out
+    in_shape = tuple(build.layers[0].out_shape)
+    res = mlc.train_model(model, in_shape, spec.train)
+    assert res.final_loss < res.loss_curve[0] and res.final_accuracy > 0.8
+    print(f"[Transformer] (5,8)->PE->encoder->flat->3  acc={res.final_accuracy:.3f} loss {res.loss_curve[0]:.3f}->{res.final_loss:.3f}")
+
+
+def test_embedding_transformer_classifier_builds():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [6]}},                                 # (L=6,) token ids
+            {"id": "emb", "type": "Embedding", "params": {"num_embeddings": 20, "embedding_dim": 8}},
+            {"id": "pe", "type": "PositionalEncoding", "params": {}},
+            {"id": "enc", "type": "TransformerEncoderLayer",
+             "params": {"nhead": 2, "dim_feedforward": 16, "dropout": 0.0}},
+            {"id": "flat", "type": "Flatten", "params": {}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 4}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "emb"], ["emb", "pe"], ["pe", "enc"], ["enc", "flat"], ["flat", "fc"], ["fc", "out"]],
+    })
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["emb"] == [6, 8] and out["enc"] == [6, 8] and out["fc"] == [4], out
+    y = model(torch.zeros(2, 6))
+    assert tuple(y.shape) == (2, 4)
+    print("[Embedding+Transformer] (6,)->emb->PE->encoder->flat->4, forward ok")
+
+
+def test_attention_head_divisibility():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [6, 8]}},
+            {"id": "att", "type": "MultiheadAttention", "params": {"num_heads": 3}},   # 8 % 3 != 0
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "att"], ["att", "out"]],
+    })
+    try:
+        mlc.build_model(spec)
+    except ShapeError as exc:
+        assert "att" in str(exc) and "num_heads" in str(exc)
+        print(f"[validate] embed_dim indivisible by heads rejected: {exc}")
+        return
+    raise AssertionError("expected a ShapeError for embed_dim not divisible by num_heads")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -361,4 +451,8 @@ if __name__ == "__main__":
     test_gru_return_sequence_then_flatten()
     test_rnn_relu_and_bad_nonlinearity()
     test_embedding_needs_1d_sequence()
-    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3)")
+    test_multihead_attention_shape()
+    test_transformer_encoder_trains()
+    test_embedding_transformer_classifier_builds()
+    test_attention_head_divisibility()
+    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4)")

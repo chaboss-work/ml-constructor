@@ -7,6 +7,7 @@ To add a layer: create a new module here and import it in this list.
 
 from . import (  # noqa: F401
     activation,
+    attention,
     conv,
     io,
     linear,
@@ -20,6 +21,7 @@ from . import (  # noqa: F401
 
 __all__ = [
     "activation",
+    "attention",
     "conv",
     "io",
     "linear",

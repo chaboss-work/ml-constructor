@@ -18,7 +18,7 @@
       <div class="panel-h">Layers</div>
       <ion-searchbar
         class="palette-search"
-        placeholder="Поиск слоёв…"
+        placeholder="Search layers…"
         [debounce]="0"
         (ionInput)="paletteQuery.set($any($event).detail.value ?? '')"
       ></ion-searchbar>
@@ -34,7 +34,7 @@
             </ion-label>
           </ion-item>
         } @empty {
-          <ion-note class="pad block muted">Ничего не найдено</ion-note>
+          <ion-note class="pad block muted">Nothing found</ion-note>
         }
       </ion-list>
     </aside>
@@ -63,8 +63,11 @@
               (click)="finishConnect(n.id, $event)"
             ></div>
 
-            <div class="node-h">{{ n.type }}</div>
+            <div class="node-h">{{ nodeTitle(n) }}</div>
             <div class="node-id">{{ n.id }}</div>
+            @if (n.type === 'Repeat') {
+              <div class="blk-inner">{{ innerSummary(n) }}</div>
+            }
             @if (shapeById().get(n.id); as sh) {
               <ion-badge class="shape">[{{ sh.join('×') }}]</ion-badge>
             }
@@ -89,7 +92,7 @@
       <div class="panel-h">Inspector</div>
       @if (selectedNode(); as n) {
         <div class="pad">
-          <div class="insp-title">{{ n.type }} <ion-note>· {{ n.id }}</ion-note></div>
+          <div class="insp-title">{{ nodeTitle(n) }} <ion-note>· {{ n.id }}</ion-note></div>
           @if (selectedInfo(); as info) {
             <ion-list lines="none">
               @for (p of info.params; track p.name) {
@@ -117,6 +120,60 @@
                 </ion-item>
               }
             </ion-list>
+          }
+          @if (n.type === 'Repeat') {
+            <div class="block-editor">
+              <div class="be-h">Inner layers (stamped ×{{ n.params['repeat'] }})</div>
+              @if (blockLayers().length) {
+                <ol class="be-list">
+                  @for (il of blockLayers(); track $index) {
+                    <li [class.sel]="innerSel() === $index" (click)="innerSel.set($index)">
+                      <span class="be-type">{{ il.type }}</span>
+                      <ion-button fill="clear" size="small" color="danger" (click)="removeInner($index); $event.stopPropagation()">✕</ion-button>
+                    </li>
+                  }
+                </ol>
+              } @else {
+                <ion-note class="muted block">No inner layers yet — add one below.</ion-note>
+              }
+              <select class="be-add" (change)="addInner($any($event).target.value); $any($event).target.value = ''">
+                <option value="">+ Add inner layer…</option>
+                @for (t of innerTypes(); track t) {
+                  <option [value]="t">{{ t }}</option>
+                }
+              </select>
+
+              @if (innerSel() !== null && blockLayers()[innerSel()!]; as il) {
+                @if (innerInfo(il.type); as info) {
+                  @if (info.params.length) {
+                    <div class="be-params-h">{{ il.type }} · parameters</div>
+                    <ion-list lines="none">
+                      @for (p of info.params; track p.name) {
+                        <ion-item>
+                          <ion-label position="stacked">{{ p.label || p.name }}</ion-label>
+                          @switch (p.type) {
+                            @case ('bool') {
+                              <ion-checkbox
+                                slot="start"
+                                [checked]="!!il.params[p.name]"
+                                (ionChange)="setInnerParam(innerSel()!, p, $any($event).detail.checked)"
+                              ></ion-checkbox>
+                            }
+                            @default {
+                              <ion-input
+                                [value]="il.params[p.name]"
+                                [type]="p.type === 'int' || p.type === 'float' ? 'number' : 'text'"
+                                (ionInput)="setInnerParam(innerSel()!, p, $any($event).detail.value)"
+                              ></ion-input>
+                            }
+                          }
+                        </ion-item>
+                      }
+                    </ion-list>
+                  }
+                }
+              }
+            </div>
           }
           <ion-button expand="block" fill="outline" color="danger" size="small" (click)="deleteSelected()">
             Delete node
@@ -159,12 +216,12 @@
         }
         @if (proposals().length) {
           <div class="fixes">
-            <div class="fixes-h">Умный адаптер</div>
+            <div class="fixes-h">Smart adapter</div>
             @for (p of proposals(); track p.source_id + '>' + p.target_id) {
               <div class="fix">
                 <ion-note class="block">{{ p.reason }}</ion-note>
                 <ion-button size="small" expand="block" fill="solid" color="primary" (click)="applyProposal(p)">
-                  Вставить {{ p.adapter_type }}
+                  Insert {{ p.adapter_type }}
                 </ion-button>
               </div>
             }

@@ -37,13 +37,10 @@ _CANDIDATES = [_flatten_candidate]
 def _reason(adapter_type: str, target_type: str, in_shape: Shape, out_shape: Shape) -> str:
     if adapter_type == "Flatten":
         return (
-            f"«{target_type}» ждёт одномерный вход, а приходит {tuple(in_shape)} — "
-            f"Flatten свернёт его в вектор из {out_shape[0]} признаков"
+            f"{target_type} expects a 1-D input, but receives {tuple(in_shape)} — "
+            f"Flatten collapses it to a {out_shape[0]}-feature vector"
         )
-    return (
-        f"Вставьте «{adapter_type}», чтобы согласовать формы "
-        f"{tuple(in_shape)} → {tuple(out_shape)}"
-    )
+    return f"Insert {adapter_type} to reconcile shapes {tuple(in_shape)} → {tuple(out_shape)}"
 
 
 def _first_fixing_adapter(src_shape: Shape, target: LayerNode):

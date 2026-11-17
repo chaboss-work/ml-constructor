@@ -62,6 +62,7 @@ def test_layer_catalog():
     assert {"MultiheadAttention", "TransformerEncoderLayer", "PositionalEncoding"} <= types, (
         "Stage 4 attention layers should be in the catalogue"
     )
+    assert "Repeat" in types, "Stage 6 block (Repeat) should be in the catalogue"
     print(f"[catalog] {len(cat)} layers: {sorted(types)}")
 
 
@@ -498,6 +499,96 @@ def test_suggest_flatten_for_sequence_to_linear():
     print(f"[suggest] seq->Linear: {props[0].reason}")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 6 — reusable blocks: a Repeat node stamps an inner linear chain N times
+# (reusing the Block mother class), behaving like any single-input layer.
+# --------------------------------------------------------------------------- #
+REPEAT_MLP = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [16]}},
+        {"id": "blk", "type": "Repeat", "params": {"repeat": 3, "layers": [
+            {"type": "Linear", "params": {"out_features": 16}},
+            {"type": "ReLU", "params": {}},
+        ]}},
+        {"id": "fc", "type": "Linear", "params": {"out_features": 4}},
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [["in", "blk"], ["blk", "fc"], ["fc", "out"]],
+    "train": {"epochs": 4, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+}
+
+
+def test_repeat_block_builds_and_trains():
+    spec = GraphSpec.model_validate(REPEAT_MLP)
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["blk"] == [16] and out["fc"] == [4], out
+    blk = next(s for s in build.layers if s.id == "blk")
+    assert blk.num_params == 3 * (16 * 16 + 16), blk.num_params  # 3 stamps of Linear(16->16)+bias
+    in_shape = tuple(build.layers[0].out_shape)
+    res = mlc.train_model(model, in_shape, spec.train)
+    assert res.final_loss < res.loss_curve[0] and res.final_accuracy > 0.8
+    print(f"[Repeat] [Linear,ReLU]x3 block params={blk.num_params} acc={res.final_accuracy:.3f}")
+
+
+def test_repeat_block_shape_changes_each_stamp():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [16]}},
+            {"id": "blk", "type": "Repeat", "params": {"repeat": 2, "layers": [
+                {"type": "Linear", "params": {"out_features": 8}},
+                {"type": "ReLU", "params": {}},
+            ]}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "blk"], ["blk", "out"]],
+    })
+    _model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["blk"] == [8], out            # (16)->L8->(8) then (8)->L8->(8)
+    blk = next(s for s in build.layers if s.id == "blk")
+    assert blk.num_params == (16 * 8 + 8) + (8 * 8 + 8), blk.num_params
+    print(f"[Repeat] shape-changing block (16->8)x2 params={blk.num_params}, out={out['blk']}")
+
+
+def test_empty_block_rejected():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [8]}},
+            {"id": "blk", "type": "Repeat", "params": {"repeat": 2, "layers": []}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "blk"], ["blk", "out"]],
+    })
+    try:
+        mlc.build_model(spec)
+    except ShapeError as exc:
+        assert "blk" in str(exc) and "empty" in str(exc)
+        print(f"[validate] empty block rejected: {exc}")
+        return
+    raise AssertionError("expected an empty block to be rejected")
+
+
+def test_block_rejects_inner_io_node():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [8]}},
+            {"id": "blk", "type": "Repeat", "params": {"repeat": 1, "layers": [
+                {"type": "Output", "params": {}},
+            ]}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "blk"], ["blk", "out"]],
+    })
+    try:
+        mlc.build_model(spec)
+    except ShapeError as exc:
+        assert "blk" in str(exc)
+        print(f"[validate] inner Output rejected: {exc}")
+        return
+    raise AssertionError("expected an inner Output to be rejected")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -522,4 +613,8 @@ if __name__ == "__main__":
     test_apply_adapter_makes_graph_build()
     test_suggest_empty_for_valid_graph()
     test_suggest_flatten_for_sequence_to_linear()
-    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5)")
+    test_repeat_block_builds_and_trains()
+    test_repeat_block_shape_changes_each_stamp()
+    test_empty_block_rejected()
+    test_block_rejects_inner_io_node()
+    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6)")

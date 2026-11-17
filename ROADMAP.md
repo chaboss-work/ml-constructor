@@ -93,10 +93,12 @@ the first (it collapses a feature map or a sequence to a vector) — and the edi
 shows the fix inline and inserts it on one click. Fewer manual Flattens; the
 candidate framework is open for reshape / pooling / dtype adapters next.
 
-### Stage 6 — Reusable blocks & repeats
-Group a sub-graph into a named **Block** and **repeat it N×** (as in "N× transformer
-blocks"). Exposes the backend's mother-class composition in the UI; edit a block
-once, stamp it many times.
+### Stage 6 — Reusable blocks & repeats · **DONE (2026-11-17)**
+A `Repeat` node holds an inner linear chain and stamps it **N×** (reusing the
+`Block` mother class), behaving like any single-input layer — its output shape is
+the chain applied N times and each stamp gets fresh parameters. The editor adds a
+Block node with an inner-chain editor (add / remove / edit inner layers, set N).
+"Edit the block once, stamp it many times."
 
 ### Stage 7 — Architecture library
 A library of ready public architectures (MLP, simple CNN, **ResNet**, **GPT-like**
@@ -143,8 +145,10 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 * **Этап 5 — Умные адаптеры · ГОТОВО (17.11):** согласование форм на стыках — бэкенд
   `/suggest` предлагает ноду-адаптер (первый — Flatten), редактор показывает подсказку
   и вставляет её в один клик; каркас открыт для reshape/пулинг/dtype-адаптеров.
-* **Этап 6 — Блоки и повторы:** группировка подграфа в блок и повтор N× («N×
-  трансформерных блоков»).
+* **Этап 6 — Блоки и повторы · ГОТОВО (17.11):** нода `Repeat` держит внутреннюю
+  линейную цепочку и штампует её **N×** (переиспользует материнский класс `Block`),
+  ведёт себя как обычный слой; в редакторе — нода Block с редактором внутренней
+  цепочки (добавить / убрать / править слои, задать N).
 * **Этап 7 — Библиотека архитектур:** готовые ResNet, GPT-подобные LLM и др. —
   добавил на холст и глубоко редактируешь.
 * **Этап 8 — Реальные датасеты и UX обучения:** **модалка с данными** на нодах

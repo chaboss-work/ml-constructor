@@ -241,3 +241,77 @@
   --box-shadow: none;
   padding: 6px 8px;
 }
+
+/* ---- block (Repeat) node + inner-chain editor ---- */
+.blk-inner {
+  margin-top: 4px;
+  font-size: 10.5px;
+  opacity: 0.7;
+  word-break: break-word;
+}
+.block-editor {
+  margin: 8px 0 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--ion-color-step-150, #e2e4e8);
+  border-left: 3px solid var(--ion-color-success, #2dd36f);
+  border-radius: 8px;
+  background: var(--ion-color-step-50, #f6f7f9);
+}
+.be-h,
+.be-params-h {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 6px;
+}
+.be-params-h {
+  margin-top: 8px;
+}
+.be-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  counter-reset: be;
+}
+.be-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid var(--ion-color-step-150, #e2e4e8);
+  border-radius: 6px;
+  margin-bottom: 4px;
+  background: var(--ion-background-color, #fff);
+  cursor: pointer;
+}
+.be-list li.sel {
+  border-color: var(--ion-color-primary, #3880ff);
+  box-shadow: 0 0 0 1px rgba(56, 128, 255, 0.3);
+}
+.be-list li::before {
+  counter-increment: be;
+  content: counter(be) '.';
+  opacity: 0.5;
+  font-size: 11px;
+}
+.be-type {
+  flex: 1 1 auto;
+  font-size: 13px;
+}
+.be-list li ion-button {
+  --padding-start: 4px;
+  --padding-end: 4px;
+  margin: 0;
+  height: 22px;
+}
+.be-add {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid var(--ion-color-step-200, #d3d7de);
+  border-radius: 7px;
+  background: var(--ion-background-color, #fff);
+  color: var(--ion-text-color, #222);
+  font-size: 13px;
+}

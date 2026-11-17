@@ -82,6 +82,7 @@ export class EditorPage {
   trainResult = signal<TrainResult | null>(null);
   runError = signal<string | null>(null);
   proposals = signal<AdapterProposal[]>([]);
+  innerSel = signal<number | null>(null); // selected inner layer of a Block (Repeat) node
 
   // ---- train config ----
   epochs = signal(3);
@@ -125,6 +126,19 @@ export class EditorPage {
         l.category.toLowerCase().includes(q),
     );
   });
+
+  // ---- Block (Repeat) node: the inner linear chain it stamps N times ----
+  blockLayers = computed<{ type: string; params: Record<string, unknown> }[]>(() => {
+    const n = this.selectedNode();
+    return n?.type === 'Repeat' ? ((n.params['layers'] as { type: string; params: Record<string, unknown> }[]) ?? []) : [];
+  });
+
+  // Layer types allowed inside a block: no Input/Output (io), no merges, no nested blocks.
+  innerTypes = computed<string[]>(() =>
+    this.layers()
+      .filter((l) => l.category !== 'io' && l.category !== 'merge' && l.type !== 'Repeat')
+      .map((l) => l.type),
+  );
 
   shapeById = computed(() => {
     const map = new Map<string, number[] | null>();
@@ -180,6 +194,7 @@ export class EditorPage {
     const id = this.freshId(layer.type);
     const params: Record<string, unknown> = {};
     for (const p of layer.params) params[p.name] = structuredClone(p.default);
+    if (layer.type === 'Repeat' && !Array.isArray(params['layers'])) params['layers'] = []; // block starts empty
     const i = this.nodes().length;
     const node: EditorNode = { id, type: layer.type, x: 70 + (i % 4) * 26, y: 60 + i * 22, params };
     this.nodes.update((ns) => [...ns, node]);
@@ -235,7 +250,7 @@ export class EditorPage {
     const hasInput = this.edges().some((e) => e.target === targetId);
     if (hasInput && !isMerge) {
       this.runError.set(
-        `«${target?.type}» принимает один вход. Чтобы объединить ветки, используйте merge-ноду (Add или Concat).`,
+        `«${target?.type}» takes a single input. To combine branches, use a merge node (Add or Concat).`,
       );
       return;
     }
@@ -294,18 +309,81 @@ export class EditorPage {
   }
 
   // ---------------------------------------------------------------- params
-  setParam(nodeId: string, p: ParamDef, raw: unknown): void {
-    let val: unknown = raw;
-    if (p.type === 'int') val = Math.round(Number(raw));
-    else if (p.type === 'float') val = Number(raw);
-    else if (p.type === 'bool') val = !!raw;
-    else if (p.type === 'intlist') {
-      val = String(raw)
+  private coerceParam(p: ParamDef, raw: unknown): unknown {
+    if (p.type === 'int') return Math.round(Number(raw));
+    if (p.type === 'float') return Number(raw);
+    if (p.type === 'bool') return !!raw;
+    if (p.type === 'intlist') {
+      return String(raw)
         .split(',')
         .map((s) => parseInt(s.trim(), 10))
         .filter((x) => !Number.isNaN(x));
-    } else val = String(raw);
+    }
+    return String(raw);
+  }
+
+  setParam(nodeId: string, p: ParamDef, raw: unknown): void {
+    const val = this.coerceParam(p, raw);
     this.nodes.update((ns) => ns.map((n) => (n.id === nodeId ? { ...n, params: { ...n.params, [p.name]: val } } : n)));
+    this.invalidateBuild();
+  }
+
+  // -------------------------------------------------------- block inner chain
+  nodeTitle(n: EditorNode): string {
+    return n.type === 'Repeat' ? `Block ×${n.params['repeat'] ?? 1}` : n.type;
+  }
+
+  innerSummary(n: EditorNode): string {
+    const ls = (n.params['layers'] as { type: string }[]) ?? [];
+    return ls.length ? ls.map((l) => l.type).join(' → ') : '(empty)';
+  }
+
+  innerInfo(type: string): LayerInfo | null {
+    return this.layers().find((l) => l.type === type) ?? null;
+  }
+
+  addInner(type: string): void {
+    if (!type) return;
+    const info = this.innerInfo(type);
+    const params: Record<string, unknown> = {};
+    if (info) for (const p of info.params) params[p.name] = structuredClone(p.default);
+    const blkId = this.selectedId();
+    this.nodes.update((ns) =>
+      ns.map((n) => {
+        if (n.id !== blkId) return n;
+        const layers = [...((n.params['layers'] as unknown[]) ?? []), { type, params }];
+        return { ...n, params: { ...n.params, layers } };
+      }),
+    );
+    this.innerSel.set(this.blockLayers().length - 1);
+    this.invalidateBuild();
+  }
+
+  removeInner(idx: number): void {
+    const blkId = this.selectedId();
+    this.nodes.update((ns) =>
+      ns.map((n) => {
+        if (n.id !== blkId) return n;
+        const layers = ((n.params['layers'] as unknown[]) ?? []).filter((_, i) => i !== idx);
+        return { ...n, params: { ...n.params, layers } };
+      }),
+    );
+    this.innerSel.set(null);
+    this.invalidateBuild();
+  }
+
+  setInnerParam(idx: number, p: ParamDef, raw: unknown): void {
+    const val = this.coerceParam(p, raw);
+    const blkId = this.selectedId();
+    this.nodes.update((ns) =>
+      ns.map((n) => {
+        if (n.id !== blkId) return n;
+        const layers = [...((n.params['layers'] as { type: string; params: Record<string, unknown> }[]) ?? [])];
+        if (!layers[idx]) return n;
+        layers[idx] = { ...layers[idx], params: { ...layers[idx].params, [p.name]: val } };
+        return { ...n, params: { ...n.params, layers } };
+      }),
+    );
     this.invalidateBuild();
   }
 
@@ -401,7 +479,7 @@ export class EditorPage {
   private errMsg(e: unknown): string {
     const err = e as { error?: { detail?: string }; message?: string; status?: number };
     if (err?.error?.detail) return err.error.detail;
-    if (err?.status === 0) return 'Нет связи с бэкендом на :8050 — запущен ли FastAPI?';
+    if (err?.status === 0) return 'No connection to the backend on :8050 — is FastAPI running?';
     return err?.message ?? 'Request failed';
   }
 

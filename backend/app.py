@@ -13,8 +13,11 @@ Endpoints:
 
 from __future__ import annotations
 
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 import mlconstructor as mlc
 from mlconstructor.schema import BuildResult, GraphSpec, LayerInfo, TrainResult
@@ -63,3 +66,14 @@ def train(spec: GraphSpec) -> TrainResult:
         return mlc.train_model(model, in_shape, spec.train)
     except _USER_ERRORS as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+# --- Serve the built frontend so one process hosts the whole app on :8050 -----
+# The API routes above are registered first, so they win over this catch-all
+# mount; everything else (index.html, JS/CSS chunks, SPA routes) is served from
+# the Angular production build. Requires `ng build` in ../frontend first.
+_FRONTEND_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "dist", "mlconstructor", "browser"
+)
+if os.path.isdir(_FRONTEND_DIR):
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")

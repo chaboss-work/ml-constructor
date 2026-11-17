@@ -209,6 +209,17 @@ export class EditorPage {
     this.connectFrom.set(null);
     if (!src || src === targetId) return;
     if (this.edges().some((e) => e.source === src && e.target === targetId)) return;
+    // A non-merge node accepts exactly one input; merge nodes (Add/Concat) take many.
+    const target = this.nodes().find((n) => n.id === targetId);
+    const info = target ? this.layers().find((l) => l.type === target.type) : null;
+    const isMerge = info?.category === 'merge';
+    const hasInput = this.edges().some((e) => e.target === targetId);
+    if (hasInput && !isMerge) {
+      this.runError.set(
+        `«${target?.type}» принимает один вход. Чтобы объединить ветки, используйте merge-ноду (Add или Concat).`,
+      );
+      return;
+    }
     this.edges.update((es) => [...es, { source: src, target: targetId }]);
     this.invalidateBuild();
   }

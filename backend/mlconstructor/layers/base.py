@@ -28,6 +28,10 @@ class LayerNode(ABC):
     #: Input/source nodes (e.g. ``Input``) set this False — they produce a shape
     #: without consuming one.
     needs_input: ClassVar[bool] = True
+    #: Merge nodes (Add/Concat) consume SEVERAL inputs. The builder then calls
+    #: their ``out_shape_merge(in_shapes)`` / ``merge_fn()`` instead of the
+    #: single-input ``out_shape`` / ``build``.
+    is_merge: ClassVar[bool] = False
 
     def __init__(self, node_id: str, params: dict | None = None):
         self.id = node_id

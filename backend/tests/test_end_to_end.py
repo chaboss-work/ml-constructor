@@ -52,6 +52,7 @@ def test_layer_catalog():
     cat = mlc.catalog()
     types = {c.type for c in cat}
     assert {"Input", "Output", "Linear", "Conv2d", "ReLU", "BatchNorm2d", "Flatten"} <= types
+    assert {"Add", "Concat"} <= types, "Stage 1 merge nodes should be in the catalogue"
     print(f"[catalog] {len(cat)} layers: {sorted(types)}")
 
 
@@ -107,10 +108,82 @@ def test_block_repeat():
     print(f"[block] repeat=3 -> {len(block.layers)} modules, out_shape={block.out_shape}")
 
 
+BRANCH_ADD = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [16]}},
+        {"id": "fc1", "type": "Linear", "params": {"out_features": 32}},
+        {"id": "pa", "type": "ReLU", "params": {}},
+        {"id": "pb", "type": "Tanh", "params": {}},
+        {"id": "sum", "type": "Add", "params": {}},
+        {"id": "fc2", "type": "Linear", "params": {"out_features": 4}},
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [
+        ["in", "fc1"],
+        ["fc1", "pa"], ["fc1", "pb"],        # branch: fc1 fans out to two paths
+        ["pa", "sum"], ["pb", "sum"],         # merge: Add combines the two paths
+        ["sum", "fc2"], ["fc2", "out"],
+    ],
+    "train": {"epochs": 3, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+}
+
+
+def test_branch_add_builds_and_trains():
+    spec = GraphSpec.model_validate(BRANCH_ADD)
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["fc1"] == [32] and out["sum"] == [32] and out["fc2"] == [4], out
+    in_shape = tuple(build.layers[0].out_shape)
+    res = mlc.train_model(model, in_shape, spec.train)
+    assert res.final_loss < res.loss_curve[0] and res.final_accuracy > 0.8
+    print(f"[branch+Add] params={build.total_params} acc={res.final_accuracy:.3f} loss {res.loss_curve[0]:.3f}->{res.final_loss:.3f}")
+
+
+def test_concat_merge():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [16]}},
+            {"id": "l1", "type": "Linear", "params": {"out_features": 8}},
+            {"id": "l2", "type": "Linear", "params": {"out_features": 8}},
+            {"id": "cc", "type": "Concat", "params": {"dim": 0}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 3}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "l1"], ["in", "l2"], ["l1", "cc"], ["l2", "cc"], ["cc", "fc"], ["fc", "out"]],
+    })
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["cc"] == [16], out            # concat of two (8,) along dim 0 -> (16,)
+    y = model(torch.zeros(2, 16))
+    assert tuple(y.shape) == (2, 3)
+    print(f"[Concat] cc out_shape={out['cc']}, forward ok")
+
+
+def test_merge_needs_two_inputs():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [8]}},
+            {"id": "sum", "type": "Add", "params": {}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "sum"], ["sum", "out"]],
+    })
+    try:
+        mlc.build_model(spec)
+    except ShapeError as exc:
+        assert "sum" in str(exc) and ">= 2" in str(exc)
+        print(f"[validate] Add with 1 input rejected: {exc}")
+        return
+    raise AssertionError("expected a ShapeError for a merge node with one input")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
     test_train_loss_drops()
     test_shape_error_is_clear()
     test_block_repeat()
-    print("\nALL M1 CHECKS PASSED")
+    test_branch_add_builds_and_trains()
+    test_concat_merge()
+    test_merge_needs_two_inputs()
+    print("\nALL CHECKS PASSED (v1 + Stage 1 branch/merge)")

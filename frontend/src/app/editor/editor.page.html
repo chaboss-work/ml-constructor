@@ -16,17 +16,25 @@
     <!-- ===================== palette ===================== -->
     <aside class="panel palette">
       <div class="panel-h">Layers</div>
+      <ion-searchbar
+        class="palette-search"
+        placeholder="Поиск слоёв…"
+        [debounce]="0"
+        (ionInput)="paletteQuery.set($any($event).detail.value ?? '')"
+      ></ion-searchbar>
       @if (layersError()) {
         <ion-note color="danger" class="pad block">{{ layersError() }}</ion-note>
       }
       <ion-list lines="none">
-        @for (l of layers(); track l.type) {
+        @for (l of filteredLayers(); track l.type) {
           <ion-item button detail="false" (click)="addNode(l)">
             <ion-label>
               <div class="l-name">{{ l.label }}</div>
               <div class="l-cat">{{ l.category }}</div>
             </ion-label>
           </ion-item>
+        } @empty {
+          <ion-note class="pad block muted">Ничего не найдено</ion-note>
         }
       </ion-list>
     </aside>

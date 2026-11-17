@@ -12,6 +12,7 @@ import {
   IonLabel,
   IonList,
   IonNote,
+  IonSearchbar,
   IonTitle,
   IonToolbar,
 } from '@ionic/angular';
@@ -49,6 +50,7 @@ const NODE_H = 78;
     IonCheckbox,
     IonBadge,
     IonNote,
+    IonSearchbar,
   ],
   templateUrl: './editor.page.html',
   styleUrl: './editor.page.scss',
@@ -62,6 +64,7 @@ export class EditorPage {
   // ---- palette ----
   layers = signal<LayerInfo[]>([]);
   layersError = signal<string | null>(null);
+  paletteQuery = signal('');
 
   // ---- graph ----
   nodes = signal<EditorNode[]>([]);
@@ -107,6 +110,20 @@ export class EditorPage {
   selectedInfo = computed<LayerInfo | null>(() => {
     const n = this.selectedNode();
     return n ? this.layers().find((l) => l.type === n.type) ?? null : null;
+  });
+
+  // Palette filtered by the search box (by label, type or category) — the
+  // catalogue is now 29 layers, so a filter keeps it navigable.
+  filteredLayers = computed<LayerInfo[]>(() => {
+    const q = this.paletteQuery().trim().toLowerCase();
+    const ls = this.layers();
+    if (!q) return ls;
+    return ls.filter(
+      (l) =>
+        l.label.toLowerCase().includes(q) ||
+        l.type.toLowerCase().includes(q) ||
+        l.category.toLowerCase().includes(q),
+    );
   });
 
   shapeById = computed(() => {

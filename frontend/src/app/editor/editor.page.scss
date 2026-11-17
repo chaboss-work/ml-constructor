@@ -12,6 +12,7 @@
 /* ---- side panels ---- */
 .panel {
   overflow-y: auto;
+  max-height: calc(100vh - 56px); /* below the header toolbar — keeps the 29-item palette scrollable */
   background: var(--ion-color-step-50, #f6f7f9);
   flex: 0 0 auto;
 }
@@ -232,4 +233,11 @@
 }
 .fix ion-button {
   margin: 0;
+}
+
+/* ---- palette search ---- */
+.palette-search {
+  --background: var(--ion-background-color, #fff);
+  --box-shadow: none;
+  padding: 6px 8px;
 }

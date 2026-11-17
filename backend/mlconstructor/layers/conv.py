@@ -1,4 +1,4 @@
-"""2-D convolution."""
+"""Convolution layers."""
 
 from __future__ import annotations
 
@@ -48,6 +48,46 @@ class Conv2dNode(LayerNode):
         return (oc, ho, wo)
 
     def build(self, in_shape: Shape | None) -> nn.Module:
-        c, h, w = self._require_shape(in_shape, ndim=3, what="(C,H,W)")
+        c, _h, _w = self._require_shape(in_shape, ndim=3, what="(C,H,W)")
         oc, k, s, pad = self._geom()
         return nn.Conv2d(c, oc, kernel_size=k, stride=s, padding=pad)
+
+
+@register("ConvTranspose2d")
+class ConvTranspose2dNode(LayerNode):
+    """2-D transposed convolution (learnable up-sampling). ``in_channels`` is
+    inferred; output H/W grow with the stride."""
+
+    category = "conv"
+    label = "ConvTranspose2d"
+
+    @classmethod
+    def param_defs(cls) -> list[ParamDef]:
+        return [
+            ParamDef(name="out_channels", type="int", default=16, min=1, label="Out channels"),
+            ParamDef(name="kernel_size", type="int", default=2, min=1, label="Kernel"),
+            ParamDef(name="stride", type="int", default=2, min=1, label="Stride"),
+            ParamDef(name="padding", type="int", default=0, min=0, label="Padding"),
+        ]
+
+    def _geom(self):
+        return (
+            int(self.p("out_channels", 16)),
+            int(self.p("kernel_size", 2)),
+            int(self.p("stride", 2)),
+            int(self.p("padding", 0)),
+        )
+
+    def out_shape(self, in_shape: Shape | None) -> Shape:
+        c, h, w = self._require_shape(in_shape, ndim=3, what="(C,H,W)")
+        oc, k, s, pad = self._geom()
+        ho = (h - 1) * s - 2 * pad + k
+        wo = (w - 1) * s - 2 * pad + k
+        if ho <= 0 or wo <= 0:
+            raise ShapeError(f"ConvTranspose2d {self.id!r}: non-positive output ({ho}x{wo})")
+        return (oc, ho, wo)
+
+    def build(self, in_shape: Shape | None) -> nn.Module:
+        c, _h, _w = self._require_shape(in_shape, ndim=3, what="(C,H,W)")
+        oc, k, s, pad = self._geom()
+        return nn.ConvTranspose2d(c, oc, kernel_size=k, stride=s, padding=pad)

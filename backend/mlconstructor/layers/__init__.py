@@ -5,6 +5,26 @@ so a plain ``from mlconstructor import layers`` populates the whole palette.
 To add a layer: create a new module here and import it in this list.
 """
 
-from . import activation, conv, io, linear, merge, norm, shaping  # noqa: F401
+from . import (  # noqa: F401
+    activation,
+    conv,
+    io,
+    linear,
+    merge,
+    norm,
+    pooling,
+    regularization,
+    shaping,
+)
 
-__all__ = ["activation", "conv", "io", "linear", "merge", "norm", "shaping"]
+__all__ = [
+    "activation",
+    "conv",
+    "io",
+    "linear",
+    "merge",
+    "norm",
+    "pooling",
+    "regularization",
+    "shaping",
+]

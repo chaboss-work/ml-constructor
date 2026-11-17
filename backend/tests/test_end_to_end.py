@@ -53,6 +53,10 @@ def test_layer_catalog():
     types = {c.type for c in cat}
     assert {"Input", "Output", "Linear", "Conv2d", "ReLU", "BatchNorm2d", "Flatten"} <= types
     assert {"Add", "Concat"} <= types, "Stage 1 merge nodes should be in the catalogue"
+    assert {
+        "Dropout", "MaxPool2d", "AvgPool2d", "AdaptiveAvgPool2d", "GELU", "LeakyReLU",
+        "Softmax", "BatchNorm1d", "LayerNorm", "GroupNorm", "ConvTranspose2d",
+    } <= types, "Stage 2 layers should be in the catalogue"
     print(f"[catalog] {len(cat)} layers: {sorted(types)}")
 
 
@@ -177,6 +181,53 @@ def test_merge_needs_two_inputs():
     raise AssertionError("expected a ShapeError for a merge node with one input")
 
 
+def test_stage2_layers():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [1, 28, 28]}},
+            {"id": "c", "type": "Conv2d", "params": {"out_channels": 8, "kernel_size": 3}},
+            {"id": "bn", "type": "BatchNorm2d", "params": {}},
+            {"id": "g", "type": "GELU", "params": {}},
+            {"id": "mp", "type": "MaxPool2d", "params": {"kernel_size": 2, "stride": 2}},
+            {"id": "gn", "type": "GroupNorm", "params": {"num_groups": 4}},
+            {"id": "ap", "type": "AdaptiveAvgPool2d", "params": {"output_size": [4, 4]}},
+            {"id": "fl", "type": "Flatten", "params": {}},
+            {"id": "dp", "type": "Dropout", "params": {"p": 0.3}},
+            {"id": "ln", "type": "LayerNorm", "params": {}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 10}},
+            {"id": "sm", "type": "Softmax", "params": {"dim": -1}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [
+            ["in", "c"], ["c", "bn"], ["bn", "g"], ["g", "mp"], ["mp", "gn"],
+            ["gn", "ap"], ["ap", "fl"], ["fl", "dp"], ["dp", "ln"], ["ln", "fc"],
+            ["fc", "sm"], ["sm", "out"],
+        ],
+    })
+    model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["c"] == [8, 26, 26] and out["mp"] == [8, 13, 13] and out["ap"] == [8, 4, 4], out
+    assert out["fl"] == [128] and out["fc"] == [10], out
+    y = model(torch.zeros(2, 1, 28, 28))
+    assert tuple(y.shape) == (2, 10)
+    print(f"[stage2] {len(build.layers)} nodes, shapes ok, params={build.total_params:,}")
+
+
+def test_conv_transpose_upsamples():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [4, 8, 8]}},
+            {"id": "up", "type": "ConvTranspose2d", "params": {"out_channels": 2, "kernel_size": 2, "stride": 2}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "up"], ["up", "out"]],
+    })
+    _model, build = mlc.build_model(spec)
+    out = {s.id: s.out_shape for s in build.layers}
+    assert out["up"] == [2, 16, 16], out            # (8-1)*2 - 0 + 2 = 16
+    print(f"[ConvTranspose2d] (4,8,8) -> {out['up']}")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -186,4 +237,6 @@ if __name__ == "__main__":
     test_branch_add_builds_and_trains()
     test_concat_merge()
     test_merge_needs_two_inputs()
-    print("\nALL CHECKS PASSED (v1 + Stage 1 branch/merge)")
+    test_stage2_layers()
+    test_conv_transpose_upsamples()
+    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2)")

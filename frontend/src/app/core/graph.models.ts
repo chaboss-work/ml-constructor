@@ -77,3 +77,19 @@ export interface TrainResult {
   device: string;
   total_params: number;
 }
+
+/** Smart adapters (Stage 5): a node to insert so a connection's shapes line up. */
+export interface AdapterProposal {
+  source_id: string;
+  target_id: string;
+  adapter_type: string;
+  params: Record<string, unknown>;
+  reason: string;
+  in_shape: number[];
+  out_shape: number[];
+}
+
+export interface SuggestResult {
+  ok: boolean;
+  proposals: AdapterProposal[];
+}

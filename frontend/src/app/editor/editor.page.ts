@@ -18,6 +18,7 @@ import {
 
 import { ApiService } from '../core/api.service';
 import {
+  AdapterProposal,
   BuildResult,
   EditorEdge,
   EditorNode,
@@ -77,6 +78,7 @@ export class EditorPage {
   buildResult = signal<BuildResult | null>(null);
   trainResult = signal<TrainResult | null>(null);
   runError = signal<string | null>(null);
+  proposals = signal<AdapterProposal[]>([]);
 
   // ---- train config ----
   epochs = signal(3);
@@ -314,8 +316,10 @@ export class EditorPage {
   onBuild(): void {
     this.busy.set(true);
     this.runError.set(null);
+    this.proposals.set([]);
     this.trainResult.set(null);
-    this.api.build(this.toSpec()).subscribe({
+    const spec = this.toSpec();
+    this.api.build(spec).subscribe({
       next: (r) => {
         this.buildResult.set(r);
         this.busy.set(false);
@@ -324,6 +328,7 @@ export class EditorPage {
         this.buildResult.set(null);
         this.runError.set(this.errMsg(e));
         this.busy.set(false);
+        this.fetchSuggestions(spec); // offer a one-click adapter if a shape mismatch is fixable
       },
     });
   }
@@ -331,6 +336,7 @@ export class EditorPage {
   onTrain(): void {
     this.busy.set(true);
     this.runError.set(null);
+    this.proposals.set([]);
     this.api.train(this.toSpec()).subscribe({
       next: (r) => {
         this.trainResult.set(r);
@@ -343,8 +349,36 @@ export class EditorPage {
     });
   }
 
+  // ---------------------------------------------------------- smart adapters
+  private fetchSuggestions(spec: GraphSpec): void {
+    this.api.suggest(spec).subscribe({
+      next: (s) => this.proposals.set(s.proposals ?? []),
+      error: () => this.proposals.set([]),
+    });
+  }
+
+  /** Insert the proposed adapter node on its edge and rebuild (one-click fix). */
+  applyProposal(p: AdapterProposal): void {
+    const id = this.freshId(p.adapter_type);
+    const src = this.nodes().find((n) => n.id === p.source_id);
+    const tgt = this.nodes().find((n) => n.id === p.target_id);
+    const x = src && tgt ? Math.round((src.x + tgt.x) / 2) : 90;
+    const y = src && tgt ? Math.round((src.y + tgt.y) / 2) : 90;
+    const node: EditorNode = { id, type: p.adapter_type, x, y, params: { ...p.params } };
+    this.nodes.update((ns) => [...ns, node]);
+    this.edges.update((es) => [
+      ...es.filter((e) => !(e.source === p.source_id && e.target === p.target_id)),
+      { source: p.source_id, target: id },
+      { source: id, target: p.target_id },
+    ]);
+    this.proposals.set([]);
+    this.runError.set(null);
+    this.onBuild();
+  }
+
   private invalidateBuild(): void {
     this.buildResult.set(null);
+    this.proposals.set([]);
   }
 
   private errMsg(e: unknown): string {

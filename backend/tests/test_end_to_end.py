@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 import torch  # noqa: E402
 
 import mlconstructor as mlc  # noqa: E402
+from mlconstructor.adapters import apply_adapter, suggest_for_graph  # noqa: E402
 from mlconstructor.blocks import Block  # noqa: E402
 from mlconstructor.layers.activation import ReLUNode  # noqa: E402
 from mlconstructor.layers.linear import LinearNode  # noqa: E402
@@ -435,6 +436,68 @@ def test_attention_head_divisibility():
     raise AssertionError("expected a ShapeError for embed_dim not divisible by num_heads")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 5 — smart adapters: a mismatched connection is proposed a fix (Flatten),
+# and applying the proposal makes the graph build.
+# --------------------------------------------------------------------------- #
+CONV_NO_FLATTEN = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [1, 28, 28]}},
+        {"id": "conv", "type": "Conv2d", "params": {"out_channels": 4, "kernel_size": 3}},
+        {"id": "fc", "type": "Linear", "params": {"out_features": 10}},    # fed a (4,26,26) map, no Flatten
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [["in", "conv"], ["conv", "fc"], ["fc", "out"]],
+}
+
+
+def test_suggest_flatten_for_conv_to_linear():
+    spec = GraphSpec.model_validate(CONV_NO_FLATTEN)
+    props = suggest_for_graph(spec)
+    assert len(props) == 1, props
+    p = props[0]
+    assert p.adapter_type == "Flatten" and p.source_id == "conv" and p.target_id == "fc"
+    assert p.in_shape == [4, 26, 26] and p.out_shape == [4 * 26 * 26]
+    print(f"[suggest] {p.reason}")
+
+
+def test_apply_adapter_makes_graph_build():
+    spec = GraphSpec.model_validate(CONV_NO_FLATTEN)
+    try:
+        mlc.build_model(spec)
+        raise AssertionError("expected the un-flattened Conv->Linear graph to fail to build")
+    except ShapeError:
+        pass
+    fixed = apply_adapter(spec, suggest_for_graph(spec)[0])
+    _model, build = mlc.build_model(fixed)
+    flats = [s for s in build.layers if s.type == "Flatten"]
+    assert len(flats) == 1 and flats[0].out_shape == [4 * 26 * 26], build.order
+    # the inserted Flatten sits on the conv->fc edge
+    assert build.order.index("conv") < build.order.index(flats[0].id) < build.order.index("fc")
+    print(f"[apply] inserted {flats[0].id} -> graph builds, params={build.total_params:,}")
+
+
+def test_suggest_empty_for_valid_graph():
+    assert suggest_for_graph(GraphSpec.model_validate(CNN_MLP)) == []
+    print("[suggest] valid graph -> no proposals")
+
+
+def test_suggest_flatten_for_sequence_to_linear():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [5, 4]}},
+            {"id": "lstm", "type": "LSTM", "params": {"hidden_size": 6, "return_sequence": True}},  # (5,6)
+            {"id": "fc", "type": "Linear", "params": {"out_features": 3}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "lstm"], ["lstm", "fc"], ["fc", "out"]],
+    })
+    props = suggest_for_graph(spec)
+    assert len(props) == 1 and props[0].adapter_type == "Flatten"
+    assert props[0].in_shape == [5, 6] and props[0].out_shape == [30]
+    print(f"[suggest] seq->Linear: {props[0].reason}")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -455,4 +518,8 @@ if __name__ == "__main__":
     test_transformer_encoder_trains()
     test_embedding_transformer_classifier_builds()
     test_attention_head_divisibility()
-    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4)")
+    test_suggest_flatten_for_conv_to_linear()
+    test_apply_adapter_makes_graph_build()
+    test_suggest_empty_for_valid_graph()
+    test_suggest_flatten_for_sequence_to_linear()
+    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5)")

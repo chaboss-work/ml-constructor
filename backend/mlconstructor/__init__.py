@@ -11,6 +11,7 @@ Public surface:
 from __future__ import annotations
 
 from . import layers  # noqa: F401  (import-time side effect: registers all layers)
+from .adapters import apply_adapter, suggest_for_graph
 from .builder import build_model
 from .registry import LAYER_REGISTRY, catalog, get_layer_cls
 from .trainer import train_model
@@ -22,6 +23,8 @@ __all__ = [
     "train_model",
     "catalog",
     "get_layer_cls",
+    "suggest_for_graph",
+    "apply_adapter",
     "LAYER_REGISTRY",
     "__version__",
 ]

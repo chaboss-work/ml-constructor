@@ -86,10 +86,12 @@ editor (e.g. Input → Embedding → LSTM → Linear).
 `LayerNorm` from Stage 2. Enough to assemble and train a small transformer, e.g.
 Input → Embedding → PositionalEncoding → TransformerEncoderLayer → Flatten → Linear.
 
-### Stage 5 — Smart adapters
-Automatic shape/type reconciliation on connections (auto-insert Flatten/reshape,
-dtype casts), with inline validation and one-click fixes — in the spirit of
-Unsloth Studio. Fewer manual Flattens; the editor proposes the adapter.
+### Stage 5 — Smart adapters · **DONE (2026-11-17)**
+Shape reconciliation on connections: when a source shape doesn't fit the target,
+the backend `/suggest` endpoint proposes an adapter node to insert — Flatten is
+the first (it collapses a feature map or a sequence to a vector) — and the editor
+shows the fix inline and inserts it on one click. Fewer manual Flattens; the
+candidate framework is open for reshape / pooling / dtype adapters next.
 
 ### Stage 6 — Reusable blocks & repeats
 Group a sub-graph into a named **Block** and **repeat it N×** (as in "N× transformer
@@ -138,8 +140,9 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 * **Этап 4 — Внимание и трансформеры · ГОТОВО (17.11):** `MultiheadAttention`
   (self-attention), `TransformerEncoderLayer`, синусоидальное `PositionalEncoding`
   — всё сохраняет форму `(L, E)`; собирается и обучается небольшой трансформер.
-* **Этап 5 — Умные адаптеры:** авто-согласование форм/типов на стыках, подсказки и
-  починка в один клик (в духе Unsloth Studio).
+* **Этап 5 — Умные адаптеры · ГОТОВО (17.11):** согласование форм на стыках — бэкенд
+  `/suggest` предлагает ноду-адаптер (первый — Flatten), редактор показывает подсказку
+  и вставляет её в один клик; каркас открыт для reshape/пулинг/dtype-адаптеров.
 * **Этап 6 — Блоки и повторы:** группировка подграфа в блок и повтор N× («N×
   трансформерных блоков»).
 * **Этап 7 — Библиотека архитектур:** готовые ResNet, GPT-подобные LLM и др. —

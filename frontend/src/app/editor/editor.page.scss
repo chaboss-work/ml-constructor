@@ -203,3 +203,33 @@
   stroke: var(--ion-color-primary, #3880ff);
   stroke-width: 1.5;
 }
+
+/* ---- smart adapters (Stage 5) ---- */
+.fixes {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--ion-color-step-150, #e2e4e8);
+  border-left: 3px solid var(--ion-color-primary, #3880ff);
+  border-radius: 8px;
+  background: var(--ion-color-step-50, #f6f7f9);
+}
+.fixes-h {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin-bottom: 6px;
+}
+.fix + .fix {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ion-color-step-150, #e2e4e8);
+}
+.fix ion-note.block {
+  font-size: 12.5px;
+  margin-bottom: 7px;
+}
+.fix ion-button {
+  margin: 0;
+}

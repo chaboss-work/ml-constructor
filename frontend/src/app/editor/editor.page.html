@@ -149,6 +149,19 @@
         @if (runError()) {
           <ion-note color="danger" class="block">{{ runError() }}</ion-note>
         }
+        @if (proposals().length) {
+          <div class="fixes">
+            <div class="fixes-h">Умный адаптер</div>
+            @for (p of proposals(); track p.source_id + '>' + p.target_id) {
+              <div class="fix">
+                <ion-note class="block">{{ p.reason }}</ion-note>
+                <ion-button size="small" expand="block" fill="solid" color="primary" (click)="applyProposal(p)">
+                  Вставить {{ p.adapter_type }}
+                </ion-button>
+              </div>
+            }
+          </div>
+        }
         @if (buildResult(); as b) {
           <div class="kv"><span>Parameters</span><b>{{ b.total_params | number }}</b></div>
           <div class="kv"><span>Layers</span><b>{{ b.layers.length }}</b></div>

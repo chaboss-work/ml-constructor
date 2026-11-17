@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-import { BuildResult, GraphSpec, LayerInfo, TrainResult } from './graph.models';
+import { BuildResult, GraphSpec, LayerInfo, SuggestResult, TrainResult } from './graph.models';
 
 /**
  * Base URL of the PyTorch backend. It is served on port 8050 on the same host
@@ -30,5 +30,9 @@ export class ApiService {
 
   train(spec: GraphSpec): Observable<TrainResult> {
     return this.http.post<TrainResult>(`${API_BASE}/train`, spec);
+  }
+
+  suggest(spec: GraphSpec): Observable<SuggestResult> {
+    return this.http.post<SuggestResult>(`${API_BASE}/suggest`, spec);
   }
 }

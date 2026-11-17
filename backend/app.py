@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import mlconstructor as mlc
-from mlconstructor.schema import BuildResult, GraphSpec, LayerInfo, TrainResult
+from mlconstructor.schema import BuildResult, GraphSpec, LayerInfo, SuggestResult, TrainResult
 from mlconstructor.shapes import ShapeError
 
 app = FastAPI(title="ML Constructor Backend", version=mlc.__version__)
@@ -64,6 +64,16 @@ def train(spec: GraphSpec) -> TrainResult:
             raise ShapeError("graph has no Input node to take a shape from")
         in_shape = tuple(result.layers[0].out_shape)
         return mlc.train_model(model, in_shape, spec.train)
+    except _USER_ERRORS as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/suggest", response_model=SuggestResult)
+def suggest(spec: GraphSpec) -> SuggestResult:
+    """Smart adapters: propose nodes (e.g. Flatten) to reconcile mismatched
+    connections. Never fails on a shape mismatch — it returns the fixes."""
+    try:
+        return SuggestResult(ok=True, proposals=mlc.suggest_for_graph(spec))
     except _USER_ERRORS as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 

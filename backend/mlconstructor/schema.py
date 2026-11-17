@@ -109,3 +109,24 @@ class TrainResult(BaseModel):
     steps: int
     device: str
     total_params: int
+
+
+# --------------------------------------------------------------------------- #
+# Smart adapters (response of /suggest) — Stage 5
+# --------------------------------------------------------------------------- #
+class AdapterProposal(BaseModel):
+    """A proposed adapter node to insert on a ``source -> target`` edge so the
+    target can consume the source's shape (e.g. a Flatten before a Linear)."""
+
+    source_id: str
+    target_id: str
+    adapter_type: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    reason: str
+    in_shape: list[int]
+    out_shape: list[int]
+
+
+class SuggestResult(BaseModel):
+    ok: bool
+    proposals: list[AdapterProposal] = Field(default_factory=list)

@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-import { BuildResult, GraphSpec, LayerInfo, SuggestResult, TrainResult } from './graph.models';
+import { ArchitectureInfo, BuildResult, GraphSpec, LayerInfo, SuggestResult, TrainResult } from './graph.models';
 
 /**
  * Base URL of the PyTorch backend. It is served on port 8050 on the same host
@@ -34,5 +34,15 @@ export class ApiService {
 
   suggest(spec: GraphSpec): Observable<SuggestResult> {
     return this.http.post<SuggestResult>(`${API_BASE}/suggest`, spec);
+  }
+
+  /** Architecture library (Stage 7): the menu of ready public architectures. */
+  architectures(): Observable<ArchitectureInfo[]> {
+    return this.http.get<ArchitectureInfo[]>(`${API_BASE}/architectures`);
+  }
+
+  /** The full, editable graph for one ready architecture. */
+  architecture(id: string): Observable<GraphSpec> {
+    return this.http.get<GraphSpec>(`${API_BASE}/architectures/${id}`);
   }
 }

@@ -20,7 +20,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import mlconstructor as mlc
-from mlconstructor.schema import BuildResult, GraphSpec, LayerInfo, SuggestResult, TrainResult
+from mlconstructor.schema import (
+    ArchitectureInfo,
+    BuildResult,
+    GraphSpec,
+    LayerInfo,
+    SuggestResult,
+    TrainResult,
+)
 from mlconstructor.shapes import ShapeError
 
 app = FastAPI(title="ML Constructor Backend", version=mlc.__version__)
@@ -76,6 +83,22 @@ def suggest(spec: GraphSpec) -> SuggestResult:
         return SuggestResult(ok=True, proposals=mlc.suggest_for_graph(spec))
     except _USER_ERRORS as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/architectures", response_model=list[ArchitectureInfo])
+def architectures() -> list[ArchitectureInfo]:
+    """The library of ready public architectures (MLP, CNN, ResNet, GPT, …) the
+    editor offers to drop onto the canvas as full, editable graphs."""
+    return mlc.list_architectures()
+
+
+@app.get("/architectures/{arch_id}", response_model=GraphSpec)
+def architecture(arch_id: str) -> GraphSpec:
+    """The full graph for one architecture — plain, editable nodes and edges."""
+    try:
+        return mlc.get_architecture(arch_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 # --- Serve the built frontend so one process hosts the whole app on :8050 -----

@@ -23,6 +23,7 @@ import torch  # noqa: E402
 
 import mlconstructor as mlc  # noqa: E402
 from mlconstructor.adapters import apply_adapter, suggest_for_graph  # noqa: E402
+from mlconstructor.architectures import get_architecture, list_architectures  # noqa: E402
 from mlconstructor.blocks import Block  # noqa: E402
 from mlconstructor.layers.activation import ReLUNode  # noqa: E402
 from mlconstructor.layers.linear import LinearNode  # noqa: E402
@@ -589,6 +590,75 @@ def test_block_rejects_inner_io_node():
     raise AssertionError("expected an inner Output to be rejected")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 7 — architecture library: ready public architectures (MLP, CNN, ResNet,
+# GPT) drop onto the canvas as full, EDITABLE graphs — ordinary nodes, real
+# Add skip-merges, a Repeat-powered transformer stack — and each one builds and
+# trains end to end.
+# --------------------------------------------------------------------------- #
+ARCH_IDS = ("mlp", "cnn", "resnet", "gpt")
+
+
+def test_architecture_catalog():
+    lib = list_architectures()
+    ids = {a.id for a in lib}
+    assert set(ARCH_IDS) <= ids, ids
+    for a in lib:
+        assert a.name and a.description and a.node_count > 0 and a.input_shape
+    print(f"[arch] library: {[(a.id, a.node_count) for a in lib]}")
+
+
+def test_architecture_nodes_are_editable_layers():
+    # Stage 7's promise: a ready architecture is NOT a black box — every node is
+    # an ordinary registered layer (and so are the inner layers of a Repeat block),
+    # so the user can select and deeply edit each one.
+    for aid in ARCH_IDS:
+        spec = get_architecture(aid)
+        for n in spec.nodes:
+            assert n.type in mlc.LAYER_REGISTRY, (aid, n.id, n.type)
+            if n.type == "Repeat":
+                for inner in n.params.get("layers", []):
+                    assert inner["type"] in mlc.LAYER_REGISTRY, (aid, inner)
+    print("[arch] every node is an editable registered layer")
+
+
+def test_architectures_build_with_expected_shapes():
+    _m, b = mlc.build_model(get_architecture("mlp"))
+    assert {s.id: s.out_shape for s in b.layers}["fc3"] == [10]
+
+    _m, b = mlc.build_model(get_architecture("cnn"))
+    out = {s.id: s.out_shape for s in b.layers}
+    assert out["flat"] == [32 * 7 * 7] and out["fc2"] == [10], out
+
+    model, b = mlc.build_model(get_architecture("resnet"))
+    out = {s.id: s.out_shape for s in b.layers}
+    assert out["b1_add"] == [16, 28, 28] and out["b2_add"] == [32, 14, 14], out
+    assert out["gap"] == [32, 1, 1] and out["flat"] == [32] and out["fc"] == [10], out
+    assert tuple(model(torch.zeros(2, 1, 28, 28)).shape) == (2, 10)   # Add skip-merges run
+
+    model, b = mlc.build_model(get_architecture("gpt"))
+    out = {s.id: s.out_shape for s in b.layers}
+    assert out["emb"] == [16, 64] and out["blocks"] == [16, 64], out
+    assert out["flat"] == [16 * 64] and out["fc"] == [10], out
+    assert tuple(model(torch.zeros(2, 16)).shape) == (2, 10)
+    print("[arch] MLP/CNN/ResNet/GPT build with the expected shapes")
+
+
+def test_each_architecture_trains():
+    for aid in ARCH_IDS:
+        spec = get_architecture(aid)
+        model, build = mlc.build_model(spec)
+        in_shape = tuple(build.layers[0].out_shape)
+        res = mlc.train_model(model, in_shape, spec.train)
+        assert res.steps > 0 and res.loss_curve
+        assert res.final_loss < res.loss_curve[0], (aid, res.final_loss, res.loss_curve[0])
+        assert res.final_accuracy > 0.5, (aid, res.final_accuracy)
+        print(
+            f"[arch:{aid}] params={build.total_params:,} acc={res.final_accuracy:.3f} "
+            f"loss {res.loss_curve[0]:.3f}->{res.final_loss:.3f}"
+        )
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -617,4 +687,11 @@ if __name__ == "__main__":
     test_repeat_block_shape_changes_each_stamp()
     test_empty_block_rejected()
     test_block_rejects_inner_io_node()
-    print("\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6)")
+    test_architecture_catalog()
+    test_architecture_nodes_are_editable_layers()
+    test_architectures_build_with_expected_shapes()
+    test_each_architecture_trains()
+    print(
+        "\nALL CHECKS PASSED "
+        "(v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 + Stage 7)"
+    )

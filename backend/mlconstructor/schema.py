@@ -130,3 +130,20 @@ class AdapterProposal(BaseModel):
 class SuggestResult(BaseModel):
     ok: bool
     proposals: list[AdapterProposal] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# Architecture library (response of /architectures) — Stage 7
+# --------------------------------------------------------------------------- #
+class ArchitectureInfo(BaseModel):
+    """A ready public architecture the editor can drop onto the canvas as a full,
+    editable graph. The graph itself comes from ``GET /architectures/{id}`` (a
+    plain :class:`GraphSpec`); this is the lightweight catalogue entry."""
+
+    id: str
+    name: str
+    description: str
+    category: str = "general"
+    tags: list[str] = Field(default_factory=list)
+    input_shape: list[int] = Field(default_factory=list)
+    node_count: int

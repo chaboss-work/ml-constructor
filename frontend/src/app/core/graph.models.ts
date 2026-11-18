@@ -93,3 +93,16 @@ export interface SuggestResult {
   ok: boolean;
   proposals: AdapterProposal[];
 }
+
+/** Architecture library (Stage 7): a ready public net the editor can drop onto
+ * the canvas as a full, editable graph. The graph itself comes from
+ * GET /architectures/{id} (a plain GraphSpec). */
+export interface ArchitectureInfo {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  input_shape: number[];
+  node_count: number;
+}

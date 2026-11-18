@@ -20,6 +20,7 @@ import {
 import { ApiService } from '../core/api.service';
 import {
   AdapterProposal,
+  ArchitectureInfo,
   BuildResult,
   EditorEdge,
   EditorNode,
@@ -66,6 +67,9 @@ export class EditorPage {
   layersError = signal<string | null>(null);
   paletteQuery = signal('');
 
+  // ---- architecture library (Stage 7) ----
+  architectures = signal<ArchitectureInfo[]>([]);
+
   // ---- graph ----
   nodes = signal<EditorNode[]>([]);
   edges = signal<EditorEdge[]>([]);
@@ -101,6 +105,10 @@ export class EditorPage {
     this.api.layers().subscribe({
       next: (ls) => this.layers.set(ls),
       error: (e) => this.layersError.set(this.errMsg(e)),
+    });
+    this.api.architectures().subscribe({
+      next: (a) => this.architectures.set(a),
+      error: () => this.architectures.set([]), // non-fatal: the templates menu just stays hidden
     });
     this.seedExample();
   }
@@ -481,6 +489,90 @@ export class EditorPage {
     if (err?.error?.detail) return err.error.detail;
     if (err?.status === 0) return 'No connection to the backend on :8050 — is FastAPI running?';
     return err?.message ?? 'Request failed';
+  }
+
+  // ------------------------------------------------ architecture library (S7)
+  /** Load a ready architecture: fetch its full graph, lay it out on the canvas,
+   * and adopt its recommended training config. The nodes are ordinary, editable
+   * layer nodes — the user can re-wire and tune every one. */
+  loadArchitecture(id: string): void {
+    this.busy.set(true);
+    this.runError.set(null);
+    this.proposals.set([]);
+    this.api.architecture(id).subscribe({
+      next: (spec) => {
+        this.nodes.set(this.layoutGraph(spec.nodes, spec.edges));
+        this.edges.set(spec.edges.map(([source, target]) => ({ source, target })));
+        this.selectedId.set(null);
+        this.innerSel.set(null);
+        this.connectFrom.set(null);
+        this.seq = spec.nodes.length;
+        const t = spec.train ?? {};
+        if (t.epochs != null) this.epochs.set(t.epochs);
+        if (t.lr != null) this.lr.set(t.lr);
+        if (t.batch_size != null) this.batchSize.set(t.batch_size);
+        if (t.samples != null) this.samples.set(t.samples);
+        this.pan.set({ x: 48, y: 24 });
+        this.zoom.set(0.8);
+        this.buildResult.set(null);
+        this.trainResult.set(null);
+        this.busy.set(false);
+      },
+      error: (e) => {
+        this.runError.set(this.errMsg(e));
+        this.busy.set(false);
+      },
+    });
+  }
+
+  /** Position a position-free backend graph on the canvas: layer by longest-path
+   * depth (top→bottom, matching the edge flow), siblings spread left→right. */
+  private layoutGraph(
+    specNodes: { id: string; type: string; params: Record<string, unknown> }[],
+    specEdges: string[][],
+  ): EditorNode[] {
+    const V_STEP = 112;
+    const H_STEP = 212;
+    const X0 = 70;
+    const Y0 = 24;
+    const ids = specNodes.map((n) => n.id);
+    const idset = new Set(ids);
+    const succ = new Map<string, string[]>(ids.map((id) => [id, []]));
+    const indeg = new Map<string, number>(ids.map((id) => [id, 0]));
+    for (const [s, t] of specEdges) {
+      if (!idset.has(s) || !idset.has(t)) continue;
+      succ.get(s)!.push(t);
+      indeg.set(t, (indeg.get(t) ?? 0) + 1);
+    }
+    // Kahn topological order
+    const deg = new Map(indeg);
+    const queue = ids.filter((id) => deg.get(id) === 0);
+    const order: string[] = [];
+    for (let i = 0; i < queue.length; i++) {
+      const n = queue[i];
+      order.push(n);
+      for (const m of succ.get(n)!) {
+        deg.set(m, (deg.get(m) ?? 0) - 1);
+        if (deg.get(m) === 0) queue.push(m);
+      }
+    }
+    const topo = order.length === ids.length ? order : ids; // cycle fallback
+    // longest-path depth from the sources
+    const depth = new Map<string, number>(ids.map((id) => [id, 0]));
+    for (const id of topo) {
+      const d = depth.get(id)!;
+      for (const m of succ.get(id)!) {
+        if (depth.get(m)! < d + 1) depth.set(m, d + 1);
+      }
+    }
+    // column within each depth, by spec insertion order (stable, few crossings)
+    const colCount = new Map<number, number>();
+    return specNodes.map((n) => {
+      const d = depth.get(n.id)!;
+      const col = colCount.get(d) ?? 0;
+      colCount.set(d, col + 1);
+      return { id: n.id, type: n.type, x: X0 + col * H_STEP, y: Y0 + d * V_STEP, params: structuredClone(n.params) };
+    });
   }
 
   // -------------------------------------------------------------- example

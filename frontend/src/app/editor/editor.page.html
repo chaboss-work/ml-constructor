@@ -15,6 +15,20 @@
   <div class="layout">
     <!-- ===================== palette ===================== -->
     <aside class="panel palette">
+      @if (architectures().length) {
+        <div class="panel-h">Architectures</div>
+        <ion-list lines="none" class="arch-list">
+          @for (a of architectures(); track a.id) {
+            <ion-item button detail="false" [title]="a.description" (click)="loadArchitecture(a.id)">
+              <ion-label>
+                <div class="l-name">{{ a.name }}</div>
+                <div class="a-desc">{{ a.description }}</div>
+              </ion-label>
+            </ion-item>
+          }
+        </ion-list>
+      }
+
       <div class="panel-h">Layers</div>
       <ion-searchbar
         class="palette-search"

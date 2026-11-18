@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from . import layers  # noqa: F401  (import-time side effect: registers all layers)
 from .adapters import apply_adapter, suggest_for_graph
+from .architectures import get_architecture, list_architectures
 from .builder import build_model
 from .registry import LAYER_REGISTRY, catalog, get_layer_cls
 from .trainer import train_model
@@ -25,6 +26,8 @@ __all__ = [
     "get_layer_cls",
     "suggest_for_graph",
     "apply_adapter",
+    "list_architectures",
+    "get_architecture",
     "LAYER_REGISTRY",
     "__version__",
 ]

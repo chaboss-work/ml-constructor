@@ -100,9 +100,14 @@ the chain applied N times and each stamp gets fresh parameters. The editor adds 
 Block node with an inner-chain editor (add / remove / edit inner layers, set N).
 "Edit the block once, stamp it many times."
 
-### Stage 7 — Architecture library
-A library of ready public architectures (MLP, simple CNN, **ResNet**, **GPT-like**
-LLM, …) you can drop onto the canvas and **deeply edit** — every layer, every repeat.
+### Stage 7 — Architecture library · **DONE (2026-11-18)**
+A library of ready public architectures — **MLP**, **simple CNN**, **ResNet**
+(whose skip connections are real `Add` merge nodes) and a **tiny GPT** (token
+embedding + sinusoidal positional encoding + an N-deep stack of transformer blocks
+expressed with the Stage 6 `Repeat` block) — served from `GET /architectures`. Pick
+one and it drops onto the canvas as a full graph of **ordinary, editable nodes**:
+every layer, every repeat, every skip is there to re-wire and tune — "start from a
+known-good net, then make it your own." Each one builds and trains end to end.
 
 ### Stage 8 — Real datasets & training UX
 A **data modal** on the Input / Output nodes showing the training set's format and
@@ -149,8 +154,12 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   линейную цепочку и штампует её **N×** (переиспользует материнский класс `Block`),
   ведёт себя как обычный слой; в редакторе — нода Block с редактором внутренней
   цепочки (добавить / убрать / править слои, задать N).
-* **Этап 7 — Библиотека архитектур:** готовые ResNet, GPT-подобные LLM и др. —
-  добавил на холст и глубоко редактируешь.
+* **Этап 7 — Библиотека архитектур · ГОТОВО (18.11):** готовые **MLP**, **CNN**,
+  **ResNet** (skip-связи — настоящие ноды-слияния `Add`) и **мини-GPT** (эмбеддинг
+  + позиционное кодирование + стопка трансформер-блоков через `Repeat` из Этапа 6),
+  отдаются по `GET /architectures`; выбираешь — и архитектура ложится на холст
+  обычными **редактируемыми нодами**: каждый слой, каждый повтор, каждый skip можно
+  перенастроить. Каждая собирается и обучается от начала до конца.
 * **Этап 8 — Реальные датасеты и UX обучения:** **модалка с данными** на нодах
   Input/Output — формат обучающей выборки и примеры строк из неё, с апгрейдом в
   **парсер кастомных примеров** для обучения; выбор датасета (MNIST/CIFAR/свой),

@@ -22,6 +22,9 @@ import {
   AdapterProposal,
   ArchitectureInfo,
   BuildResult,
+  DataPreview,
+  DataSampleRow,
+  DatasetInfo,
   EditorEdge,
   EditorNode,
   GraphSpec,
@@ -70,6 +73,20 @@ export class EditorPage {
   // ---- architecture library (Stage 7) ----
   architectures = signal<ArchitectureInfo[]>([]);
 
+  // ---- datasets, data preview & export (Stage 8) ----
+  // `stage8` turns the new UI on only once the backend answers /datasets, so the
+  // live app keeps working against an older backend (features just stay hidden).
+  stage8 = signal(false);
+  datasets = signal<DatasetInfo[]>([]);
+  dataset = signal<string>('synthetic');
+  dataPreview = signal<DataPreview | null>(null);
+  dataModalOpen = signal(false);
+  exportCode = signal<string>('');
+  exportModalOpen = signal(false);
+  exportCopied = signal(false);
+  overlayBusy = signal(false);
+  overlayError = signal<string | null>(null);
+
   // ---- graph ----
   nodes = signal<EditorNode[]>([]);
   edges = signal<EditorEdge[]>([]);
@@ -109,6 +126,16 @@ export class EditorPage {
     this.api.architectures().subscribe({
       next: (a) => this.architectures.set(a),
       error: () => this.architectures.set([]), // non-fatal: the templates menu just stays hidden
+    });
+    this.api.datasets().subscribe({
+      next: (ds) => {
+        this.datasets.set(ds);
+        if (ds.length) {
+          this.dataset.set(ds[0].id);
+          this.stage8.set(true); // backend supports Stage 8 — show the dataset picker, Data & Export
+        }
+      },
+      error: () => this.stage8.set(false), // older backend: hide the Stage 8 UI, app still works
     });
     this.seedExample();
   }
@@ -192,6 +219,24 @@ export class EditorPage {
       .map((v, i) => {
         const x = pad + (i / n) * (W - 2 * pad);
         const y = pad + (1 - (v - min) / span) * (H - 2 * pad);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  });
+
+  // Accuracy per epoch (Stage 8), on a fixed 0..1 axis so the height reads as accuracy.
+  accPoints = computed(() => {
+    const r = this.trainResult();
+    const c = r?.acc_curve ?? [];
+    if (c.length === 0) return '';
+    const W = 220;
+    const H = 60;
+    const pad = 4;
+    const n = c.length - 1 || 1;
+    return c
+      .map((v, i) => {
+        const x = pad + (i / n) * (W - 2 * pad);
+        const y = pad + (1 - Math.min(1, Math.max(0, v))) * (H - 2 * pad);
         return `${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(' ');
@@ -407,7 +452,7 @@ export class EditorPage {
       nodes: this.nodes().map((n) => ({ id: n.id, type: n.type, params: n.params })),
       edges: this.edges().map((e) => [e.source, e.target]),
       train: {
-        dataset: 'synthetic',
+        dataset: this.dataset(),
         epochs: this.epochs(),
         lr: this.lr(),
         batch_size: this.batchSize(),
@@ -450,6 +495,79 @@ export class EditorPage {
         this.busy.set(false);
       },
     });
+  }
+
+  // ------------------------------------------------ data & export (Stage 8)
+  setDataset(id: string): void {
+    if (!id) return;
+    this.dataset.set(id);
+    this.trainResult.set(null);
+  }
+
+  datasetInfo(id: string) {
+    return this.datasets().find((d) => d.id === id) ?? null;
+  }
+
+  rowValues(r: DataSampleRow): string {
+    const base = r.values.join(', ');
+    return r.truncated ? `[${base}, … +${r.total - r.values.length} more]` : `[${base}]`;
+  }
+
+  /** Show the format and a few real rows of the training set for this graph. */
+  openData(): void {
+    this.dataModalOpen.set(true);
+    this.overlayError.set(null);
+    this.overlayBusy.set(true);
+    this.dataPreview.set(null);
+    this.api.dataPreview(this.toSpec(), 6).subscribe({
+      next: (p) => {
+        this.dataPreview.set(p);
+        this.overlayBusy.set(false);
+      },
+      error: (e) => {
+        this.overlayError.set(this.errMsg(e));
+        this.overlayBusy.set(false);
+      },
+    });
+  }
+
+  closeData(): void {
+    this.dataModalOpen.set(false);
+  }
+
+  /** Generate standalone PyTorch source for this graph and show it. */
+  openExport(): void {
+    this.exportModalOpen.set(true);
+    this.overlayError.set(null);
+    this.overlayBusy.set(true);
+    this.exportCode.set('');
+    this.exportCopied.set(false);
+    this.api.exportPytorch(this.toSpec(), true).subscribe({
+      next: (r) => {
+        this.exportCode.set(r.code);
+        this.overlayBusy.set(false);
+      },
+      error: (e) => {
+        this.overlayError.set(this.errMsg(e));
+        this.overlayBusy.set(false);
+      },
+    });
+  }
+
+  closeExport(): void {
+    this.exportModalOpen.set(false);
+  }
+
+  copyCode(): void {
+    const code = this.exportCode();
+    if (!code) return;
+    navigator.clipboard?.writeText(code).then(
+      () => {
+        this.exportCopied.set(true);
+        setTimeout(() => this.exportCopied.set(false), 1500);
+      },
+      () => this.overlayError.set('Copy failed — select the text and copy it manually.'),
+    );
   }
 
   // ---------------------------------------------------------- smart adapters

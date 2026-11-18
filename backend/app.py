@@ -23,6 +23,9 @@ import mlconstructor as mlc
 from mlconstructor.schema import (
     ArchitectureInfo,
     BuildResult,
+    DataPreview,
+    DatasetInfo,
+    ExportResult,
     GraphSpec,
     LayerInfo,
     SuggestResult,
@@ -99,6 +102,34 @@ def architecture(arch_id: str) -> GraphSpec:
         return mlc.get_architecture(arch_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.get("/datasets", response_model=list[DatasetInfo])
+def datasets() -> list[DatasetInfo]:
+    """The datasets the trainer can run on (Stage 8). v1 = self-contained synthetic
+    tasks (no download, no GPU); real datasets plug in behind the same contract."""
+    return mlc.list_datasets()
+
+
+@app.post("/data/preview", response_model=DataPreview)
+def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
+    """A few real rows of the training set for this graph, plus its format — the
+    exact data training will see (Stage 8's data modal)."""
+    try:
+        return mlc.data_preview(spec, rows)
+    except _USER_ERRORS as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/export/pytorch", response_model=ExportResult)
+def export_pytorch(spec: GraphSpec, include_training: bool = True) -> ExportResult:
+    """Standalone PyTorch source for this graph — a real ``nn.Module`` (optionally
+    with a tiny training loop) that depends on nothing but torch (Stage 8)."""
+    try:
+        code = mlc.generate_pytorch(spec, include_training=include_training)
+        return ExportResult(ok=True, filename="model.py", code=code)
+    except _USER_ERRORS as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 # --- Serve the built frontend so one process hosts the whole app on :8050 -----

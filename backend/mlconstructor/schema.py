@@ -104,6 +104,9 @@ class BuildResult(BaseModel):
 class TrainResult(BaseModel):
     ok: bool
     loss_curve: list[float]
+    #: Full-set accuracy after each completed epoch (Stage 8 — the accuracy curve
+    #: next to the per-step loss curve). Empty if training stopped before an epoch.
+    acc_curve: list[float] = Field(default_factory=list)
     final_loss: float
     final_accuracy: float
     steps: int
@@ -147,3 +150,55 @@ class ArchitectureInfo(BaseModel):
     tags: list[str] = Field(default_factory=list)
     input_shape: list[int] = Field(default_factory=list)
     node_count: int
+
+
+# --------------------------------------------------------------------------- #
+# Datasets & data preview (response of /datasets and /data/preview) — Stage 8
+# --------------------------------------------------------------------------- #
+class DatasetInfo(BaseModel):
+    """A dataset the trainer can run on. v1 ships self-contained synthetic tasks
+    (no download, no GPU); real datasets (MNIST/CIFAR/upload) plug in here next."""
+
+    id: str
+    name: str
+    description: str
+    kind: str = "synthetic"
+
+
+class DataSampleRow(BaseModel):
+    """One example from the training set: its class label and its (flattened,
+    rounded, possibly truncated) feature values, for the editor's data modal."""
+
+    label: int
+    values: list[float]
+    truncated: bool = False
+    total: int
+
+
+class DataPreview(BaseModel):
+    """What the training set actually looks like for the graph the user built —
+    its format plus a few real sample rows (Stage 8's data modal)."""
+
+    dataset: str
+    dataset_name: str
+    description: str
+    input_shape: list[int]
+    dtype: str
+    num_classes: int
+    num_samples: int
+    feature_count: int
+    rows: list[DataSampleRow] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# Export (response of /export/pytorch) — Stage 8
+# --------------------------------------------------------------------------- #
+class ExportResult(BaseModel):
+    """Standalone, runnable PyTorch source for the graph the user built — the
+    architecture as a real ``nn.Module`` (optionally with a tiny training loop),
+    depending on nothing but torch."""
+
+    ok: bool
+    language: str = "python"
+    filename: str
+    code: str

@@ -109,12 +109,24 @@ one and it drops onto the canvas as a full graph of **ordinary, editable nodes**
 every layer, every repeat, every skip is there to re-wire and tune — "start from a
 known-good net, then make it your own." Each one builds and trains end to end.
 
-### Stage 8 — Real datasets & training UX
-A **data modal** on the Input / Output nodes showing the training set's format and
-a few sample rows from it, later upgraded into a **parser for custom training
-examples** you paste or upload. Plus a dataset picker (MNIST / CIFAR / custom
-upload), live loss & accuracy curves, checkpoints, **GPU** training, and export
-(generated PyTorch code / `state_dict` / ONNX).
+### Stage 8 — Datasets, data preview & export · **DONE (2026-11-18)**
+See the data, and take the model with you. A **dataset layer** feeds both the
+trainer and a new **data preview** (`/data/preview`): a modal showing the exact
+format — input shape, dtype, class count, sample count — and a few **real sample
+rows** the model will train on (the headline "data modal"). A **dataset picker**
+chooses the synthetic task (`blobs` — separable clusters; `shells` — a non-linear
+radial boundary), the result now plots an **accuracy curve** per epoch next to the
+loss, and one click **exports standalone PyTorch** (`/export/pytorch`): a real
+`nn.Module` reconstructing the whole graph — branches, `Add`/`Concat` merges,
+`Repeat` blocks and all — plus an optional training loop, depending on nothing but
+torch. Verified end to end: every architecture exports to code that rebuilds to the
+same parameters and output.
+
+### Stage 9 — Real datasets & richer training UX
+Real datasets behind the same dataset contract (MNIST / CIFAR / custom upload) and a
+**parser for custom training examples** you paste or upload; live streaming loss &
+accuracy curves, checkpoints, **GPU** training, and more export targets
+(`state_dict` / ONNX).
 
 ### Ongoing
 Professional OOP and engineering practices, tests, documentation, performance, and
@@ -160,8 +172,17 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   отдаются по `GET /architectures`; выбираешь — и архитектура ложится на холст
   обычными **редактируемыми нодами**: каждый слой, каждый повтор, каждый skip можно
   перенастроить. Каждая собирается и обучается от начала до конца.
-* **Этап 8 — Реальные датасеты и UX обучения:** **модалка с данными** на нодах
-  Input/Output — формат обучающей выборки и примеры строк из неё, с апгрейдом в
-  **парсер кастомных примеров** для обучения; выбор датасета (MNIST/CIFAR/свой),
-  живые кривые loss/accuracy, чекпоинты, обучение на GPU, экспорт (код/`state_dict`/ONNX).
+* **Этап 8 — Датасеты, превью данных и экспорт · ГОТОВО (18.11):** увидеть данные и
+  забрать модель с собой. Слой датасетов кормит и тренер, и новое **превью данных**
+  (`/data/preview`): модалка с точным форматом (форма входа, dtype, число классов и
+  примеров) и несколькими **настоящими строками** выборки, на которых учится сеть.
+  **Выбор датасета** (`blobs` — разделимые кластеры; `shells` — нелинейная радиальная
+  граница), результат рисует **кривую точности** по эпохам рядом с loss, и в один клик —
+  **экспорт автономного PyTorch** (`/export/pytorch`): настоящий `nn.Module`, собирающий
+  весь граф (ветки, слияния `Add`/`Concat`, блоки `Repeat`), плюс цикл обучения — без
+  зависимостей, кроме torch. Проверено сквозными тестами: каждая архитектура
+  экспортируется в код, который собирается в ту же модель.
+* **Этап 9 — Реальные датасеты и богаче UX обучения:** реальные датасеты за тем же
+  контрактом (MNIST/CIFAR/свой) и **парсер кастомных примеров**; живые потоковые кривые,
+  чекпоинты, обучение на GPU, доп. форматы экспорта (`state_dict`/ONNX).
 * **Постоянно:** высокий уровень ООП, тесты, документация, производительность.

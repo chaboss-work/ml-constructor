@@ -202,6 +202,16 @@
 
       <div class="panel-h">Training</div>
       <ion-list lines="none" class="train-cfg">
+        @if (stage8()) {
+          <ion-item>
+            <ion-label position="stacked">Dataset</ion-label>
+            <select class="ds-select" (change)="setDataset($any($event).target.value)">
+              @for (d of datasets(); track d.id) {
+                <option [value]="d.id" [selected]="d.id === dataset()" [title]="d.description">{{ d.name }}</option>
+              }
+            </select>
+          </ion-item>
+        }
         <ion-item>
           <ion-label position="stacked">Epochs</ion-label>
           <ion-input type="number" [value]="epochs()" (ionInput)="epochs.set(+$any($event).detail.value)"></ion-input>
@@ -219,6 +229,16 @@
           <ion-input type="number" [value]="samples()" (ionInput)="samples.set(+$any($event).detail.value)"></ion-input>
         </ion-item>
       </ion-list>
+      @if (stage8()) {
+        <div class="pad s8-actions">
+          <ion-button size="small" fill="outline" [disabled]="busy() || !nodes().length" (click)="openData()">
+            Data
+          </ion-button>
+          <ion-button size="small" fill="outline" [disabled]="busy() || !nodes().length" (click)="openExport()">
+            Export .py
+          </ion-button>
+        </div>
+      }
 
       <div class="panel-h">Result</div>
       <div class="pad result">
@@ -254,8 +274,89 @@
             <polyline [attr.points]="lossPoints()"></polyline>
           </svg>
           <ion-note class="muted">loss curve · {{ t.device }}</ion-note>
+          @if (t.acc_curve?.length) {
+            <svg class="spark acc" viewBox="0 0 220 60" preserveAspectRatio="none">
+              <polyline [attr.points]="accPoints()"></polyline>
+            </svg>
+            <ion-note class="muted">accuracy curve · per epoch (0–1)</ion-note>
+          }
         }
       </div>
     </aside>
   </div>
+
+  <!-- ============ data preview (Stage 8) ============ -->
+  @if (dataModalOpen()) {
+    <div class="overlay" (click)="closeData()">
+      <div class="sheet" (click)="$event.stopPropagation()">
+        <div class="sheet-h">
+          <span>Training data</span>
+          <ion-button fill="clear" size="small" (click)="closeData()">✕</ion-button>
+        </div>
+        <div class="sheet-body">
+          @if (overlayBusy()) {
+            <ion-note class="muted">Loading…</ion-note>
+          }
+          @if (overlayError()) {
+            <ion-note color="danger" class="block">{{ overlayError() }}</ion-note>
+          }
+          @if (dataPreview(); as p) {
+            <div class="dp-meta">
+              <div class="dp-title"><b>{{ p.dataset_name }}</b></div>
+              <div class="dp-desc">{{ p.description }}</div>
+              <div class="dp-facts">
+                <span>input [{{ p.input_shape.join('×') }}]</span>
+                <span>{{ p.feature_count | number }} features · {{ p.dtype }}</span>
+                <span>{{ p.num_classes }} classes</span>
+                <span>{{ p.num_samples | number }} samples</span>
+              </div>
+            </div>
+            <table class="dp-table">
+              <thead>
+                <tr><th>label</th><th>features</th></tr>
+              </thead>
+              <tbody>
+                @for (r of p.rows; track $index) {
+                  <tr>
+                    <td class="dp-label">{{ r.label }}</td>
+                    <td class="dp-vals">{{ rowValues(r) }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+            <ion-note class="muted block">The exact first rows the model trains on (same dataset &amp; seed).</ion-note>
+          }
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ============ export (Stage 8) ============ -->
+  @if (exportModalOpen()) {
+    <div class="overlay" (click)="closeExport()">
+      <div class="sheet sheet-wide" (click)="$event.stopPropagation()">
+        <div class="sheet-h">
+          <span>Export · PyTorch</span>
+          <span class="sheet-actions">
+            <ion-button fill="outline" size="small" [disabled]="!exportCode()" (click)="copyCode()">
+              {{ exportCopied() ? 'Copied ✓' : 'Copy' }}
+            </ion-button>
+            <ion-button fill="clear" size="small" (click)="closeExport()">✕</ion-button>
+          </span>
+        </div>
+        <div class="sheet-body">
+          @if (overlayBusy()) {
+            <ion-note class="muted">Generating…</ion-note>
+          }
+          @if (overlayError()) {
+            <ion-note color="danger" class="block">{{ overlayError() }}</ion-note>
+          }
+          @if (exportCode()) {
+            <ion-note class="muted block">Standalone <code>model.py</code> — depends only on torch.</ion-note>
+            <pre class="code">{{ exportCode() }}</pre>
+          }
+        </div>
+      </div>
+    </div>
+  }
 </ion-content>

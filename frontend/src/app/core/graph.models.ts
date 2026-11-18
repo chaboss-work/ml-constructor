@@ -71,6 +71,8 @@ export interface BuildResult {
 export interface TrainResult {
   ok: boolean;
   loss_curve: number[];
+  /** Full-set accuracy after each epoch (Stage 8). Optional: older backends omit it. */
+  acc_curve?: number[];
   final_loss: number;
   final_accuracy: number;
   steps: number;
@@ -105,4 +107,39 @@ export interface ArchitectureInfo {
   tags: string[];
   input_shape: number[];
   node_count: number;
+}
+
+/** Datasets & data preview (Stage 8). */
+export interface DatasetInfo {
+  id: string;
+  name: string;
+  description: string;
+  kind: string;
+}
+
+export interface DataSampleRow {
+  label: number;
+  values: number[];
+  truncated: boolean;
+  total: number;
+}
+
+export interface DataPreview {
+  dataset: string;
+  dataset_name: string;
+  description: string;
+  input_shape: number[];
+  dtype: string;
+  num_classes: number;
+  num_samples: number;
+  feature_count: number;
+  rows: DataSampleRow[];
+}
+
+/** Export (Stage 8): standalone PyTorch source for the current graph. */
+export interface ExportResult {
+  ok: boolean;
+  language: string;
+  filename: string;
+  code: string;
 }

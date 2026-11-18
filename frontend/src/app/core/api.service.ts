@@ -2,7 +2,17 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
-import { ArchitectureInfo, BuildResult, GraphSpec, LayerInfo, SuggestResult, TrainResult } from './graph.models';
+import {
+  ArchitectureInfo,
+  BuildResult,
+  DataPreview,
+  DatasetInfo,
+  ExportResult,
+  GraphSpec,
+  LayerInfo,
+  SuggestResult,
+  TrainResult,
+} from './graph.models';
 
 /**
  * Base URL of the PyTorch backend. It is served on port 8050 on the same host
@@ -44,5 +54,23 @@ export class ApiService {
   /** The full, editable graph for one ready architecture. */
   architecture(id: string): Observable<GraphSpec> {
     return this.http.get<GraphSpec>(`${API_BASE}/architectures/${id}`);
+  }
+
+  /** Datasets the trainer can run on (Stage 8). */
+  datasets(): Observable<DatasetInfo[]> {
+    return this.http.get<DatasetInfo[]>(`${API_BASE}/datasets`);
+  }
+
+  /** A few real rows of the training set for a graph, plus its format (Stage 8). */
+  dataPreview(spec: GraphSpec, rows = 6): Observable<DataPreview> {
+    return this.http.post<DataPreview>(`${API_BASE}/data/preview?rows=${rows}`, spec);
+  }
+
+  /** Standalone PyTorch source for a graph (Stage 8). */
+  exportPytorch(spec: GraphSpec, includeTraining = true): Observable<ExportResult> {
+    return this.http.post<ExportResult>(
+      `${API_BASE}/export/pytorch?include_training=${includeTraining}`,
+      spec,
+    );
   }
 }

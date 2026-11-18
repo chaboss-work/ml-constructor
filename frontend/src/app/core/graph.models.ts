@@ -117,6 +117,8 @@ export interface DatasetInfo {
   name: string;
   description: string;
   kind: string;
+  /** Fixed input shape a real dataset needs (MNIST [1,28,28]); null = adaptive. */
+  input_shape?: number[] | null;
 }
 
 export interface DataSampleRow {

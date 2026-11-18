@@ -166,6 +166,8 @@ class DatasetInfo(BaseModel):
     name: str
     description: str
     kind: str = "synthetic"
+    #: Fixed input shape a real dataset requires (MNIST [1,28,28]); None = adaptive.
+    input_shape: list[int] | None = None
 
 
 class DataSampleRow(BaseModel):

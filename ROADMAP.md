@@ -133,9 +133,18 @@ script now also saves the trained weights (`torch.save` → `model.pt`) and expo
 accuracy 1.000, bad rows are rejected, and the exported file writes a real `state_dict`
 and ONNX graph.
 
-### Stage 10 — Built-in real datasets & live training
-Auto-downloaded standard datasets behind the same contract (MNIST / CIFAR), live
-streaming loss & accuracy curves, checkpoints, and **GPU** training.
+### Stage 10 — Built-in real datasets (MNIST / CIFAR-10) · **DONE (2026-11-19)**
+Real datasets behind the same dataset contract, auto-downloaded from their official
+sources (no torchvision) and cached locally: **MNIST** (28×28 digits) and
+**CIFAR-10** (32×32 colour), each parsed with the standard library, shape/class
+validated against the graph (a clear message if your Input doesn't match), previewed
+like any dataset and trained on a reproducible subset. Verified end to end — MNIST
+reaches ~0.96 accuracy on a small CPU run; CIFAR-10 downloads, parses and trains
+(loss drops). The dataset picker lists them and hints the Input shape they need.
+
+### Stage 11 — Live training (streaming curves, checkpoints, GPU)
+Live streaming loss & accuracy curves during training, checkpoints (save / resume),
+and **GPU** training (needs a CUDA PyTorch build on the host).
 
 ### Ongoing
 Professional OOP and engineering practices, tests, documentation, performance, and
@@ -199,7 +208,14 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   зависимостей теперь ещё и сохраняет веса (`torch.save` → `model.pt`) и экспортирует **ONNX**
   (`model.onnx`, best-effort). Проверено сквозными тестами: свои строки обучаются до acc 1.000,
   плохие строки отклоняются, экспортированный файл пишет настоящий `state_dict` и ONNX-граф.
-* **Этап 10 — Встроенные реальные датасеты и живое обучение:** авто-скачиваемые стандартные
-  датасеты за тем же контрактом (MNIST/CIFAR), живые потоковые кривые loss/accuracy, чекпоинты
-  и обучение на GPU.
+* **Этап 10 — Встроенные реальные датасеты (MNIST / CIFAR-10) · ГОТОВО (19.11):** реальные
+  датасеты за тем же контрактом, авто-скачиваемые с официальных источников (без torchvision) и
+  кэшируемые локально: **MNIST** (цифры 28×28) и **CIFAR-10** (цвет 32×32), парсинг стандартной
+  библиотекой, проверка формы/классов по графу (понятное сообщение, если Input не совпал),
+  превью как у любого датасета и обучение на воспроизводимом подмножестве. Проверено сквозь:
+  MNIST ~0.96 на небольшом CPU-прогоне; CIFAR-10 скачивается, парсится и обучается (loss падает).
+  Пикер показывает их и подсказывает нужную форму Input.
+* **Этап 11 — Живое обучение (потоковые кривые, чекпоинты, GPU):** живые кривые loss/accuracy во
+  время обучения, чекпоинты (сохранение/возобновление) и обучение на GPU (нужна CUDA-сборка
+  PyTorch на хосте).
 * **Постоянно:** высокий уровень ООП, тесты, документация, производительность.

@@ -14,16 +14,30 @@ A ``Shape`` here is per-sample, without the batch dimension.
 
 from __future__ import annotations
 
+import gzip
 import math
+import os
+import pickle
+import shutil
+import struct
+import tarfile
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from typing import Callable
 
+import numpy as np
 import torch
 
 from .schema import DatasetInfo, TrainSpec
 from .shapes import Shape, numel
 
 _MAX_CUSTOM_ROWS = 10000  # bound the payload / memory for pasted-or-uploaded data
+
+# Local cache for auto-downloaded real datasets (gitignored: backend/data/).
+_CACHE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+# Only these official hosts may be downloaded from (Stage 10).
+_OFFICIAL_HOSTS = {"ossci-datasets.s3.amazonaws.com", "www.cs.toronto.edu"}
 
 #: A generator: (per-sample shape, #classes, train spec, device) -> (X, y).
 DatasetFn = Callable[[Shape, int, TrainSpec, "torch.device"], tuple["torch.Tensor", "torch.Tensor"]]
@@ -35,6 +49,11 @@ class DatasetDef:
     name: str
     description: str
     make: DatasetFn
+    #: Real datasets (MNIST/CIFAR) have a FIXED input shape and class count the
+    #: graph must match; adaptive synthetic datasets leave these None.
+    fixed_shape: tuple[int, ...] | None = None
+    fixed_classes: int | None = None
+    kind: str = "synthetic"
 
 
 def _blobs(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple["torch.Tensor", "torch.Tensor"]:
@@ -112,6 +131,93 @@ def _custom(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple
     return X.to(device), y.to(device)
 
 
+# --------------------------------------------------------------------------- #
+# Real datasets (Stage 10): auto-downloaded from their official sources, parsed
+# with the standard library + numpy (no torchvision), cached under backend/data/.
+# --------------------------------------------------------------------------- #
+def _download(url: str, dest: str) -> str:
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if host not in _OFFICIAL_HOSTS:
+        raise ValueError(f"refusing to download a dataset from a non-official host: {host!r}")
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if not os.path.exists(dest):
+        req = urllib.request.Request(url, headers={"User-Agent": "ml-constructor"})
+        with urllib.request.urlopen(req) as resp, open(dest, "wb") as out:  # noqa: S310 (host allow-listed)
+            shutil.copyfileobj(resp, out)
+    return dest
+
+
+_MNIST_BASE = "https://ossci-datasets.s3.amazonaws.com/mnist/"
+_MNIST_IMAGES = "train-images-idx3-ubyte.gz"
+_MNIST_LABELS = "train-labels-idx1-ubyte.gz"
+
+
+def _load_mnist() -> tuple[np.ndarray, np.ndarray]:
+    d = os.path.join(_CACHE, "mnist")
+    imgs_gz = _download(_MNIST_BASE + _MNIST_IMAGES, os.path.join(d, _MNIST_IMAGES))
+    lbls_gz = _download(_MNIST_BASE + _MNIST_LABELS, os.path.join(d, _MNIST_LABELS))
+    with gzip.open(imgs_gz, "rb") as f:
+        _magic, n, rows, cols = struct.unpack(">IIII", f.read(16))
+        imgs = np.frombuffer(f.read(), dtype=np.uint8).reshape(n, rows, cols)
+    with gzip.open(lbls_gz, "rb") as f:
+        struct.unpack(">II", f.read(8))
+        lbls = np.frombuffer(f.read(), dtype=np.uint8)
+    return imgs, lbls
+
+
+_CIFAR_URL = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
+
+
+def _load_cifar10() -> tuple[np.ndarray, np.ndarray]:
+    d = os.path.join(_CACHE, "cifar10")
+    tgz = _download(_CIFAR_URL, os.path.join(d, "cifar-10-python.tar.gz"))
+    batch_dir = os.path.join(d, "cifar-10-batches-py")
+    if not os.path.isdir(batch_dir):
+        with tarfile.open(tgz, "r:gz") as t:
+            t.extractall(d, filter="data")  # py3.12 safe extraction (blocks path traversal)
+    data, labels = [], []
+    for i in range(1, 6):
+        with open(os.path.join(batch_dir, f"data_batch_{i}"), "rb") as f:
+            batch = pickle.load(f, encoding="bytes")  # official CIFAR-10 pickle
+        data.append(batch[b"data"])
+        labels.extend(batch[b"labels"])
+    X = np.concatenate(data).reshape(-1, 3, 32, 32)  # (50000, 3, 32, 32) uint8
+    y = np.array(labels, dtype=np.uint8)
+    return X, y
+
+
+def _subsample(imgs: np.ndarray, lbls: np.ndarray, spec: TrainSpec, device):
+    """A reproducible random subset of `spec.samples` images, scaled to [0, 1]."""
+    n = min(int(spec.samples), imgs.shape[0])
+    g = torch.Generator().manual_seed(int(spec.seed))
+    sel = torch.randperm(imgs.shape[0], generator=g)[:n].numpy()
+    X = torch.from_numpy(imgs[sel].astype(np.float32) / 255.0)
+    y = torch.from_numpy(lbls[sel].astype(np.int64))
+    return X.to(device), y.to(device)
+
+
+def _check_fixed(name: str, want: tuple[int, ...], in_shape: Shape, num_classes: int):
+    if tuple(int(x) for x in in_shape) != want:
+        raise ValueError(f"{name} needs an Input of shape {list(want)}; your graph's input is {list(in_shape)}")
+    if num_classes < 10:
+        raise ValueError(
+            f"{name} has 10 classes; your network outputs {num_classes} — make the last layer output at least 10"
+        )
+
+
+def _mnist(in_shape: Shape, num_classes: int, spec: TrainSpec, device):
+    _check_fixed("MNIST", (1, 28, 28), in_shape, num_classes)
+    imgs, lbls = _load_mnist()
+    X, y = _subsample(imgs, lbls, spec, device)  # imgs (n,28,28) -> add channel
+    return X.unsqueeze(1), y
+
+
+def _cifar10(in_shape: Shape, num_classes: int, spec: TrainSpec, device):
+    _check_fixed("CIFAR-10", (3, 32, 32), in_shape, num_classes)
+    imgs, lbls = _load_cifar10()  # (50000,3,32,32)
+    return _subsample(imgs, lbls, spec, device)
+
+
 _DATASETS: list[DatasetDef] = [
     DatasetDef(
         "blobs",
@@ -133,6 +239,27 @@ _DATASETS: list[DatasetDef] = [
         "Train on rows you paste or upload: each row is its features, then a "
         "whole-number class label. The features must match the Input shape.",
         _custom,
+        kind="custom",
+    ),
+    DatasetDef(
+        "mnist",
+        "MNIST (digits)",
+        "Handwritten digits, 28x28 grayscale, 10 classes. Needs Input [1, 28, 28]. "
+        "Auto-downloaded (~11 MB) on first use.",
+        _mnist,
+        fixed_shape=(1, 28, 28),
+        fixed_classes=10,
+        kind="real",
+    ),
+    DatasetDef(
+        "cifar10",
+        "CIFAR-10",
+        "Color images, 32x32 RGB, 10 classes. Needs Input [3, 32, 32]. "
+        "Auto-downloaded (~170 MB) on first use; heavy on CPU.",
+        _cifar10,
+        fixed_shape=(3, 32, 32),
+        fixed_classes=10,
+        kind="real",
     ),
 ]
 
@@ -164,4 +291,13 @@ def make_dataset(
 
 def list_datasets() -> list[DatasetInfo]:
     """The dataset catalogue for the editor's picker (``GET /datasets``)."""
-    return [DatasetInfo(id=d.id, name=d.name, description=d.description, kind="synthetic") for d in _DATASETS]
+    return [
+        DatasetInfo(
+            id=d.id,
+            name=d.name,
+            description=d.description,
+            kind=d.kind,
+            input_shape=(list(d.fixed_shape) if d.fixed_shape else None),
+        )
+        for d in _DATASETS
+    ]

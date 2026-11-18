@@ -666,10 +666,11 @@ def test_each_architecture_trains():
 # --------------------------------------------------------------------------- #
 def test_dataset_catalog():
     ds = mlc.list_datasets()
-    ids = {d.id for d in ds}
-    assert {"blobs", "shells"} <= ids, ids
+    kinds = {d.id: d.kind for d in ds}
+    assert {"blobs", "shells"} <= set(kinds), kinds
+    assert kinds["blobs"] == "synthetic" and kinds["shells"] == "synthetic"
     for d in ds:
-        assert d.name and d.description and d.kind == "synthetic"
+        assert d.name and d.description and d.kind
     print(f"[datasets] {[d.id for d in ds]}")
 
 
@@ -924,6 +925,38 @@ def test_export_saves_state_dict_and_onnx():
     print(f"[export] state_dict saved; onnx={'yes' if onnx_ok else 'skipped (best-effort)'}")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 10 — built-in real datasets (MNIST / CIFAR-10). These offline checks cover
+# the catalogue and the fixed-shape validation (which runs BEFORE any download).
+# The actual download + train is verified separately (scratchpad/verify_real.py),
+# so the always-run suite stays offline and fast.
+# --------------------------------------------------------------------------- #
+def test_real_datasets_in_catalog():
+    by = {d.id: d for d in mlc.list_datasets()}
+    assert "mnist" in by and "cifar10" in by, list(by)
+    assert by["mnist"].kind == "real" and by["mnist"].input_shape == [1, 28, 28]
+    assert by["cifar10"].kind == "real" and by["cifar10"].input_shape == [3, 32, 32]
+    assert by["custom"].kind == "custom"
+    assert by["blobs"].input_shape is None  # adaptive datasets advertise no fixed shape
+    print(f"[real] catalogue: mnist{by['mnist'].input_shape} cifar10{by['cifar10'].input_shape}")
+
+
+def test_real_dataset_shape_validation():
+    dev = torch.device("cpu")
+    cfg = TrainSpec(dataset="mnist", samples=16, seed=0)
+    try:  # wrong input shape -> clear error, WITHOUT downloading (validated first)
+        mlc.make_dataset("mnist", (4,), 10, cfg, dev)
+        raise AssertionError("expected a shape error")
+    except ValueError as exc:
+        assert "Input of shape [1, 28, 28]" in str(exc), exc
+    try:  # too few output classes -> clear error, also before any download
+        mlc.make_dataset("mnist", (1, 28, 28), 3, cfg, dev)
+        raise AssertionError("expected a class-count error")
+    except ValueError as exc:
+        assert "10 classes" in str(exc), exc
+    print("[real] fixed-shape / class validation rejects mismatches (no download)")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -969,7 +1002,9 @@ if __name__ == "__main__":
     test_custom_data_preview_echoes_your_rows()
     test_export_custom_embeds_your_data()
     test_export_saves_state_dict_and_onnx()
+    test_real_datasets_in_catalog()
+    test_real_dataset_shape_validation()
     print(
-        "\nALL CHECKS PASSED "
-        "(v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 + Stage 7 + Stage 8 + Stage 9)"
+        "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
+        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline)"
     )

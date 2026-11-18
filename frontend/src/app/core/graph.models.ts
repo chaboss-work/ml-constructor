@@ -44,6 +44,8 @@ export interface TrainCfg {
   batch_size: number;
   samples: number;
   seed: number;
+  /** Stage 9 — rows for the "custom" dataset: each is [f1, …, fk, label]. */
+  custom_rows?: number[][];
 }
 
 /** The payload sent to /build and /train. */

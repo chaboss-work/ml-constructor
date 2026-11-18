@@ -122,11 +122,20 @@ loss, and one click **exports standalone PyTorch** (`/export/pytorch`): a real
 torch. Verified end to end: every architecture exports to code that rebuilds to the
 same parameters and output.
 
-### Stage 9 — Real datasets & richer training UX
-Real datasets behind the same dataset contract (MNIST / CIFAR / custom upload) and a
-**parser for custom training examples** you paste or upload; live streaming loss &
-accuracy curves, checkpoints, **GPU** training, and more export targets
-(`state_dict` / ONNX).
+### Stage 9 — Bring your own data & model export · **DONE (2026-11-19)**
+Train on your own data, and take the trained model out. A **custom dataset** lets you
+**paste or upload** training rows (each row: its features, then a class label); the
+backend parses and validates them against the graph (clear messages on a bad shape or
+label), the **Data** modal previews exactly what you gave, and training runs on
+precisely those rows. Export grew **more targets**: the generated, dependency-free
+script now also saves the trained weights (`torch.save` → `model.pt`) and exports
+**ONNX** (`model.onnx`, best-effort). Verified end to end — custom rows train to
+accuracy 1.000, bad rows are rejected, and the exported file writes a real `state_dict`
+and ONNX graph.
+
+### Stage 10 — Built-in real datasets & live training
+Auto-downloaded standard datasets behind the same contract (MNIST / CIFAR), live
+streaming loss & accuracy curves, checkpoints, and **GPU** training.
 
 ### Ongoing
 Professional OOP and engineering practices, tests, documentation, performance, and
@@ -182,7 +191,15 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   весь граф (ветки, слияния `Add`/`Concat`, блоки `Repeat`), плюс цикл обучения — без
   зависимостей, кроме torch. Проверено сквозными тестами: каждая архитектура
   экспортируется в код, который собирается в ту же модель.
-* **Этап 9 — Реальные датасеты и богаче UX обучения:** реальные датасеты за тем же
-  контрактом (MNIST/CIFAR/свой) и **парсер кастомных примеров**; живые потоковые кривые,
-  чекпоинты, обучение на GPU, доп. форматы экспорта (`state_dict`/ONNX).
+* **Этап 9 — Свои данные и экспорт модели · ГОТОВО (19.11):** обучай на своих данных и
+  забирай обученную модель. **Кастомный датасет**: вставь или загрузи строки (в каждой —
+  признаки, затем метка класса); бэкенд парсит и проверяет их по графу (понятные ошибки при
+  неверной форме/метке), модалка **Data** показывает ровно то, что ты дал, и обучение идёт
+  именно на этих строках. Экспорт получил **новые форматы**: сгенерированный скрипт без
+  зависимостей теперь ещё и сохраняет веса (`torch.save` → `model.pt`) и экспортирует **ONNX**
+  (`model.onnx`, best-effort). Проверено сквозными тестами: свои строки обучаются до acc 1.000,
+  плохие строки отклоняются, экспортированный файл пишет настоящий `state_dict` и ONNX-граф.
+* **Этап 10 — Встроенные реальные датасеты и живое обучение:** авто-скачиваемые стандартные
+  датасеты за тем же контрактом (MNIST/CIFAR), живые потоковые кривые loss/accuracy, чекпоинты
+  и обучение на GPU.
 * **Постоянно:** высокий уровень ООП, тесты, документация, производительность.

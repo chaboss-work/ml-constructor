@@ -14,13 +14,16 @@ A ``Shape`` here is per-sample, without the batch dimension.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Callable
 
 import torch
 
 from .schema import DatasetInfo, TrainSpec
-from .shapes import Shape
+from .shapes import Shape, numel
+
+_MAX_CUSTOM_ROWS = 10000  # bound the payload / memory for pasted-or-uploaded data
 
 #: A generator: (per-sample shape, #classes, train spec, device) -> (X, y).
 DatasetFn = Callable[[Shape, int, TrainSpec, "torch.device"], tuple["torch.Tensor", "torch.Tensor"]]
@@ -69,6 +72,46 @@ def _shells(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple
     return X.to(device), y.to(device)
 
 
+def _custom(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple["torch.Tensor", "torch.Tensor"]:
+    """Train on the user's OWN rows (Stage 9 — paste or upload your data).
+
+    Each row in ``spec.custom_rows`` is ``[f1, …, fk, label]``: its features then
+    an integer class label. Rows are validated against the graph's input shape and
+    the network's class count, so a mismatch is a clear message, not a torch crash.
+    """
+    rows = spec.custom_rows or []
+    if not rows:
+        raise ValueError(
+            "the 'custom' dataset needs rows — paste or upload training examples "
+            "(each row = the features, then a whole-number class label)"
+        )
+    if len(rows) > _MAX_CUSTOM_ROWS:
+        raise ValueError(f"too many custom rows ({len(rows)}); the limit is {_MAX_CUSTOM_ROWS}")
+    feat = numel(in_shape)
+    xs: list[list[float]] = []
+    ys: list[int] = []
+    for i, row in enumerate(rows):
+        if len(row) != feat + 1:
+            raise ValueError(
+                f"custom row {i + 1}: expected {feat} feature(s) + 1 label = {feat + 1} values, got {len(row)}"
+            )
+        if any(not math.isfinite(float(v)) for v in row):
+            raise ValueError(f"custom row {i + 1}: contains a non-finite value (NaN/inf)")
+        if int(row[-1]) != row[-1]:
+            raise ValueError(f"custom row {i + 1}: label {row[-1]} must be a whole number")
+        label = int(row[-1])
+        if not (0 <= label < num_classes):
+            raise ValueError(
+                f"custom row {i + 1}: label {label} out of range [0, {num_classes}) — "
+                f"the network's output layer has {num_classes} classes"
+            )
+        xs.append([float(v) for v in row[:-1]])
+        ys.append(label)
+    X = torch.tensor(xs, dtype=torch.float32).reshape(len(rows), *in_shape)
+    y = torch.tensor(ys, dtype=torch.long)
+    return X.to(device), y.to(device)
+
+
 _DATASETS: list[DatasetDef] = [
     DatasetDef(
         "blobs",
@@ -83,6 +126,13 @@ _DATASETS: list[DatasetDef] = [
         "The class is the distance from the origin (radius = class). A curved, "
         "non-linear boundary — needs a hidden layer, not just a Linear.",
         _shells,
+    ),
+    DatasetDef(
+        "custom",
+        "Your data",
+        "Train on rows you paste or upload: each row is its features, then a "
+        "whole-number class label. The features must match the Input shape.",
+        _custom,
     ),
 ]
 

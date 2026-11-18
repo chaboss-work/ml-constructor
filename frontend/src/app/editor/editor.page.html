@@ -294,6 +294,34 @@
           <ion-button fill="clear" size="small" (click)="closeData()">✕</ion-button>
         </div>
         <div class="sheet-body">
+          @if (dataset() === 'custom') {
+            <div class="custom-ed">
+              <div class="custom-hint">
+                One example per line: the features, then a whole-number class label (comma or space
+                separated). Lines starting with # are ignored. Features must match the Input shape.
+              </div>
+              <textarea
+                class="custom-ta"
+                rows="7"
+                placeholder="2, 0, 0, 0, 0&#10;0, 2, 0, 0, 1&#10;0, 0, 2, 0, 2"
+                [value]="customText()"
+                (input)="customText.set($any($event).target.value)"
+              ></textarea>
+              <div class="custom-actions">
+                <ion-button size="small" fill="solid" (click)="applyCustom()">Apply &amp; preview</ion-button>
+                <label class="file-btn">
+                  Upload CSV
+                  <input type="file" accept=".csv,.txt,text/*" (change)="onCustomFile($event)" hidden />
+                </label>
+                @if (customRows().length) {
+                  <ion-note class="muted">{{ customRows().length }} rows</ion-note>
+                }
+              </div>
+              @if (customError()) {
+                <ion-note color="danger" class="block">{{ customError() }}</ion-note>
+              }
+            </div>
+          }
           @if (overlayBusy()) {
             <ion-note class="muted">Loading…</ion-note>
           }
@@ -324,7 +352,11 @@
                 }
               </tbody>
             </table>
-            <ion-note class="muted block">The exact first rows the model trains on (same dataset &amp; seed).</ion-note>
+            @if (p.dataset === 'custom') {
+              <ion-note class="muted block">Your rows, as the model will see them.</ion-note>
+            } @else {
+              <ion-note class="muted block">The exact first rows the model trains on (same dataset &amp; seed).</ion-note>
+            }
           }
         </div>
       </div>

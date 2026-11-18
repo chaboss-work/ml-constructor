@@ -200,6 +200,44 @@ pre.code {
   tab-size: 4;
 }
 
+/* ---- custom data editor (Stage 9) ---- */
+.custom-ed {
+  margin-bottom: 14px;
+}
+.custom-hint {
+  font-size: 12px;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+.custom-ta {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 9px 11px;
+  border: 1px solid var(--ion-color-step-200, #d3d7de);
+  border-radius: 8px;
+  background: var(--ion-color-step-50, #f6f7f9);
+  color: var(--ion-text-color, #222);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.custom-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.custom-actions ion-button {
+  margin: 0;
+}
+.file-btn {
+  font-size: 13px;
+  color: var(--ion-color-primary, #3880ff);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* ---- canvas ---- */
 .canvas-wrap {
   position: relative;

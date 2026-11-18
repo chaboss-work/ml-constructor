@@ -42,6 +42,9 @@ class TrainSpec(BaseModel):
     num_classes: int = Field(default=10, ge=2, le=1000)
     optimizer: Literal["adam", "sgd"] = "adam"
     seed: int = 0
+    #: Stage 9 — rows for the "custom" dataset: each row is ``[f1, …, fk, label]``
+    #: (the class label is the last value). Used only when ``dataset == "custom"``.
+    custom_rows: list[list[float]] | None = None
 
 
 class GraphSpec(BaseModel):

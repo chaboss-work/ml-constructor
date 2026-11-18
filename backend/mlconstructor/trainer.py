@@ -163,7 +163,7 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
         input_shape=list(in_shape),
         dtype=str(X.dtype).replace("torch.", ""),
         num_classes=num_classes,
-        num_samples=int(spec.train.samples),
+        num_samples=int(X.shape[0]),  # actual rows (synthetic = samples; custom = your row count)
         feature_count=numel(in_shape),
         rows=out_rows,
     )

@@ -808,6 +808,122 @@ def test_export_file_trains_end_to_end():
     print("[export] generated MLP file trains end to end")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 9 — bring your own data (the "custom" dataset) + state_dict / ONNX export.
+# --------------------------------------------------------------------------- #
+from mlconstructor.schema import TrainSpec  # noqa: E402
+
+CUSTOM_MLP_NODES = [
+    {"id": "in", "type": "Input", "params": {"shape": [4]}},
+    {"id": "fc1", "type": "Linear", "params": {"out_features": 16}},
+    {"id": "a1", "type": "ReLU", "params": {}},
+    {"id": "fc2", "type": "Linear", "params": {"out_features": 3}},
+    {"id": "out", "type": "Output", "params": {}},
+]
+CUSTOM_MLP_EDGES = [["in", "fc1"], ["fc1", "a1"], ["a1", "fc2"], ["fc2", "out"]]
+# 12 linearly separable rows in 4-D, 3 classes (features..., label):
+CUSTOM_ROWS = [
+    [2.0, 0.0, 0.0, 0.0, 0], [2.0, 0.1, 0.0, 0.0, 0], [1.8, 0.0, 0.1, 0.0, 0], [2.1, 0.0, 0.0, 0.1, 0],
+    [0.0, 2.0, 0.0, 0.0, 1], [0.1, 2.0, 0.0, 0.0, 1], [0.0, 1.8, 0.1, 0.0, 1], [0.0, 2.1, 0.0, 0.0, 1],
+    [0.0, 0.0, 2.0, 0.0, 2], [0.0, 0.1, 2.0, 0.0, 2], [0.0, 0.0, 1.8, 0.1, 2], [0.0, 0.0, 2.1, 0.0, 2],
+]
+
+
+def _custom_graph(rows, **train):
+    return GraphSpec.model_validate({
+        "nodes": CUSTOM_MLP_NODES,
+        "edges": CUSTOM_MLP_EDGES,
+        "train": {"dataset": "custom", "custom_rows": rows, **train},
+    })
+
+
+def test_custom_dataset_in_catalog():
+    assert "custom" in {d.id for d in mlc.list_datasets()}
+    print("[custom] dataset in catalogue")
+
+
+def test_custom_dataset_trains_on_your_rows():
+    spec = _custom_graph(CUSTOM_ROWS, epochs=60, lr=0.05, batch_size=64, seed=0)
+    model, build = mlc.build_model(spec)
+    in_shape = tuple(build.layers[0].out_shape)
+    res = mlc.train_model(model, in_shape, spec.train)
+    assert res.steps == 60, res.steps  # 12 rows, one batch per epoch -> uses EXACTLY our data
+    assert res.final_loss < res.loss_curve[0] and res.final_accuracy > 0.8
+    print(f"[custom] trained on 12 pasted rows: acc={res.final_accuracy:.3f} loss {res.loss_curve[0]:.3f}->{res.final_loss:.3f}")
+
+
+def test_custom_dataset_validation():
+    dev = torch.device("cpu")
+    # wrong row length (4 features expected + 1 label = 5)
+    try:
+        mlc.make_dataset("custom", (4,), 3, _custom_graph([[1.0, 2.0, 3.0, 0]]).train, dev)
+        raise AssertionError("expected a length error")
+    except ValueError as exc:
+        assert "expected 4 feature" in str(exc), exc
+    # label out of range for a 3-class network
+    try:
+        mlc.make_dataset("custom", (4,), 3, _custom_graph([[0.0, 0.0, 0.0, 0.0, 5]]).train, dev)
+        raise AssertionError("expected an out-of-range error")
+    except ValueError as exc:
+        assert "out of range" in str(exc), exc
+    # no rows at all
+    try:
+        mlc.make_dataset("custom", (4,), 3, _custom_graph([]).train, dev)
+        raise AssertionError("expected a needs-rows error")
+    except ValueError as exc:
+        assert "needs rows" in str(exc), exc
+    # non-finite value
+    try:
+        bad = TrainSpec(dataset="custom", custom_rows=[[0.0, 0.0, 0.0, float("nan"), 0]])
+        mlc.make_dataset("custom", (4,), 3, bad, dev)
+        raise AssertionError("expected a non-finite error")
+    except ValueError as exc:
+        assert "non-finite" in str(exc), exc
+    print("[custom] bad rows rejected with clear messages")
+
+
+def test_custom_data_preview_echoes_your_rows():
+    spec = _custom_graph(CUSTOM_ROWS)
+    prev = mlc.data_preview(spec, rows=4)
+    assert prev.dataset == "custom" and prev.input_shape == [4] and prev.num_classes == 3
+    assert len(prev.rows) == 4 and prev.rows[0].total == 4
+    for a, b in zip(prev.rows[0].values, CUSTOM_ROWS[0][:4]):
+        assert abs(a - b) < 1e-6
+    assert prev.rows[0].label == CUSTOM_ROWS[0][4]
+    print("[custom] preview echoes the pasted rows")
+
+
+def test_export_custom_embeds_your_data():
+    spec = _custom_graph(CUSTOM_ROWS, epochs=5, lr=0.05)
+    code = mlc.generate_pytorch(spec, include_training=True)
+    assert "CUSTOM_ROWS = " in code and "def make_data" in code and "mlconstructor" not in code
+    model = _exec_exported(code)["main"]()  # trains on the embedded rows
+    _m, build = mlc.build_model(spec)
+    assert sum(p.numel() for p in model.parameters()) == build.total_params
+    print("[export:custom] embeds your rows and trains end to end")
+
+
+def test_export_saves_state_dict_and_onnx():
+    import os
+    import shutil
+    import tempfile
+
+    code = mlc.generate_pytorch(get_architecture("mlp"), include_training=True)
+    assert "def export_model" in code and "torch.save" in code and "torch.onnx.export" in code
+    ns = _exec_exported(code)
+    d = tempfile.mkdtemp()
+    cwd = os.getcwd()
+    try:
+        os.chdir(d)
+        ns["export_model"](ns["main"]())
+        assert os.path.exists("model.pt"), "state_dict should be saved"
+        onnx_ok = os.path.exists("model.onnx")
+    finally:
+        os.chdir(cwd)
+        shutil.rmtree(d, ignore_errors=True)
+    print(f"[export] state_dict saved; onnx={'yes' if onnx_ok else 'skipped (best-effort)'}")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -847,7 +963,13 @@ if __name__ == "__main__":
     test_data_preview_is_the_training_data()
     test_export_is_standalone_and_equivalent()
     test_export_file_trains_end_to_end()
+    test_custom_dataset_in_catalog()
+    test_custom_dataset_trains_on_your_rows()
+    test_custom_dataset_validation()
+    test_custom_data_preview_echoes_your_rows()
+    test_export_custom_embeds_your_data()
+    test_export_saves_state_dict_and_onnx()
     print(
         "\nALL CHECKS PASSED "
-        "(v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 + Stage 7 + Stage 8)"
+        "(v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 + Stage 7 + Stage 8 + Stage 9)"
     )

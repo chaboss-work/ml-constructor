@@ -87,6 +87,11 @@ export class EditorPage {
   overlayBusy = signal(false);
   overlayError = signal<string | null>(null);
 
+  // ---- custom data: bring your own rows (Stage 9) ----
+  customText = signal<string>('');
+  customRows = signal<number[][]>([]);
+  customError = signal<string | null>(null);
+
   // ---- graph ----
   nodes = signal<EditorNode[]>([]);
   edges = signal<EditorEdge[]>([]);
@@ -448,16 +453,18 @@ export class EditorPage {
 
   // ------------------------------------------------------------------- run
   private toSpec(): GraphSpec {
+    const train: GraphSpec['train'] = {
+      dataset: this.dataset(),
+      epochs: this.epochs(),
+      lr: this.lr(),
+      batch_size: this.batchSize(),
+      samples: this.samples(),
+    };
+    if (this.dataset() === 'custom') train.custom_rows = this.customRows();
     return {
       nodes: this.nodes().map((n) => ({ id: n.id, type: n.type, params: n.params })),
       edges: this.edges().map((e) => [e.source, e.target]),
-      train: {
-        dataset: this.dataset(),
-        epochs: this.epochs(),
-        lr: this.lr(),
-        batch_size: this.batchSize(),
-        samples: this.samples(),
-      },
+      train,
     };
   }
 
@@ -482,6 +489,10 @@ export class EditorPage {
   }
 
   onTrain(): void {
+    if (this.dataset() === 'custom' && !this.customRows().length) {
+      this.runError.set('Select some data first: open “Data”, paste your rows, and Apply.');
+      return;
+    }
     this.busy.set(true);
     this.runError.set(null);
     this.proposals.set([]);
@@ -513,11 +524,24 @@ export class EditorPage {
     return r.truncated ? `[${base}, … +${r.total - r.values.length} more]` : `[${base}]`;
   }
 
-  /** Show the format and a few real rows of the training set for this graph. */
+  /** Show the format and a few real rows of the training set for this graph.
+   * For the "custom" dataset this opens the paste/upload editor instead; the
+   * preview then runs once rows are applied. */
   openData(): void {
     this.dataModalOpen.set(true);
     this.overlayError.set(null);
+    this.dataPreview.set(null);
+    if (this.dataset() === 'custom') {
+      this.overlayBusy.set(false);
+      if (this.customRows().length) this.previewData();
+      return;
+    }
+    this.previewData();
+  }
+
+  private previewData(): void {
     this.overlayBusy.set(true);
+    this.overlayError.set(null);
     this.dataPreview.set(null);
     this.api.dataPreview(this.toSpec(), 6).subscribe({
       next: (p) => {
@@ -529,6 +553,48 @@ export class EditorPage {
         this.overlayBusy.set(false);
       },
     });
+  }
+
+  /** Parse the pasted/uploaded text into numeric rows (features…, then a label)
+   * and preview them (the backend validates against the graph). */
+  applyCustom(): void {
+    const lines = this.customText()
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+    if (!lines.length) {
+      this.customError.set('Paste some rows first — one example per line.');
+      return;
+    }
+    const rows: number[][] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const nums = lines[i].split(/[,\s]+/).filter((s) => s.length).map(Number);
+      if (nums.some((n) => Number.isNaN(n))) {
+        this.customError.set(`Line ${i + 1}: not all values are numbers.`);
+        return;
+      }
+      if (nums.length < 2) {
+        this.customError.set(`Line ${i + 1}: need at least one feature and a label.`);
+        return;
+      }
+      rows.push(nums);
+    }
+    this.customError.set(null);
+    this.customRows.set(rows);
+    this.previewData(); // backend validates the rows against the graph and echoes them
+  }
+
+  onCustomFile(ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      this.customText.set(String(reader.result ?? ''));
+      this.applyCustom();
+    };
+    reader.readAsText(file);
+    input.value = '';
   }
 
   closeData(): void {

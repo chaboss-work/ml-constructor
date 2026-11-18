@@ -172,6 +172,16 @@ def make_data(n, in_shape, num_classes, seed=0):
 ''',
 }
 
+# Custom data is embedded as a CUSTOM_ROWS literal above this snippet.
+_CUSTOM_DATA_SRC = '''
+def make_data(n, in_shape, num_classes, seed=0):
+    feats = [row[:-1] for row in CUSTOM_ROWS]
+    labels = [int(row[-1]) for row in CUSTOM_ROWS]
+    X = torch.tensor(feats, dtype=torch.float).reshape(len(CUSTOM_ROWS), *in_shape)
+    y = torch.tensor(labels, dtype=torch.long)
+    return X, y
+'''
+
 _TRAIN_BODY = '''
 def _num_classes(model):
     with torch.no_grad():
@@ -186,11 +196,12 @@ def main():
     opt = OPTIMIZER(model.parameters(), lr=LR)
     loss_fn = nn.CrossEntropyLoss()
     n = X.shape[0]
+    bs = min(BATCH_SIZE, n)
     model.train()
     for epoch in range(EPOCHS):
         perm = torch.randperm(n)
-        for i in range(0, n, BATCH_SIZE):
-            idx = perm[i : i + BATCH_SIZE]
+        for i in range(0, n, bs):
+            idx = perm[i : i + bs]
             opt.zero_grad()
             loss = loss_fn(model(X[idx]), y[idx])
             loss.backward()
@@ -200,10 +211,31 @@ def main():
             acc = (model(X).argmax(1) == y).float().mean().item()
         model.train()
         print(f"epoch {epoch + 1}/{EPOCHS}  loss {loss.item():.3f}  acc {acc:.3f}")
+    return model
+
+
+def export_model(model, onnx=True):
+    """Save the trained weights, and (best effort) an ONNX graph -- Stage 9."""
+    model.eval()
+    torch.save(model.state_dict(), "model.pt")
+    print("saved weights -> model.pt")
+    if onnx:
+        try:
+            dummy = torch.zeros(1, *IN_SHAPE)
+            names = dict(input_names=["input"], output_names=["logits"],
+                        dynamic_axes={"input": {0: "batch"}, "logits": {0: "batch"}})
+            try:
+                # Legacy exporter: no onnxscript needed (the dynamo path requires it).
+                torch.onnx.export(model, dummy, "model.onnx", dynamo=False, **names)
+            except TypeError:
+                torch.onnx.export(model, dummy, "model.onnx", **names)  # older torch
+            print("exported -> model.onnx")
+        except Exception as exc:
+            print(f"ONNX export skipped: {exc}")
 
 
 if __name__ == "__main__":
-    main()
+    export_model(main())
 '''
 
 
@@ -283,12 +315,21 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
 
     if include_training:
         ds = get_dataset(spec.train.dataset)
-        data_src = _DATA_SRC.get(ds.id, _DATA_SRC["blobs"])
         opt = "torch.optim.Adam" if spec.train.optimizer == "adam" else "torch.optim.SGD"
+        rows = spec.train.custom_rows or []
+        if ds.id == "custom" and rows:
+            comment = "# ---- training on your custom data ----"
+            data_block = "CUSTOM_ROWS = " + repr(rows) + "\n\n\n" + _CUSTOM_DATA_SRC.strip("\n")
+        elif ds.id == "custom":
+            comment = "# ---- no custom rows provided; using synthetic 'blobs' as a placeholder ----"
+            data_block = _DATA_SRC["blobs"].strip("\n")
+        else:
+            comment = f"# ---- training on the same synthetic task the app used ({ds.id}) ----"
+            data_block = _DATA_SRC.get(ds.id, _DATA_SRC["blobs"]).strip("\n")
         consts = [
             "",
             "",
-            "# ---- training on the same synthetic task the app used ----",
+            comment,
             f"IN_SHAPE = {in_shape!r}",
             f"SEED = {int(spec.train.seed)}",
             f"SAMPLES = {int(spec.train.samples)}",
@@ -298,7 +339,7 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
             f"OPTIMIZER = {opt}",
         ]
         out.extend(consts)
-        out.append(data_src.strip("\n"))
+        out.append(data_block)
         out.append(_TRAIN_BODY.strip("\n"))
 
     return "\n".join(out) + "\n"

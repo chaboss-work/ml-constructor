@@ -3,7 +3,8 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.7
 
-# PyTorch: the CPU build is enough for the v1 thin-slice training.
+# PyTorch: the CPU build is enough — training defaults to the CPU. Install a CUDA
+# build to enable the optional GPU training (editor: Device -> GPU; API: train.device="cuda").
 #   CPU  : pip install torch --index-url https://download.pytorch.org/whl/cpu
 #   CUDA : pip install torch --index-url https://download.pytorch.org/whl/cu126
 # (pinned loosely on purpose; see README for the exact install command)

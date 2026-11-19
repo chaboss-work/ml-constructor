@@ -51,7 +51,14 @@ _USER_ERRORS = (ShapeError, KeyError, ValueError)
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "version": mlc.__version__, "layers": len(mlc.LAYER_REGISTRY)}
+    import torch  # is_available() queries the driver; it does not open a CUDA context
+
+    return {
+        "status": "ok",
+        "version": mlc.__version__,
+        "layers": len(mlc.LAYER_REGISTRY),
+        "cuda_available": bool(torch.cuda.is_available()),
+    }
 
 
 @app.get("/layers", response_model=list[LayerInfo])

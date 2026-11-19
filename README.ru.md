@@ -83,6 +83,7 @@ python -m venv .venv
 pip install fastapi "uvicorn[standard]" pydantic numpy
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 #   сборка под CUDA:     --index-url https://download.pytorch.org/whl/cu126
+#   (обучение на GPU — по желанию: Device -> GPU в редакторе; по умолчанию CPU)
 
 python tests/test_end_to_end.py           # доказать конвейер (build + train)
 python -m uvicorn app:app --port 8050     # запустить API

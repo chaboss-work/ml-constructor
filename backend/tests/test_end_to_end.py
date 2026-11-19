@@ -1017,6 +1017,43 @@ def test_checkpoint_save_and_resume():
           f"{resumed.loss_curve[0]:.3f} << fresh {fresh.loss_curve[0]:.3f}")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 12 — GPU as an explicit opt-in. The default never touches the (shared) GPU;
+# "cuda" fails clearly when no CUDA device exists; "auto" falls back to the CPU. The
+# real on-card run is verified separately, inside a coordinated GPU window.
+# --------------------------------------------------------------------------- #
+def test_device_default_cpu_and_cuda_optin():
+    import torch as _torch
+
+    res = _train(CKPT_MLP)
+    assert res.device == "cpu", res.device  # default: never touches the GPU
+    real = _torch.cuda.is_available
+    try:
+        _torch.cuda.is_available = lambda: False  # simulate a backend without CUDA
+        try:
+            _train(CKPT_MLP, device="cuda")
+            raise AssertionError("expected a clear no-CUDA error")
+        except ValueError as exc:
+            assert "CUDA" in str(exc), exc
+        assert _train(CKPT_MLP, device="auto").device == "cpu"  # auto falls back
+    finally:
+        _torch.cuda.is_available = real
+    print("[device] default cpu; device=cuda errors clearly without CUDA; auto -> cpu")
+
+
+def test_probe_runs_on_the_model_device():
+    # Regression (found by the promotion session recording Stage 11 on a CUDA venv):
+    # the class-count probe must run on the MODEL's device. Stage 11 built it on the
+    # CPU, so a model moved to CUDA crashed with "Input type (torch.FloatTensor) and
+    # weight type (torch.cuda.FloatTensor)". The meta device exercises it, GPU-free.
+    from mlconstructor.trainer import _infer_num_classes
+
+    model, build = mlc.build_model(get_architecture("cnn"))
+    model = model.to("meta")
+    assert _infer_num_classes(model, tuple(build.layers[0].out_shape)) == 10
+    print("[probe] class-count probe follows the model's device (meta) — Stage 11 CUDA crash fixed")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -1066,7 +1103,9 @@ if __name__ == "__main__":
     test_real_dataset_shape_validation()
     test_train_iter_streams_events()
     test_checkpoint_save_and_resume()
+    test_device_default_cpu_and_cuda_optin()
+    test_probe_runs_on_the_model_device()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
-        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11)"
+        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12)"
     )

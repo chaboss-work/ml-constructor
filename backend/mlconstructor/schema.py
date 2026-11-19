@@ -49,6 +49,9 @@ class TrainSpec(BaseModel):
     #: and/or resume from this architecture's last checkpoint before training.
     checkpoint: bool = False
     resume: bool = False
+    #: Stage 12 — where to train: "cpu" (default — never touches the shared GPU),
+    #: "cuda" (the GPU; a clear error if none is available) or "auto" (GPU if any).
+    device: Literal["cpu", "cuda", "auto"] = "cpu"
 
 
 class GraphSpec(BaseModel):

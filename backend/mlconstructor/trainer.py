@@ -34,8 +34,9 @@ _CKPT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 def _infer_num_classes(model: nn.Module, in_shape: Shape) -> int:
     was_training = model.training
     model.eval()
+    dev = next((p.device for p in model.parameters()), torch.device("cpu"))
     with torch.no_grad():
-        probe = model(torch.zeros(2, *in_shape))  # batch=2 keeps BatchNorm happy
+        probe = model(torch.zeros(2, *in_shape, device=dev))  # batch=2 keeps BatchNorm happy
     if was_training:
         model.train()
     if probe.dim() != 2:
@@ -67,10 +68,20 @@ def _checkpoint_path(model: nn.Module) -> str:
     return os.path.join(_CKPT_DIR, _checkpoint_key(model) + ".pt")
 
 
-def _device() -> "torch.device":
-    """GPU when a CUDA build of torch is present, else CPU. The bundled backend is
-    CPU-only, so this stays cpu until a CUDA torch is installed (Stage 11)."""
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def _device(want: str = "cpu") -> "torch.device":
+    """Where to train (Stage 12). ``"cpu"`` (the default) never touches the GPU — the
+    card is shared on this host, so GPU use is an explicit opt-in. ``"cuda"`` asks
+    for the GPU and fails clearly if there is none; ``"auto"`` takes the GPU when
+    available, else the CPU."""
+    if want == "cuda":
+        if not torch.cuda.is_available():
+            raise ValueError(
+                "GPU (CUDA) training was requested, but no CUDA device is available on this backend"
+            )
+        return torch.device("cuda")
+    if want == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device("cpu")
 
 
 def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[dict]:
@@ -83,7 +94,7 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
     one trajectory — with ``checkpoint``/``resume`` off it is the original loop,
     byte for byte)."""
     torch.manual_seed(spec.seed)
-    device = _device()
+    device = _device(spec.device)
     model = model.to(device)
 
     in_shape = tuple(int(d) for d in in_shape)
@@ -170,6 +181,10 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
         acc_curve.append(accuracy)
     if spec.checkpoint and ckpt_key is None:  # stopped before any epoch finished — save final
         ckpt_key = _save()
+    if device.type == "cuda":  # hand the shared card back: weights, data and cached blocks
+        model.to("cpu")
+        del X, y, logits
+        torch.cuda.empty_cache()
 
     result = TrainResult(
         ok=True,

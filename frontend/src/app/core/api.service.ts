@@ -27,8 +27,10 @@ export class ApiService {
   private http = inject(HttpClient);
   readonly base = API_BASE;
 
-  health(): Observable<{ status: string; version: string; layers: number }> {
-    return this.http.get<{ status: string; version: string; layers: number }>(`${API_BASE}/health`);
+  health(): Observable<{ status: string; version: string; layers: number; cuda_available?: boolean }> {
+    return this.http.get<{ status: string; version: string; layers: number; cuda_available?: boolean }>(
+      `${API_BASE}/health`,
+    );
   }
 
   layers(): Observable<LayerInfo[]> {

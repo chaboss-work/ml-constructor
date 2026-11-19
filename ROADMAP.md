@@ -151,9 +151,17 @@ verified end to end (resuming starts far below a fresh run's loss). The trainer 
 **device-aware** (uses CUDA automatically when a CUDA PyTorch build is present); the
 bundled backend is CPU-only, so actually running on the GPU is Stage 12.
 
-### Stage 12 — GPU training
-Install a CUDA PyTorch build on the host and train on the GPU (coordinated card
-window); the trainer already selects the device automatically.
+### Stage 12 — GPU training (explicit opt-in) · **DONE (2026-11-19)**
+Training can run on the GPU: the backend runs on a CUDA PyTorch build, and the
+trainer takes a `device` — `cpu` (the default, so a shared server never grabs the card
+on its own), `cuda`, or `auto`; asking for `cuda` without a CUDA device fails with a
+clear message, and after a GPU run the weights and data are handed back to the card.
+`GET /health` reports `cuda_available` (without opening a CUDA context), and the editor
+shows a **Device** picker only when a GPU is there. Verified on an RTX 3060 Laptop GPU:
+a small MNIST CNN trains **~9.7× faster** than on the CPU (0.63 s vs 6.15 s for 3
+epochs), and live streaming works on CUDA. This stage also fixes a latent Stage 11 bug
+— the class-count probe ran on the CPU while the model sat on the GPU — covered by a
+GPU-free regression test.
 
 ### Ongoing
 Professional OOP and engineering practices, tests, documentation, performance, and
@@ -231,6 +239,13 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   запуске — проверено сквозь (возобновление стартует намного ниже loss свежего запуска). Тренер
   **device-aware** (берёт CUDA автоматически, если стоит CUDA-сборка PyTorch); встроенный бэкенд
   CPU-only, поэтому реальный прогон на GPU — Этап 12.
-* **Этап 12 — Обучение на GPU:** поставить CUDA-сборку PyTorch на хост и обучать на карте
-  (согласованное окно карты); тренер уже сам выбирает устройство.
+* **Этап 12 — Обучение на GPU (явный opt-in) · ГОТОВО (19.11):** обучение может идти на
+  видеокарте: бэкенд на CUDA-сборке PyTorch, а тренер принимает `device` — `cpu` (по
+  умолчанию, чтобы общий сервер сам не занимал карту), `cuda` или `auto`; `cuda` без
+  CUDA-устройства — понятная ошибка, после GPU-прогона веса и данные отдаются карте обратно.
+  `GET /health` сообщает `cuda_available` (не открывая CUDA-контекст), редактор показывает
+  выбор **Device** только при наличии GPU. Проверено на RTX 3060 Laptop GPU: небольшая CNN на
+  MNIST учится **в ~9.7 раза быстрее**, чем на CPU (0.63 с против 6.15 с за 3 эпохи), живой
+  стрим на CUDA работает. Заодно исправлен скрытый баг Этапа 11 — проба числа классов шла на
+  CPU, когда модель уже на GPU, — с регрессионным тестом без GPU.
 * **Постоянно:** высокий уровень ООП, тесты, документация, производительность.

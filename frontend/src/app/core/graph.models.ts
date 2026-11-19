@@ -49,6 +49,8 @@ export interface TrainCfg {
   /** Stage 11 — save best weights during training / resume from the last checkpoint. */
   checkpoint?: boolean;
   resume?: boolean;
+  /** Stage 12 — where to train; the backend defaults to "cpu" (GPU is opt-in). */
+  device?: 'cpu' | 'cuda' | 'auto';
 }
 
 /** Stage 11 — one streamed progress event from POST /train/stream. */

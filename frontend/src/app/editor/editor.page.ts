@@ -99,6 +99,10 @@ export class EditorPage {
   saveCheckpoint = signal(false);
   resumeCheckpoint = signal(false);
 
+  // ---- GPU as an explicit opt-in (Stage 12) ----
+  cudaAvailable = signal(false); // from /health — the Device picker only shows when true
+  device = signal<'cpu' | 'cuda' | 'auto'>('cpu');
+
   // ---- graph ----
   nodes = signal<EditorNode[]>([]);
   edges = signal<EditorEdge[]>([]);
@@ -148,6 +152,10 @@ export class EditorPage {
         }
       },
       error: () => this.stage8.set(false), // older backend: hide the Stage 8 UI, app still works
+    });
+    this.api.health().subscribe({
+      next: (h) => this.cudaAvailable.set(!!h.cuda_available),
+      error: () => this.cudaAvailable.set(false),
     });
     this.seedExample();
   }
@@ -464,6 +472,7 @@ export class EditorPage {
     if (this.dataset() === 'custom') train.custom_rows = this.customRows();
     if (this.saveCheckpoint()) train.checkpoint = true;
     if (this.resumeCheckpoint()) train.resume = true;
+    if (this.device() !== 'cpu') train.device = this.device();
     return {
       nodes: this.nodes().map((n) => ({ id: n.id, type: n.type, params: n.params })),
       edges: this.edges().map((e) => [e.source, e.target]),

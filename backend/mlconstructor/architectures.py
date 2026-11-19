@@ -140,7 +140,8 @@ def _resnet() -> Spec:
             # head
             ["b2_act2", "gap"], ["gap", "flat"], ["flat", "fc"], ["fc", "out"],
         ],
-        "train": {"epochs": 5, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+        # 8 epochs: converges on current torch builds too (5 left it at ~0.70 on 2.6)
+        "train": {"epochs": 8, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
     }
 
 

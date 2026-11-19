@@ -215,6 +215,16 @@
             }
           </ion-item>
         }
+        @if (stage8() && cudaAvailable()) {
+          <ion-item>
+            <ion-label position="stacked">Device</ion-label>
+            <select class="ds-select" (change)="device.set($any($event).target.value)">
+              <option value="cpu" [selected]="device() === 'cpu'">CPU</option>
+              <option value="cuda" [selected]="device() === 'cuda'">GPU (CUDA)</option>
+            </select>
+            <ion-note class="help">CPU by default; pick GPU to train on CUDA.</ion-note>
+          </ion-item>
+        }
         <ion-item>
           <ion-label position="stacked">Epochs</ion-label>
           <ion-input type="number" [value]="epochs()" (ionInput)="epochs.set(+$any($event).detail.value)"></ion-input>

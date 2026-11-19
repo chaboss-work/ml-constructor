@@ -45,6 +45,10 @@ class TrainSpec(BaseModel):
     #: Stage 9 — rows for the "custom" dataset: each row is ``[f1, …, fk, label]``
     #: (the class label is the last value). Used only when ``dataset == "custom"``.
     custom_rows: list[list[float]] | None = None
+    #: Stage 11 — save the best-accuracy weights to a checkpoint during training,
+    #: and/or resume from this architecture's last checkpoint before training.
+    checkpoint: bool = False
+    resume: bool = False
 
 
 class GraphSpec(BaseModel):
@@ -115,6 +119,11 @@ class TrainResult(BaseModel):
     steps: int
     device: str
     total_params: int
+    #: Stage 11 — the saved checkpoint's key (None if none saved), the best full-set
+    #: accuracy seen during training, and whether training resumed from a checkpoint.
+    checkpoint: str | None = None
+    best_accuracy: float | None = None
+    resumed: bool = False
 
 
 # --------------------------------------------------------------------------- #

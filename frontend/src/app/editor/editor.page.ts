@@ -30,6 +30,7 @@ import {
   GraphSpec,
   LayerInfo,
   ParamDef,
+  TrainEvent,
   TrainResult,
 } from '../core/graph.models';
 
@@ -91,6 +92,12 @@ export class EditorPage {
   customText = signal<string>('');
   customRows = signal<number[][]>([]);
   customError = signal<string | null>(null);
+
+  // ---- live training + checkpoints (Stage 11) ----
+  liveLoss = signal<number[]>([]);
+  liveAcc = signal<number[]>([]);
+  saveCheckpoint = signal(false);
+  resumeCheckpoint = signal(false);
 
   // ---- graph ----
   nodes = signal<EditorNode[]>([]);
@@ -209,43 +216,37 @@ export class EditorPage {
     return `translate(${p.x}px, ${p.y}px) scale(${this.zoom()})`;
   });
 
-  lossPoints = computed(() => {
-    const r = this.trainResult();
-    if (!r || r.loss_curve.length === 0) return '';
-    const c = r.loss_curve;
+  // Live training curves (Stage 11): prefer the streamed arrays, else the final result.
+  curveLoss = computed(() => {
+    const live = this.liveLoss();
+    return live.length ? live : (this.trainResult()?.loss_curve ?? []);
+  });
+  curveAcc = computed(() => {
+    const live = this.liveAcc();
+    return live.length ? live : (this.trainResult()?.acc_curve ?? []);
+  });
+
+  lossPoints = computed(() => this.pointsOf(this.curveLoss(), false));
+  // Accuracy on a fixed 0..1 axis so the height reads as accuracy.
+  accPoints = computed(() => this.pointsOf(this.curveAcc(), true));
+
+  private pointsOf(c: number[], fixed01: boolean): string {
+    if (c.length === 0) return '';
     const W = 220;
     const H = 60;
     const pad = 4;
-    const max = Math.max(...c);
-    const min = Math.min(...c);
+    const max = fixed01 ? 1 : Math.max(...c);
+    const min = fixed01 ? 0 : Math.min(...c);
     const span = max - min || 1;
     const n = c.length - 1 || 1;
     return c
       .map((v, i) => {
         const x = pad + (i / n) * (W - 2 * pad);
-        const y = pad + (1 - (v - min) / span) * (H - 2 * pad);
+        const y = pad + (1 - (Math.min(max, Math.max(min, v)) - min) / span) * (H - 2 * pad);
         return `${x.toFixed(1)},${y.toFixed(1)}`;
       })
       .join(' ');
-  });
-
-  // Accuracy per epoch (Stage 8), on a fixed 0..1 axis so the height reads as accuracy.
-  accPoints = computed(() => {
-    const r = this.trainResult();
-    const c = r?.acc_curve ?? [];
-    if (c.length === 0) return '';
-    const W = 220;
-    const H = 60;
-    const pad = 4;
-    const n = c.length - 1 || 1;
-    return c
-      .map((v, i) => {
-        const x = pad + (i / n) * (W - 2 * pad);
-        const y = pad + (1 - Math.min(1, Math.max(0, v))) * (H - 2 * pad);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(' ');
-  });
+  }
 
   // ---------------------------------------------------------------- palette
   addNode(layer: LayerInfo): void {
@@ -461,6 +462,8 @@ export class EditorPage {
       samples: this.samples(),
     };
     if (this.dataset() === 'custom') train.custom_rows = this.customRows();
+    if (this.saveCheckpoint()) train.checkpoint = true;
+    if (this.resumeCheckpoint()) train.resume = true;
     return {
       nodes: this.nodes().map((n) => ({ id: n.id, type: n.type, params: n.params })),
       edges: this.edges().map((e) => [e.source, e.target]),
@@ -496,16 +499,48 @@ export class EditorPage {
     this.busy.set(true);
     this.runError.set(null);
     this.proposals.set([]);
-    this.api.train(this.toSpec()).subscribe({
-      next: (r) => {
-        this.trainResult.set(r);
-        this.busy.set(false);
-      },
-      error: (e) => {
-        this.runError.set(this.errMsg(e));
-        this.busy.set(false);
-      },
-    });
+    this.trainResult.set(null);
+    this.liveLoss.set([]);
+    this.liveAcc.set([]);
+    const spec = this.toSpec();
+    this.api
+      .trainStream(spec, (e) => {
+        if (e.type === 'start') {
+          this.liveLoss.set([]);
+          this.liveAcc.set([]);
+        } else if (e.type === 'step' && e.loss != null) {
+          this.liveLoss.update((a) => [...a, e.loss as number]);
+        } else if (e.type === 'epoch' && e.acc != null) {
+          this.liveAcc.update((a) => [...a, e.acc as number]);
+        } else if (e.type === 'done' && e.result) {
+          this.trainResult.set(e.result);
+          this.busy.set(false);
+        } else if (e.type === 'error') {
+          this.runError.set(e.detail ?? 'Training failed');
+          this.busy.set(false);
+        }
+      })
+      .then(() => {
+        if (this.busy() && !this.trainResult()) this.busy.set(false); // stream ended without a result
+      })
+      .catch((err) => {
+        if (err?.fallback) {
+          // older backend without /train/stream — fall back to the plain endpoint
+          this.api.train(spec).subscribe({
+            next: (r) => {
+              this.trainResult.set(r);
+              this.busy.set(false);
+            },
+            error: (e) => {
+              this.runError.set(this.errMsg(e));
+              this.busy.set(false);
+            },
+          });
+        } else {
+          this.runError.set(err?.detail || this.errMsg(err));
+          this.busy.set(false);
+        }
+      });
   }
 
   // ------------------------------------------------ data & export (Stage 8)

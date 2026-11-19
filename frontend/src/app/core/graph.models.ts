@@ -46,6 +46,25 @@ export interface TrainCfg {
   seed: number;
   /** Stage 9 — rows for the "custom" dataset: each is [f1, …, fk, label]. */
   custom_rows?: number[][];
+  /** Stage 11 — save best weights during training / resume from the last checkpoint. */
+  checkpoint?: boolean;
+  resume?: boolean;
+}
+
+/** Stage 11 — one streamed progress event from POST /train/stream. */
+export interface TrainEvent {
+  type: 'start' | 'step' | 'epoch' | 'done' | 'error';
+  step?: number;
+  loss?: number;
+  epoch?: number;
+  acc?: number;
+  device?: string;
+  resumed?: boolean;
+  total_params?: number;
+  samples?: number;
+  num_classes?: number;
+  result?: TrainResult;
+  detail?: string;
 }
 
 /** The payload sent to /build and /train. */
@@ -80,6 +99,10 @@ export interface TrainResult {
   steps: number;
   device: string;
   total_params: number;
+  /** Stage 11 — saved checkpoint key (or null), best full-set accuracy, resumed flag. */
+  checkpoint?: string | null;
+  best_accuracy?: number | null;
+  resumed?: boolean;
 }
 
 /** Smart adapters (Stage 5): a node to insert so a connection's shapes line up. */

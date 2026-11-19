@@ -957,6 +957,66 @@ def test_real_dataset_shape_validation():
     print("[real] fixed-shape / class validation rejects mismatches (no download)")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 11 — live training: streamed progress events + checkpoints (save/resume).
+# --------------------------------------------------------------------------- #
+def test_train_iter_streams_events():
+    spec = GraphSpec.model_validate(BRANCH_ADD)
+    model, build = mlc.build_model(spec)
+    in_shape = tuple(build.layers[0].out_shape)
+    events = list(mlc.train_iter(model, in_shape, spec.train))
+    assert events[0]["type"] == "start" and events[0]["total_params"] > 0, events[0]
+    steps = [e for e in events if e["type"] == "step"]
+    epochs = [e for e in events if e["type"] == "epoch"]
+    done = [e for e in events if e["type"] == "done"]
+    assert len(done) == 1 and len(steps) == done[0]["result"].steps
+    assert len(epochs) == spec.train.epochs  # 3 full epochs, no step cap
+    assert steps[-1]["loss"] < steps[0]["loss"]  # the loss drops as events stream
+    res = done[0]["result"]
+    assert res.final_loss < res.loss_curve[0] and res.final_accuracy > 0.8
+    print(f"[stream] {len(steps)} step + {len(epochs)} epoch events; acc={res.final_accuracy:.3f}")
+
+
+CKPT_MLP = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [12]}},
+        {"id": "fc1", "type": "Linear", "params": {"out_features": 24}},
+        {"id": "a1", "type": "ReLU", "params": {}},
+        {"id": "fc2", "type": "Linear", "params": {"out_features": 6}},
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [["in", "fc1"], ["fc1", "a1"], ["a1", "fc2"], ["fc2", "out"]],
+    "train": {"dataset": "blobs", "epochs": 4, "lr": 0.05, "batch_size": 64, "samples": 256, "seed": 0},
+}
+
+
+def _train(graph, **train_over):
+    spec = GraphSpec.model_validate({**graph, "train": {**graph["train"], **train_over}})
+    model, build = mlc.build_model(spec)
+    return mlc.train_model(model, tuple(build.layers[0].out_shape), spec.train)
+
+
+def test_checkpoint_save_and_resume():
+    import os as _os
+    from mlconstructor.trainer import _CKPT_DIR
+
+    fresh = _train(CKPT_MLP)                      # no checkpoint
+    saved = _train(CKPT_MLP, checkpoint=True)     # save the best-accuracy weights
+    assert saved.checkpoint is not None and saved.best_accuracy is not None
+    path = _os.path.join(_CKPT_DIR, saved.checkpoint + ".pt")
+    assert _os.path.exists(path), path
+    try:
+        resumed = _train(CKPT_MLP, resume=True)   # load those weights, keep training
+        assert resumed.resumed is True
+        # resuming from trained weights starts far below a fresh run's first loss
+        assert resumed.loss_curve[0] < fresh.loss_curve[0], (resumed.loss_curve[0], fresh.loss_curve[0])
+    finally:
+        if _os.path.exists(path):
+            _os.remove(path)
+    print(f"[checkpoint] saved {saved.checkpoint}; resumed first-loss "
+          f"{resumed.loss_curve[0]:.3f} << fresh {fresh.loss_curve[0]:.3f}")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -1004,7 +1064,9 @@ if __name__ == "__main__":
     test_export_saves_state_dict_and_onnx()
     test_real_datasets_in_catalog()
     test_real_dataset_shape_validation()
+    test_train_iter_streams_events()
+    test_checkpoint_save_and_resume()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
-        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline)"
+        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11)"
     )

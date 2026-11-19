@@ -13,10 +13,12 @@ Endpoints:
 
 from __future__ import annotations
 
+import json
 import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import mlconstructor as mlc
@@ -76,6 +78,31 @@ def train(spec: GraphSpec) -> TrainResult:
         return mlc.train_model(model, in_shape, spec.train)
     except _USER_ERRORS as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.post("/train/stream")
+def train_stream(spec: GraphSpec) -> StreamingResponse:
+    """Live training (Stage 11): stream newline-delimited JSON progress events —
+    ``start`` once, a ``step`` per optimizer step, an ``epoch`` per finished epoch,
+    then ``done`` with the full TrainResult. A bad graph still fails fast with 422."""
+    try:
+        model, result = mlc.build_model(spec)
+        if not result.layers or result.layers[0].out_shape is None:
+            raise ShapeError("graph has no Input node to take a shape from")
+        in_shape = tuple(result.layers[0].out_shape)
+    except _USER_ERRORS as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    def events():
+        try:
+            for event in mlc.train_iter(model, in_shape, spec.train):
+                if event["type"] == "done":
+                    event = {"type": "done", "result": event["result"].model_dump()}
+                yield json.dumps(event) + "\n"
+        except _USER_ERRORS as exc:  # a training-time error -> stream it, don't 500
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+
+    return StreamingResponse(events(), media_type="application/x-ndjson")
 
 
 @app.post("/suggest", response_model=SuggestResult)

@@ -142,9 +142,18 @@ like any dataset and trained on a reproducible subset. Verified end to end — M
 reaches ~0.96 accuracy on a small CPU run; CIFAR-10 downloads, parses and trains
 (loss drops). The dataset picker lists them and hints the Input shape they need.
 
-### Stage 11 — Live training (streaming curves, checkpoints, GPU)
-Live streaming loss & accuracy curves during training, checkpoints (save / resume),
-and **GPU** training (needs a CUDA PyTorch build on the host).
+### Stage 11 — Live training: streaming curves & checkpoints · **DONE (2026-11-19)**
+Training streams its progress live: `POST /train/stream` emits newline-delimited JSON
+(`start` → a per-step `step` → a per-epoch `epoch` → `done`), and the editor plots the
+loss and accuracy curves as they arrive. **Checkpoints** save the best-accuracy weights
+during training (keyed by the architecture) and **resume** from them on the next run —
+verified end to end (resuming starts far below a fresh run's loss). The trainer is
+**device-aware** (uses CUDA automatically when a CUDA PyTorch build is present); the
+bundled backend is CPU-only, so actually running on the GPU is Stage 12.
+
+### Stage 12 — GPU training
+Install a CUDA PyTorch build on the host and train on the GPU (coordinated card
+window); the trainer already selects the device automatically.
 
 ### Ongoing
 Professional OOP and engineering practices, tests, documentation, performance, and
@@ -215,7 +224,13 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   превью как у любого датасета и обучение на воспроизводимом подмножестве. Проверено сквозь:
   MNIST ~0.96 на небольшом CPU-прогоне; CIFAR-10 скачивается, парсится и обучается (loss падает).
   Пикер показывает их и подсказывает нужную форму Input.
-* **Этап 11 — Живое обучение (потоковые кривые, чекпоинты, GPU):** живые кривые loss/accuracy во
-  время обучения, чекпоинты (сохранение/возобновление) и обучение на GPU (нужна CUDA-сборка
-  PyTorch на хосте).
+* **Этап 11 — Живое обучение: потоковые кривые и чекпоинты · ГОТОВО (19.11):** обучение стримит
+  прогресс вживую — `POST /train/stream` шлёт NDJSON (`start` → по-шагово `step` → по-эпохно
+  `epoch` → `done`), редактор рисует кривые loss/accuracy по мере поступления. **Чекпоинты**
+  сохраняют лучшие по точности веса (ключ — по архитектуре) и **возобновляют** из них в следующем
+  запуске — проверено сквозь (возобновление стартует намного ниже loss свежего запуска). Тренер
+  **device-aware** (берёт CUDA автоматически, если стоит CUDA-сборка PyTorch); встроенный бэкенд
+  CPU-only, поэтому реальный прогон на GPU — Этап 12.
+* **Этап 12 — Обучение на GPU:** поставить CUDA-сборку PyTorch на хост и обучать на карте
+  (согласованное окно карты); тренер уже сам выбирает устройство.
 * **Постоянно:** высокий уровень ООП, тесты, документация, производительность.

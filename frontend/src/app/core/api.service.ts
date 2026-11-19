@@ -11,6 +11,7 @@ import {
   GraphSpec,
   LayerInfo,
   SuggestResult,
+  TrainEvent,
   TrainResult,
 } from './graph.models';
 
@@ -72,5 +73,40 @@ export class ApiService {
       `${API_BASE}/export/pytorch?include_training=${includeTraining}`,
       spec,
     );
+  }
+
+  /** Live training (Stage 11): POST the graph and stream NDJSON progress events,
+   * invoking `onEvent` for each. Rejects with `{status, fallback, detail}` — set
+   * `fallback` when the backend has no streaming endpoint (404), so the caller can
+   * fall back to the plain `train()`. */
+  async trainStream(spec: GraphSpec, onEvent: (e: TrainEvent) => void): Promise<void> {
+    const resp = await fetch(`${API_BASE}/train/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(spec),
+    });
+    if (!resp.ok || !resp.body) {
+      let detail = '';
+      try {
+        detail = (await resp.json())?.detail ?? '';
+      } catch {
+        /* no JSON body */
+      }
+      throw { status: resp.status, fallback: resp.status === 404, detail };
+    }
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line) onEvent(JSON.parse(line) as TrainEvent);
+      }
+    }
   }
 }

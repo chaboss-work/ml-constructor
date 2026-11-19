@@ -17,13 +17,14 @@ from .builder import build_model
 from .datasets import list_datasets, make_dataset
 from .export import generate_pytorch
 from .registry import LAYER_REGISTRY, catalog, get_layer_cls
-from .trainer import data_preview, train_model
+from .trainer import data_preview, train_iter, train_model
 
 __version__ = "0.1.0"
 
 __all__ = [
     "build_model",
     "train_model",
+    "train_iter",
     "data_preview",
     "catalog",
     "get_layer_cls",

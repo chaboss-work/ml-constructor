@@ -164,6 +164,9 @@ npx http-server dist/mlconstructor/browser -p 4200
 (см. [LICENSE](LICENSE)). Запрет на коммерческое использование делает проект технически
 *source-available*, а не строго OSI-«open source».
 
+**Нужно коммерческое использование?** Доступна коммерческая лицензия для одной организации:
+https://whop.com/chaboss/ml-constructor-commercial-license
+
 ## Ссылки
 
 Часть небольшой сетки экспериментов. Каналы проекта (YouTube / Telegram) и репозиторий

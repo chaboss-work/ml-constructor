@@ -163,6 +163,9 @@ A non-commercial source-available license — **PolyForm Noncommercial 1.0.0**
 (see [LICENSE](LICENSE)). A non-commercial restriction makes this *source-available*,
 not OSI-"open source".
 
+**Commercial use?** A commercial license for one organization is available:
+https://whop.com/chaboss/ml-constructor-commercial-license
+
 ## Links
 
 Part of a small network of experiments. Project channels (YouTube / Telegram) and

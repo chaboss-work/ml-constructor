@@ -21,7 +21,7 @@ import os
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import mlconstructor as mlc
@@ -29,6 +29,8 @@ from mlconstructor.projects import MAX_PROJECT_BYTES
 from mlconstructor.schema import (
     ArchitectureInfo,
     BuildResult,
+    ConnectionOptions,
+    ConnectionOptionsRequest,
     DataPreview,
     DatasetInfo,
     ExportResult,
@@ -56,6 +58,18 @@ app.add_middleware(
 _USER_ERRORS = (ShapeError, KeyError, ValueError)
 
 
+def _error_info(exc: Exception) -> dict:
+    if isinstance(exc, ShapeError):
+        return exc.to_detail()
+    return {"message": str(exc), "node_id": None, "edge": None, "hint": None}
+
+
+def _unprocessable(exc: Exception) -> JSONResponse:
+    """422 for a mistake in the graph: ``detail`` is the message (as before) and,
+    since Stage 14, ``error`` says where it is (node / connection) and what to do."""
+    return JSONResponse(status_code=422, content={"detail": str(exc), "error": _error_info(exc)})
+
+
 @app.get("/health")
 def health() -> dict:
     import torch  # is_available() queries the driver; it does not open a CUDA context
@@ -66,6 +80,7 @@ def health() -> dict:
         "layers": len(mlc.LAYER_REGISTRY),
         "cuda_available": bool(torch.cuda.is_available()),
         "server_projects": mlc.server_projects_enabled(),
+        "api": mlc.API_LEVEL,
     }
 
 
@@ -80,7 +95,7 @@ def build(spec: GraphSpec) -> BuildResult:
         _model, result = mlc.build_model(spec)
         return result
     except _USER_ERRORS as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        return _unprocessable(exc)
 
 
 @app.post("/train", response_model=TrainResult)
@@ -92,7 +107,7 @@ def train(spec: GraphSpec) -> TrainResult:
         in_shape = tuple(result.layers[0].out_shape)
         return mlc.train_model(model, in_shape, spec.train)
     except _USER_ERRORS as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        return _unprocessable(exc)
 
 
 @app.post("/train/stream")
@@ -106,7 +121,7 @@ def train_stream(spec: GraphSpec) -> StreamingResponse:
             raise ShapeError("graph has no Input node to take a shape from")
         in_shape = tuple(result.layers[0].out_shape)
     except _USER_ERRORS as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        return _unprocessable(exc)
 
     def events():
         try:
@@ -115,7 +130,7 @@ def train_stream(spec: GraphSpec) -> StreamingResponse:
                     event = {"type": "done", "result": event["result"].model_dump()}
                 yield json.dumps(event) + "\n"
         except _USER_ERRORS as exc:  # a training-time error -> stream it, don't 500
-            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+            yield json.dumps({"type": "error", "detail": str(exc), "error": _error_info(exc)}) + "\n"
 
     return StreamingResponse(events(), media_type="application/x-ndjson")
 
@@ -127,7 +142,7 @@ def suggest(spec: GraphSpec) -> SuggestResult:
     try:
         return SuggestResult(ok=True, proposals=mlc.suggest_for_graph(spec))
     except _USER_ERRORS as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        return _unprocessable(exc)
 
 
 @app.get("/architectures", response_model=list[ArchitectureInfo])
@@ -160,7 +175,7 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
     try:
         return mlc.data_preview(spec, rows)
     except _USER_ERRORS as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        return _unprocessable(exc)
 
 
 @app.post("/export/pytorch", response_model=ExportResult)
@@ -171,7 +186,18 @@ def export_pytorch(spec: GraphSpec, include_training: bool = True) -> ExportResu
         code = mlc.generate_pytorch(spec, include_training=include_training)
         return ExportResult(ok=True, filename="model.py", code=code)
     except _USER_ERRORS as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        return _unprocessable(exc)
+
+
+@app.post("/connections/options", response_model=ConnectionOptions)
+def connections_options(req: ConnectionOptionsRequest) -> ConnectionOptions:
+    """The connection inspector (Stage 14): for one edge, the shape arriving, what
+    "auto" picks, and every transform that applies — with parameters, presets and
+    whether the target accepts the result."""
+    try:
+        return mlc.connection_options(req.spec, req.source, req.target)
+    except _USER_ERRORS as exc:
+        return _unprocessable(exc)
 
 
 # --- Projects: open any format version, optional server-side store (Stage 13) --

@@ -270,8 +270,13 @@ _BY_ID: dict[str, DatasetDef] = {d.id: d for d in _DATASETS}
 _ALIASES = {"synthetic": "blobs", "": "blobs"}
 
 
+def canonical_dataset_id(name: str) -> str:
+    """The catalogue id for a dataset name (resolves the legacy aliases)."""
+    return _ALIASES.get(name, name)
+
+
 def get_dataset(name: str) -> DatasetDef:
-    key = _ALIASES.get(name, name)
+    key = canonical_dataset_id(name)
     try:
         return _BY_ID[key]
     except KeyError:

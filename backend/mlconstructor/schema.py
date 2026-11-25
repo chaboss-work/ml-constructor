@@ -219,3 +219,92 @@ class ExportResult(BaseModel):
     language: str = "python"
     filename: str
     code: str
+
+
+# --------------------------------------------------------------------------- #
+# Projects: save / open / autosave (Stage 13)
+# --------------------------------------------------------------------------- #
+PROJECT_FORMAT = "mlconstructor.project"
+PROJECT_FORMAT_VERSION = 1
+
+
+class NodePosition(BaseModel):
+    x: float
+    y: float
+
+
+class ProjectNode(NodeSpec):
+    """A graph node plus where it sits on the canvas (``None`` = lay it out)."""
+
+    position: NodePosition | None = None
+
+
+class ProjectGraph(BaseModel):
+    nodes: list[ProjectNode] = Field(default_factory=list)
+    edges: list[list[str]] = Field(default_factory=list)
+
+    @field_validator("edges")
+    @classmethod
+    def _check_edges(cls, edges: list[list[str]]) -> list[list[str]]:
+        for e in edges:
+            if len(e) != 2:
+                raise ValueError(f"edge must be [source_id, target_id], got {e!r}")
+        return edges
+
+
+class ProjectView(BaseModel):
+    pan_x: float = 48.0
+    pan_y: float = 36.0
+    zoom: float = 1.0
+
+
+class ProjectEditorState(BaseModel):
+    """Editor-only state that does not change the model — kept so a reopened project
+    looks exactly as it was left."""
+
+    custom_text: str = ""
+    view: ProjectView = Field(default_factory=ProjectView)
+
+
+class ProjectFile(BaseModel):
+    """A saved project (``.mlc.json``): the graph with node positions, the training
+    setup and metadata. It carries a format version, so older files keep opening."""
+
+    format: Literal["mlconstructor.project"] = PROJECT_FORMAT
+    version: int = PROJECT_FORMAT_VERSION
+    name: str = Field(default="Untitled", max_length=120)
+    description: str = Field(default="", max_length=2000)
+    created_at: str | None = None
+    updated_at: str | None = None
+    graph: ProjectGraph = Field(default_factory=ProjectGraph)
+    train: TrainSpec = Field(default_factory=TrainSpec)
+    editor: ProjectEditorState = Field(default_factory=ProjectEditorState)
+
+
+class ProjectWarning(BaseModel):
+    """Something worth telling the user when a project opens (it still opens).
+    ``code`` is stable, so the UI can translate it later (Stage 16)."""
+
+    code: str
+    message: str
+    node_id: str | None = None
+
+
+class ProjectLoadResult(BaseModel):
+    ok: bool
+    project: ProjectFile
+    migrated_from: int | None = None
+    warnings: list[ProjectWarning] = Field(default_factory=list)
+
+
+class ProjectSummary(BaseModel):
+    slug: str
+    name: str
+    updated_at: str | None = None
+    node_count: int = 0
+
+
+class ProjectSaveResult(BaseModel):
+    ok: bool
+    slug: str
+    updated_at: str

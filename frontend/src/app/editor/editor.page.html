@@ -1,9 +1,20 @@
 <ion-header>
   <ion-toolbar color="dark">
     <ion-buttons slot="start">
-      <ion-button fill="clear" size="small" (click)="clearGraph()">Clear</ion-button>
+      <ion-button fill="clear" size="small" [disabled]="busy()" (click)="newProject()">New</ion-button>
+      <ion-button fill="clear" size="small" [disabled]="busy()" (click)="openProjects()">Open</ion-button>
+      <ion-button fill="clear" size="small" title="Save (Ctrl+S)" (click)="saveProject()">Save</ion-button>
+      <ion-button fill="clear" size="small" [disabled]="busy()" (click)="clearGraph()">Clear</ion-button>
     </ion-buttons>
-    <ion-title>ML Constructor · node editor</ion-title>
+    <ion-title>
+      <span class="brand">ML Constructor</span>
+      <button type="button" class="proj-name" title="Projects: rename, save, open" (click)="openProjects()">
+        {{ projectName() }}
+      </button>
+      <span class="save-state" [class.warn]="autosaveError()" [class.edited]="dirty()" [title]="saveTooltip()">
+        {{ saveStatus() }}
+      </span>
+    </ion-title>
     <ion-buttons slot="end">
       <ion-button fill="outline" [disabled]="busy() || !nodes().length" (click)="onBuild()">Build</ion-button>
       <ion-button fill="solid" color="primary" [disabled]="busy() || !nodes().length" (click)="onTrain()">Train ▶</ion-button>
@@ -54,7 +65,15 @@
     </aside>
 
     <!-- ===================== canvas ====================== -->
-    <main class="canvas-wrap" (pointerdown)="canvasDown($event)" (wheel)="onWheel($event)">
+    <main
+      class="canvas-wrap"
+      [class.drop]="dropHover()"
+      (pointerdown)="canvasDown($event)"
+      (wheel)="onWheel($event)"
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave($event)"
+      (drop)="onDrop($event)"
+    >
       <div class="canvas" [style.transform]="canvasTransform()">
         <svg class="edges" width="4000" height="4000">
           @for (e of edgeViews(); track e.id) {
@@ -99,6 +118,25 @@
         <div class="hint">Click another node's top port (input) to connect · click the canvas to cancel</div>
       }
       <div class="zoomhint">{{ zoom() * 100 | number: '1.0-0' }}%</div>
+      @if (dropHover()) {
+        <div class="drop-hint">Drop a .mlc.json project file to open it</div>
+      }
+      @if (notice(); as nt) {
+        <div
+          class="notice"
+          [class.warn]="nt.kind === 'warn'"
+          [class.error]="nt.kind === 'error'"
+          (pointerdown)="$event.stopPropagation()"
+        >
+          <div class="notice-body">
+            <div class="notice-text">{{ nt.text }}</div>
+            @for (d of nt.details; track $index) {
+              <div class="notice-d">• {{ d }}</div>
+            }
+          </div>
+          <button type="button" class="notice-x" title="Dismiss" (click)="notice.set(null)">✕</button>
+        </div>
+      }
     </main>
 
     <!-- ==================== inspector ==================== -->
@@ -437,6 +475,102 @@
           @if (exportCode()) {
             <ion-note class="muted block">Standalone <code>model.py</code> — depends only on torch.</ion-note>
             <pre class="code">{{ exportCode() }}</pre>
+          }
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ============ projects: save / open (Stage 13) ============ -->
+  @if (projectsOpen()) {
+    <div class="overlay" (click)="closeProjects()">
+      <div class="sheet sheet-wide" (click)="$event.stopPropagation()">
+        <div class="sheet-h">
+          <span>Projects</span>
+          <ion-button fill="clear" size="small" (click)="closeProjects()">✕</ion-button>
+        </div>
+        <div class="sheet-body projects">
+          <section class="pj-current">
+            <label class="pj-label" for="pj-name">Name</label>
+            <input
+              id="pj-name"
+              class="pj-input"
+              maxlength="120"
+              [value]="projectName()"
+              (input)="projectName.set($any($event).target.value)"
+            />
+            <label class="pj-label" for="pj-desc">Description</label>
+            <textarea
+              id="pj-desc"
+              class="pj-input"
+              rows="2"
+              maxlength="2000"
+              placeholder="What is this network for? (optional)"
+              [value]="projectDesc()"
+              (input)="projectDesc.set($any($event).target.value)"
+            ></textarea>
+            <div class="pj-status" [class.warn]="autosaveError()">{{ saveTooltip() }}</div>
+            <div class="pj-actions">
+              <ion-button size="small" (click)="saveProject()">Save</ion-button>
+              <ion-button size="small" fill="outline" (click)="saveLocal(true)">Save as copy</ion-button>
+              <ion-button size="small" fill="outline" (click)="downloadProject()">Download .mlc.json</ion-button>
+              @if (serverEnabled() && origin() !== 'server') {
+                <ion-button size="small" fill="outline" [disabled]="serverBusy()" (click)="saveToServer()">
+                  Save to server
+                </ion-button>
+              }
+              <ion-button size="small" fill="clear" [disabled]="busy()" (click)="newProject()">New project</ion-button>
+            </div>
+          </section>
+
+          <section>
+            <div class="pj-h">Open a file</div>
+            <label class="file-btn">
+              Choose a .mlc.json file…
+              <input type="file" accept=".json,application/json" (change)="onProjectFile($event)" hidden />
+            </label>
+            <span class="muted pj-or">or drop it onto the canvas</span>
+          </section>
+
+          <section>
+            <div class="pj-h">Recent · saved in this browser</div>
+            @for (p of localProjects(); track p.id) {
+              <div class="pj-row" [class.cur]="origin() === 'browser' && p.id === localId()">
+                <button type="button" class="pj-open" [disabled]="busy()" (click)="openLocal(p.id)">
+                  <span class="pj-name">{{ p.name }}</span>
+                  <span class="pj-meta">{{ p.node_count }} nodes · {{ p.updated_at | date: 'd MMM y, HH:mm' }}</span>
+                </button>
+                <ion-button fill="clear" size="small" color="danger" title="Delete from this browser" (click)="deleteLocal(p)">
+                  ✕
+                </ion-button>
+              </div>
+            } @empty {
+              <ion-note class="muted block">Nothing saved yet — press Save (Ctrl+S) to keep this project here.</ion-note>
+            }
+          </section>
+
+          @if (serverEnabled()) {
+            <section>
+              <div class="pj-h">On the server</div>
+              @if (serverError()) {
+                <ion-note color="danger" class="block">{{ serverError() }}</ion-note>
+              }
+              @for (p of serverProjects(); track p.slug) {
+                <div class="pj-row" [class.cur]="origin() === 'server' && p.slug === serverSlug()">
+                  <button type="button" class="pj-open" [disabled]="busy()" (click)="openServer(p.slug)">
+                    <span class="pj-name">{{ p.name }}</span>
+                    <span class="pj-meta">
+                      {{ p.node_count }} nodes{{ p.updated_at ? ' · ' + (p.updated_at | date: 'd MMM y, HH:mm') : '' }}
+                    </span>
+                  </button>
+                  <ion-button fill="clear" size="small" color="danger" title="Delete from the server" (click)="deleteServer(p)">
+                    ✕
+                  </ion-button>
+                </div>
+              } @empty {
+                <ion-note class="muted block">No projects on this server yet.</ion-note>
+              }
+            </section>
           }
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, HostListener, computed, inject, signal } from '@angular/core';
+import { Component, HostListener, computed, effect, inject, signal } from '@angular/core';
 import {
   IonBadge,
   IonButton,
@@ -30,12 +30,38 @@ import {
   GraphSpec,
   LayerInfo,
   ParamDef,
+  ProjectLoadResult,
+  ProjectSummary,
+  TrainCfg,
   TrainEvent,
   TrainResult,
 } from '../core/graph.models';
+import {
+  DEFAULT_VIEW,
+  EditorSnapshot,
+  LocalProjectMeta,
+  MAX_PROJECT_BYTES,
+  ProjectOrigin,
+  ProjectStorage,
+  UI_TRAIN_KEYS,
+  fingerprint,
+  fromProjectFile,
+  layoutGraph,
+  projectFileName,
+  readCurrentFormat,
+  toProjectFile,
+} from '../core/project';
 
 const NODE_W = 174;
 const NODE_H = 78;
+const AUTOSAVE_DELAY_MS = 700;
+const ORIGINS: readonly ProjectOrigin[] = ['new', 'browser', 'server', 'file'];
+
+interface Notice {
+  kind: 'info' | 'warn' | 'error';
+  text: string;
+  details: string[];
+}
 
 @Component({
   selector: 'app-editor',
@@ -58,7 +84,7 @@ const NODE_H = 78;
     IonSearchbar,
   ],
   templateUrl: './editor.page.html',
-  styleUrl: './editor.page.scss',
+  styleUrls: ['./editor.page.scss', './projects.scss'],
 })
 export class EditorPage {
   private api = inject(ApiService);
@@ -103,6 +129,32 @@ export class EditorPage {
   cudaAvailable = signal(false); // from /health — the Device picker only shows when true
   device = signal<'cpu' | 'cuda' | 'auto'>('cpu');
 
+  // ---- projects: save / open / autosave (Stage 13) ----
+  projectName = signal('Untitled');
+  projectDesc = signal('');
+  private projectCreated = signal<string | null>(null);
+  /** Training settings without an editor control (optimizer, seed, …), kept as loaded. */
+  private trainExtra = signal<Record<string, unknown>>({});
+  origin = signal<ProjectOrigin>('new');
+  localId = signal<string | null>(null);
+  serverSlug = signal<string | null>(null);
+  private savedFp = signal<string | null>(null);
+  dirty = signal(false);
+  lastAutosave = signal<Date | null>(null);
+  autosaveError = signal<string | null>(null);
+  projectsOpen = signal(false);
+  localProjects = signal<LocalProjectMeta[]>([]);
+  serverEnabled = signal(false); // from /health — the server section only shows when true
+  serverProjects = signal<ProjectSummary[]>([]);
+  serverError = signal<string | null>(null);
+  serverBusy = signal(false);
+  notice = signal<Notice | null>(null);
+  dropHover = signal(false);
+  private store = ProjectStorage.browser();
+  private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private autosaveArmed = false;
+  private noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
   // ---- graph ----
   nodes = signal<EditorNode[]>([]);
   edges = signal<EditorEdge[]>([]);
@@ -110,8 +162,8 @@ export class EditorPage {
   connectFrom = signal<string | null>(null);
 
   // ---- view ----
-  pan = signal<{ x: number; y: number }>({ x: 48, y: 36 });
-  zoom = signal(1);
+  pan = signal<{ x: number; y: number }>({ x: DEFAULT_VIEW.pan_x, y: DEFAULT_VIEW.pan_y });
+  zoom = signal(DEFAULT_VIEW.zoom);
 
   // ---- run ----
   busy = signal(false);
@@ -147,17 +199,37 @@ export class EditorPage {
       next: (ds) => {
         this.datasets.set(ds);
         if (ds.length) {
-          this.dataset.set(ds[0].id);
+          // Keep a restored project's dataset; otherwise start on the first one. That
+          // swap is housekeeping, not an edit, so a clean project stays clean.
+          if (!ds.some((d) => d.id === this.dataset())) {
+            const wasClean = !this.isDirtyNow();
+            this.dataset.set(ds[0].id);
+            if (wasClean) this.savedFp.set(this.currentFp());
+          }
           this.stage8.set(true); // backend supports Stage 8 — show the dataset picker, Data & Export
         }
       },
       error: () => this.stage8.set(false), // older backend: hide the Stage 8 UI, app still works
     });
     this.api.health().subscribe({
-      next: (h) => this.cudaAvailable.set(!!h.cuda_available),
-      error: () => this.cudaAvailable.set(false),
+      next: (h) => {
+        this.cudaAvailable.set(!!h.cuda_available);
+        this.serverEnabled.set(!!h.server_projects);
+      },
+      error: () => {
+        this.cudaAvailable.set(false);
+        this.serverEnabled.set(false);
+      },
     });
-    this.seedExample();
+
+    // Bring back the autosaved draft (your work survives a reload); first visit -> the example.
+    const restored = this.restoreAutosave();
+    if (restored !== 'restored') this.startFresh(this.exampleSnapshot());
+    effect(() => {
+      this.snapshot(); // track every piece of project state...
+      if (this.autosaveArmed) this.scheduleAutosave(); // ...and save a draft shortly after a change
+    });
+    this.autosaveArmed = restored !== 'pending';
   }
 
   // ---------------------------------------------------------------- derived
@@ -238,6 +310,50 @@ export class EditorPage {
   // Accuracy on a fixed 0..1 axis so the height reads as accuracy.
   accPoints = computed(() => this.pointsOf(this.curveAcc(), true));
 
+  // Everything a project file holds, as one value (autosave tracks it).
+  private snapshot = computed<EditorSnapshot>(() => {
+    const p = this.pan();
+    return {
+      name: this.projectName(),
+      description: this.projectDesc(),
+      createdAt: this.projectCreated(),
+      nodes: this.nodes(),
+      edges: this.edges(),
+      train: this.uiTrain(),
+      trainExtra: this.trainExtra(),
+      customText: this.customText(),
+      view: { pan_x: p.x, pan_y: p.y, zoom: this.zoom() },
+    };
+  });
+
+  // One short word on the toolbar for where the work stands; the tooltip says more.
+  saveStatus = computed(() => {
+    if (this.autosaveError()) return '⚠ autosave off';
+    if (this.dirty()) return '● edited · autosaved';
+    switch (this.origin()) {
+      case 'browser':
+        return '✓ saved in browser';
+      case 'server':
+        return '✓ saved on server';
+      case 'file':
+        return '✓ file';
+      default:
+        return 'draft · autosaved';
+    }
+  });
+
+  saveTooltip = computed(() => {
+    const err = this.autosaveError();
+    if (err) return err;
+    const at = this.lastAutosave();
+    const when = at ? ` (last at ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : '';
+    const where =
+      this.origin() === 'server'
+        ? 'Save (Ctrl+S) stores it on the server.'
+        : 'Save (Ctrl+S) keeps it in this browser; Download makes a file.';
+    return `Your draft is autosaved in this browser and comes back after a reload${when}. ${where}`;
+  });
+
   private pointsOf(c: number[], fixed01: boolean): string {
     if (c.length === 0) return '';
     const W = 220;
@@ -269,9 +385,15 @@ export class EditorPage {
     this.invalidateBuild();
   }
 
+  /** A new node id that no node in the graph uses yet (opened projects bring their own ids). */
   private freshId(type: string): string {
-    this.seq += 1;
-    return `${type.toLowerCase()}_${this.seq}`;
+    const taken = new Set(this.nodes().map((n) => n.id));
+    let id: string;
+    do {
+      this.seq += 1;
+      id = `${type.toLowerCase()}_${this.seq}`;
+    } while (taken.has(id));
+    return id;
   }
 
   // -------------------------------------------------------------- selection
@@ -289,6 +411,9 @@ export class EditorPage {
   }
 
   clearGraph(): void {
+    if (this.nodes().length && !confirm('Clear the canvas? Every node and connection is removed (there is no undo yet).')) {
+      return;
+    }
     this.nodes.set([]);
     this.edges.set([]);
     this.selectedId.set(null);
@@ -463,6 +588,7 @@ export class EditorPage {
   // ------------------------------------------------------------------- run
   private toSpec(): GraphSpec {
     const train: GraphSpec['train'] = {
+      ...(this.trainExtra() as Partial<TrainCfg>), // optimizer, seed, … as the project carries them
       dataset: this.dataset(),
       epochs: this.epochs(),
       lr: this.lr(),
@@ -472,12 +598,29 @@ export class EditorPage {
     if (this.dataset() === 'custom') train.custom_rows = this.customRows();
     if (this.saveCheckpoint()) train.checkpoint = true;
     if (this.resumeCheckpoint()) train.resume = true;
-    if (this.device() !== 'cpu') train.device = this.device();
+    // The GPU only where this backend has one: a project saved on a CUDA machine still trains elsewhere.
+    if (this.device() !== 'cpu' && this.cudaAvailable()) train.device = this.device();
     return {
       nodes: this.nodes().map((n) => ({ id: n.id, type: n.type, params: n.params })),
       edges: this.edges().map((e) => [e.source, e.target]),
       train,
     };
+  }
+
+  /** The training settings the editor's controls hold, as saved in a project. */
+  private uiTrain(): Partial<TrainCfg> {
+    const t: Partial<TrainCfg> = {
+      dataset: this.dataset(),
+      epochs: this.epochs(),
+      lr: this.lr(),
+      batch_size: this.batchSize(),
+      samples: this.samples(),
+    };
+    if (this.customRows().length) t.custom_rows = this.customRows(); // pasted rows travel with the project
+    if (this.saveCheckpoint()) t.checkpoint = true;
+    if (this.resumeCheckpoint()) t.resume = true;
+    if (this.device() !== 'cpu') t.device = this.device();
+    return t;
   }
 
   onBuild(): void {
@@ -720,31 +863,40 @@ export class EditorPage {
   }
 
   // ------------------------------------------------ architecture library (S7)
-  /** Load a ready architecture: fetch its full graph, lay it out on the canvas,
-   * and adopt its recommended training config. The nodes are ordinary, editable
-   * layer nodes — the user can re-wire and tune every one. */
+  /** Start a new project from a ready architecture: fetch its full graph, lay it
+   * out on the canvas, and adopt its recommended training config. The nodes are
+   * ordinary, editable layer nodes — the user can re-wire and tune every one. */
   loadArchitecture(id: string): void {
+    if (this.busy() || !this.confirmDiscard()) return;
     this.busy.set(true);
     this.runError.set(null);
     this.proposals.set([]);
     this.api.architecture(id).subscribe({
       next: (spec) => {
-        this.nodes.set(this.layoutGraph(spec.nodes, spec.edges));
-        this.edges.set(spec.edges.map(([source, target]) => ({ source, target })));
-        this.selectedId.set(null);
-        this.innerSel.set(null);
-        this.connectFrom.set(null);
-        this.seq = spec.nodes.length;
+        const info = this.architectures().find((a) => a.id === id);
         const t = spec.train ?? {};
-        if (t.epochs != null) this.epochs.set(t.epochs);
-        if (t.lr != null) this.lr.set(t.lr);
-        if (t.batch_size != null) this.batchSize.set(t.batch_size);
-        if (t.samples != null) this.samples.set(t.samples);
-        this.pan.set({ x: 48, y: 24 });
-        this.zoom.set(0.8);
-        this.buildResult.set(null);
-        this.trainResult.set(null);
+        const trainExtra: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(t)) if (!UI_TRAIN_KEYS.includes(k)) trainExtra[k] = v;
         this.busy.set(false);
+        this.startFresh({
+          name: info?.name ?? id,
+          description: info?.description ?? '',
+          createdAt: null,
+          nodes: layoutGraph(spec.nodes, spec.edges),
+          edges: spec.edges.map(([source, target]) => ({ source, target })),
+          train: {
+            // the template brings its recommended schedule; your data choice stays
+            ...this.uiTrain(),
+            epochs: t.epochs ?? this.epochs(),
+            lr: t.lr ?? this.lr(),
+            batch_size: t.batch_size ?? this.batchSize(),
+            samples: t.samples ?? this.samples(),
+          },
+          trainExtra,
+          customText: this.customText(),
+          view: { pan_x: 48, pan_y: 24, zoom: 0.8 },
+        });
+        this.showNotice('info', `New project from the «${info?.name ?? id}» template.`);
       },
       error: (e) => {
         this.runError.set(this.errMsg(e));
@@ -753,58 +905,428 @@ export class EditorPage {
     });
   }
 
-  /** Position a position-free backend graph on the canvas: layer by longest-path
-   * depth (top→bottom, matching the edge flow), siblings spread left→right. */
-  private layoutGraph(
-    specNodes: { id: string; type: string; params: Record<string, unknown> }[],
-    specEdges: string[][],
-  ): EditorNode[] {
-    const V_STEP = 112;
-    const H_STEP = 212;
-    const X0 = 70;
-    const Y0 = 24;
-    const ids = specNodes.map((n) => n.id);
-    const idset = new Set(ids);
-    const succ = new Map<string, string[]>(ids.map((id) => [id, []]));
-    const indeg = new Map<string, number>(ids.map((id) => [id, 0]));
-    for (const [s, t] of specEdges) {
-      if (!idset.has(s) || !idset.has(t)) continue;
-      succ.get(s)!.push(t);
-      indeg.set(t, (indeg.get(t) ?? 0) + 1);
+  // ------------------------------------------------ projects (Stage 13)
+  openProjects(): void {
+    this.localProjects.set(this.store.list());
+    this.projectsOpen.set(true);
+    if (this.serverEnabled()) this.refreshServerProjects();
+  }
+
+  closeProjects(): void {
+    this.projectsOpen.set(false);
+  }
+
+  /** New, empty project (asks first if there are unsaved changes). */
+  newProject(): void {
+    if (this.busy() || !this.confirmDiscard()) return;
+    this.startFresh(this.blankSnapshot());
+    this.projectsOpen.set(false);
+    this.showNotice('info', 'New project — add layers from the palette.');
+  }
+
+  /** Ctrl+S / Save: save where the project lives — the server for a server
+   * project, otherwise this browser's project library. */
+  saveProject(): void {
+    if (this.origin() === 'server' && this.serverSlug() && this.serverEnabled()) this.saveToServer();
+    else this.saveLocal(false);
+  }
+
+  /** Save into this browser's project library — in place, or as a new copy. */
+  saveLocal(asCopy: boolean): void {
+    if (!this.store.available) {
+      this.showNotice('error', 'This browser does not allow storage here — use Download to keep a file.');
+      return;
     }
-    // Kahn topological order
-    const deg = new Map(indeg);
-    const queue = ids.filter((id) => deg.get(id) === 0);
-    const order: string[] = [];
-    for (let i = 0; i < queue.length; i++) {
-      const n = queue[i];
-      order.push(n);
-      for (const m of succ.get(n)!) {
-        deg.set(m, (deg.get(m) ?? 0) - 1);
-        if (deg.get(m) === 0) queue.push(m);
-      }
+    const prevName = this.projectName();
+    const prevCreated = this.projectCreated();
+    if (asCopy) {
+      this.projectName.set(`${prevName} (copy)`.slice(0, 120));
+      this.projectCreated.set(null);
     }
-    const topo = order.length === ids.length ? order : ids; // cycle fallback
-    // longest-path depth from the sources
-    const depth = new Map<string, number>(ids.map((id) => [id, 0]));
-    for (const id of topo) {
-      const d = depth.get(id)!;
-      for (const m of succ.get(id)!) {
-        if (depth.get(m)! < d + 1) depth.set(m, d + 1);
-      }
+    try {
+      const res = this.store.save(asCopy ? null : this.localId(), toProjectFile(this.snapshot()));
+      this.localId.set(res.id);
+      this.serverSlug.set(null);
+      this.origin.set('browser');
+      this.projectCreated.set(res.project.created_at ?? null);
+      this.markSaved();
+      this.localProjects.set(this.store.list());
+      this.showNotice('info', asCopy ? `Saved a copy: «${res.project.name}».` : `Saved «${res.project.name}» in this browser.`);
+    } catch {
+      this.projectName.set(prevName);
+      this.projectCreated.set(prevCreated);
+      this.showNotice('error', 'Could not save: browser storage is full. Download the project as a file, or delete old projects.');
     }
-    // column within each depth, by spec insertion order (stable, few crossings)
-    const colCount = new Map<number, number>();
-    return specNodes.map((n) => {
-      const d = depth.get(n.id)!;
-      const col = colCount.get(d) ?? 0;
-      colCount.set(d, col + 1);
-      return { id: n.id, type: n.type, x: X0 + col * H_STEP, y: Y0 + d * V_STEP, params: structuredClone(n.params) };
+  }
+
+  openLocal(id: string): void {
+    if (this.busy() || !this.confirmDiscard()) return;
+    const raw = this.store.load(id);
+    if (raw == null) {
+      this.showNotice('error', 'That project is no longer in this browser.');
+      this.localProjects.set(this.store.list());
+      return;
+    }
+    const current = readCurrentFormat(raw);
+    if (current) {
+      this.adoptLoaded({ ok: true, project: current, migrated_from: null, warnings: [] }, 'browser', { localId: id });
+      return;
+    }
+    this.api.normalizeProject(raw).subscribe({
+      next: (res) => this.adoptLoaded(res, 'browser', { localId: id }),
+      error: (e) => this.showNotice('error', `Could not open it: ${this.errMsg(e)}`),
     });
   }
 
+  deleteLocal(p: LocalProjectMeta): void {
+    if (!confirm(`Delete «${p.name}» from this browser? This cannot be undone.`)) return;
+    try {
+      this.store.remove(p.id);
+    } catch {
+      this.showNotice('error', 'Could not update browser storage.');
+    }
+    if (this.localId() === p.id) this.detachFromStore();
+    this.localProjects.set(this.store.list());
+  }
+
+  /** Download the project as a `.mlc.json` file (opens on any ML Constructor). */
+  downloadProject(): void {
+    const project = toProjectFile(this.snapshot());
+    const now = new Date().toISOString();
+    project.created_at = project.created_at ?? now;
+    project.updated_at = now;
+    const blob = new Blob([JSON.stringify(project, null, 1)], { type: 'application/json' });
+    if (blob.size > MAX_PROJECT_BYTES) {
+      this.showNotice('error', 'This project is over 5 MB and would not open again — trim the pasted rows first.');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = projectFileName(project.name);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (this.origin() === 'new' || this.origin() === 'file') {
+      this.origin.set('file');
+      this.markSaved(fingerprint(project));
+    }
+    this.showNotice('info', `Downloaded ${a.download}`);
+  }
+
+  onProjectFile(ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) this.openProjectFile(file);
+  }
+
+  /** Open a `.mlc.json` file — any format version, or a bare graph spec. The
+   * backend migrates and checks it; warnings are shown, nothing is lost silently. */
+  openProjectFile(file: File): void {
+    if (this.busy()) return;
+    if (file.size > MAX_PROJECT_BYTES) {
+      this.showNotice('error', `«${file.name}» is too large (the limit is 5 MB).`);
+      return;
+    }
+    if (!this.confirmDiscard()) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(String(reader.result ?? ''));
+      } catch {
+        this.showNotice('error', `«${file.name}» is not a JSON file.`);
+        return;
+      }
+      this.api.normalizeProject(raw).subscribe({
+        next: (res) => this.adoptLoaded(res, 'file', {}),
+        error: (e) => {
+          // An older backend without /projects/normalize still opens current-format files.
+          const current = e?.status === 404 || e?.status === 405 ? readCurrentFormat(raw) : null;
+          if (current) this.adoptLoaded({ ok: true, project: current, migrated_from: null, warnings: [] }, 'file', {});
+          else this.showNotice('error', `Could not open «${file.name}»: ${this.errMsg(e)}`);
+        },
+      });
+    };
+    reader.onerror = () => this.showNotice('error', `Could not read «${file.name}».`);
+    reader.readAsText(file);
+  }
+
+  // Drop a project file anywhere on the canvas to open it.
+  onDragOver(ev: DragEvent): void {
+    if (!ev.dataTransfer?.types?.includes('Files')) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+    this.dropHover.set(true);
+  }
+
+  onDragLeave(ev: DragEvent): void {
+    const to = ev.relatedTarget as Node | null;
+    if (!to || !(ev.currentTarget as HTMLElement).contains(to)) this.dropHover.set(false);
+  }
+
+  onDrop(ev: DragEvent): void {
+    ev.preventDefault();
+    this.dropHover.set(false);
+    const file = ev.dataTransfer?.files?.[0];
+    if (file) this.openProjectFile(file);
+  }
+
+  refreshServerProjects(): void {
+    this.api.listProjects().subscribe({
+      next: (list) => {
+        this.serverProjects.set(list);
+        this.serverError.set(null);
+      },
+      error: (e) => this.serverError.set(this.errMsg(e)),
+    });
+  }
+
+  /** Save on the server: in place for a server project, else as a new one. */
+  saveToServer(): void {
+    if (!this.serverEnabled() || this.serverBusy()) return;
+    const project = toProjectFile(this.snapshot());
+    const slug = this.origin() === 'server' ? this.serverSlug() : null;
+    this.serverBusy.set(true);
+    (slug ? this.api.saveProject(slug, project) : this.api.createProject(project)).subscribe({
+      next: (r) => {
+        this.serverBusy.set(false);
+        this.serverSlug.set(r.slug);
+        this.localId.set(null);
+        this.origin.set('server');
+        this.markSaved(fingerprint(project)); // what was sent, even if you kept editing meanwhile
+        this.refreshServerProjects();
+        this.showNotice('info', `Saved «${project.name}» on the server.`);
+      },
+      error: (e) => {
+        this.serverBusy.set(false);
+        this.showNotice('error', `Could not save on the server: ${this.errMsg(e)}`);
+      },
+    });
+  }
+
+  openServer(slug: string): void {
+    if (this.busy() || !this.confirmDiscard()) return;
+    this.api.getProject(slug).subscribe({
+      next: (res) => this.adoptLoaded(res, 'server', { serverSlug: slug }),
+      error: (e) => this.showNotice('error', `Could not open «${slug}»: ${this.errMsg(e)}`),
+    });
+  }
+
+  deleteServer(p: ProjectSummary): void {
+    if (!confirm(`Delete «${p.name}» from the server? This cannot be undone.`)) return;
+    this.api.deleteProject(p.slug).subscribe({
+      next: () => {
+        if (this.origin() === 'server' && this.serverSlug() === p.slug) this.detachFromStore();
+        this.refreshServerProjects();
+      },
+      error: (e) => this.showNotice('error', `Could not delete «${p.name}»: ${this.errMsg(e)}`),
+    });
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onKeyDown(ev: KeyboardEvent): void {
+    // Ctrl+S / Cmd+S — by physical key, so it works on any keyboard layout
+    if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && ev.code === 'KeyS') {
+      ev.preventDefault();
+      this.saveProject();
+    }
+  }
+
+  // Never lose the last few hundred milliseconds of work: write a pending draft
+  // right away when the tab is hidden or closed.
+  @HostListener('window:beforeunload')
+  @HostListener('document:visibilitychange')
+  flushPendingAutosave(): void {
+    if (this.autosaveTimer) this.flushAutosave();
+  }
+
+  /** Load a snapshot into every piece of editor state. */
+  private applySnapshot(s: EditorSnapshot): void {
+    const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+    const t = s.train;
+    this.projectName.set(s.name);
+    this.projectDesc.set(s.description);
+    this.projectCreated.set(s.createdAt);
+    this.nodes.set(s.nodes);
+    this.edges.set(s.edges);
+    this.dataset.set(typeof t.dataset === 'string' && t.dataset ? t.dataset : (this.datasets()[0]?.id ?? 'synthetic'));
+    this.epochs.set(num(t.epochs, 3));
+    this.lr.set(num(t.lr, 0.01));
+    this.batchSize.set(num(t.batch_size, 64));
+    this.samples.set(num(t.samples, 512));
+    this.customRows.set(Array.isArray(t.custom_rows) ? t.custom_rows : []);
+    this.saveCheckpoint.set(t.checkpoint === true);
+    this.resumeCheckpoint.set(t.resume === true);
+    this.device.set(t.device === 'cuda' || t.device === 'auto' ? t.device : 'cpu');
+    this.trainExtra.set({ ...s.trainExtra });
+    this.customText.set(s.customText);
+    this.customError.set(null);
+    this.pan.set({ x: s.view.pan_x, y: s.view.pan_y });
+    this.zoom.set(s.view.zoom);
+    this.selectedId.set(null);
+    this.innerSel.set(null);
+    this.connectFrom.set(null);
+    this.buildResult.set(null);
+    this.trainResult.set(null);
+    this.runError.set(null);
+    this.proposals.set([]);
+    this.liveLoss.set([]);
+    this.liveAcc.set([]);
+    this.seq = s.nodes.length;
+  }
+
+  private startFresh(s: EditorSnapshot): void {
+    this.applySnapshot(s);
+    this.origin.set('new');
+    this.localId.set(null);
+    this.serverSlug.set(null);
+    this.markSaved();
+  }
+
+  private adoptLoaded(
+    res: ProjectLoadResult,
+    origin: ProjectOrigin,
+    ids: { localId?: string | null; serverSlug?: string | null },
+  ): void {
+    this.applySnapshot(fromProjectFile(res.project));
+    this.origin.set(origin);
+    this.localId.set(ids.localId ?? null);
+    this.serverSlug.set(ids.serverSlug ?? null);
+    this.markSaved();
+    this.projectsOpen.set(false);
+    const details = (res.warnings ?? []).filter((w) => w.code !== 'migrated').map((w) => w.message);
+    const ds = this.datasets();
+    if (ds.length && !ds.some((d) => d.id === this.dataset())) {
+      details.push(`The dataset «${this.dataset()}» is not available here — pick another one under Training.`);
+    }
+    const upgraded = res.migrated_from != null ? ` (upgraded from format ${res.migrated_from})` : '';
+    this.showNotice(details.length ? 'warn' : 'info', `Opened «${res.project.name}»${upgraded}.`, details);
+  }
+
+  /** The stored copy is gone (deleted): keep the work on the canvas as an unsaved draft. */
+  private detachFromStore(): void {
+    this.origin.set('new');
+    this.localId.set(null);
+    this.serverSlug.set(null);
+    this.savedFp.set(null);
+    this.flushAutosave();
+  }
+
+  /** Remember the current state (or the given fingerprint) as saved. */
+  private markSaved(fp: string = this.currentFp()): void {
+    this.savedFp.set(fp);
+    this.flushAutosave();
+  }
+
+  private currentFp(): string {
+    return fingerprint(toProjectFile(this.snapshot()));
+  }
+
+  private isDirtyNow(): boolean {
+    return this.currentFp() !== this.savedFp();
+  }
+
+  /** Ask before replacing work that is not saved anywhere but the autosaved draft. */
+  private confirmDiscard(): boolean {
+    if (!this.nodes().length || !this.isDirtyNow()) return true;
+    return confirm(`«${this.projectName()}» has unsaved changes. Replace it anyway? (Save first to keep them.)`);
+  }
+
+  private scheduleAutosave(): void {
+    if (this.autosaveTimer) clearTimeout(this.autosaveTimer);
+    this.autosaveTimer = setTimeout(() => this.flushAutosave(), AUTOSAVE_DELAY_MS);
+  }
+
+  private flushAutosave(): void {
+    if (this.autosaveTimer) {
+      clearTimeout(this.autosaveTimer);
+      this.autosaveTimer = null;
+    }
+    const project = toProjectFile(this.snapshot());
+    this.dirty.set(fingerprint(project) !== this.savedFp());
+    if (!this.autosaveArmed) return;
+    if (!this.store.available) {
+      this.autosaveError.set('Autosave is off: this browser blocks local storage here. Use Download to keep your work.');
+      return;
+    }
+    try {
+      this.store.writeAutosave({
+        project,
+        origin: this.origin(),
+        localId: this.localId(),
+        serverSlug: this.serverSlug(),
+        savedFp: this.savedFp(),
+        at: new Date().toISOString(),
+      });
+      this.autosaveError.set(null);
+      this.lastAutosave.set(new Date());
+    } catch {
+      this.autosaveError.set('Autosave is off: this project is too big for browser storage. Use Download to keep your work.');
+    }
+  }
+
+  /** Bring back the autosaved draft. `pending`: it is an older format the backend
+   * migrates first — autosave stays off until then, so the old draft is never
+   * overwritten by the example. */
+  private restoreAutosave(): 'restored' | 'pending' | 'none' {
+    const rec = this.store.readAutosave();
+    if (!rec) return 'none';
+    const origin = ORIGINS.includes(rec.origin) ? rec.origin : 'new';
+    const ids = { localId: rec.localId ?? null, serverSlug: rec.serverSlug ?? null };
+    const current = readCurrentFormat(rec.project);
+    if (current) {
+      this.applySnapshot(fromProjectFile(current));
+      this.origin.set(origin);
+      this.localId.set(ids.localId);
+      this.serverSlug.set(ids.serverSlug);
+      this.savedFp.set(rec.savedFp ?? null);
+      this.dirty.set(this.isDirtyNow());
+      this.lastAutosave.set(rec.at ? new Date(rec.at) : null);
+      return 'restored';
+    }
+    this.api.normalizeProject(rec.project).subscribe({
+      next: (res) => {
+        this.autosaveArmed = true;
+        this.adoptLoaded(res, origin, ids);
+      },
+      error: () => {
+        this.autosaveArmed = true;
+        this.showNotice('warn', 'The autosaved draft from an older version could not be opened.');
+      },
+    });
+    return 'pending';
+  }
+
+  private showNotice(kind: Notice['kind'], text: string, details: string[] = []): void {
+    const n: Notice = { kind, text, details };
+    this.notice.set(n);
+    if (this.noticeTimer) clearTimeout(this.noticeTimer);
+    if (kind === 'info') {
+      this.noticeTimer = setTimeout(() => {
+        if (this.notice() === n) this.notice.set(null);
+      }, 3500);
+    }
+  }
+
   // -------------------------------------------------------------- example
-  private seedExample(): void {
+  private blankSnapshot(): EditorSnapshot {
+    return {
+      name: 'Untitled',
+      description: '',
+      createdAt: null,
+      nodes: [],
+      edges: [],
+      train: { dataset: this.datasets()[0]?.id ?? this.dataset(), epochs: 3, lr: 0.01, batch_size: 64, samples: 512 },
+      trainExtra: {},
+      customText: '',
+      view: { ...DEFAULT_VIEW },
+    };
+  }
+
+  private exampleSnapshot(): EditorSnapshot {
     const mk = (id: string, type: string, x: number, y: number, params: Record<string, unknown> = {}): EditorNode => ({
       id,
       type,
@@ -812,21 +1334,23 @@ export class EditorPage {
       y,
       params,
     });
-    this.nodes.set([
-      mk('input_1', 'Input', 70, 24, { shape: [1, 28, 28] }),
-      mk('flatten_2', 'Flatten', 70, 136, {}),
-      mk('linear_3', 'Linear', 70, 248, { out_features: 64, bias: true }),
-      mk('relu_4', 'ReLU', 70, 360, {}),
-      mk('linear_5', 'Linear', 70, 472, { out_features: 10, bias: true }),
-      mk('output_6', 'Output', 70, 584, {}),
-    ]);
-    this.edges.set([
-      { source: 'input_1', target: 'flatten_2' },
-      { source: 'flatten_2', target: 'linear_3' },
-      { source: 'linear_3', target: 'relu_4' },
-      { source: 'relu_4', target: 'linear_5' },
-      { source: 'linear_5', target: 'output_6' },
-    ]);
-    this.seq = 6;
+    return {
+      ...this.blankSnapshot(),
+      nodes: [
+        mk('input_1', 'Input', 70, 24, { shape: [1, 28, 28] }),
+        mk('flatten_2', 'Flatten', 70, 136, {}),
+        mk('linear_3', 'Linear', 70, 248, { out_features: 64, bias: true }),
+        mk('relu_4', 'ReLU', 70, 360, {}),
+        mk('linear_5', 'Linear', 70, 472, { out_features: 10, bias: true }),
+        mk('output_6', 'Output', 70, 584, {}),
+      ],
+      edges: [
+        { source: 'input_1', target: 'flatten_2' },
+        { source: 'flatten_2', target: 'linear_3' },
+        { source: 'linear_3', target: 'relu_4' },
+        { source: 'relu_4', target: 'linear_5' },
+        { source: 'linear_5', target: 'output_6' },
+      ],
+    };
   }
 }

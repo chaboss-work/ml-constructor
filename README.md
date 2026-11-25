@@ -137,6 +137,9 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
 * `POST /build` → per-layer shapes + parameter counts (or a `422` with the reason).
 * `POST /train` → `{ loss_curve, final_loss, final_accuracy, steps, ... }`.
 * `GET /layers` → the palette the editor renders.
+* `edge_settings` (optional) → how a connection reshapes its data; without it every
+  connection adapts by itself (flatten, fold into an image, read an image as a
+  sequence, …). `POST /connections/options` lists the choices for one connection.
 
 > **v1 scope:** a single linear chain (one `Input` → one `Output`). Branch/merge
 > nodes (Add, Concat, residuals) and real datasets are planned — see below.

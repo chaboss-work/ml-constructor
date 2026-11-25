@@ -19,6 +19,7 @@ import torch.nn as nn
 
 from .blocks import Block
 from .builder import build_model
+from .connections import ImageToSeq, SeqPool
 from .layers.attention import _PositionalEncoding, _SelfAttention
 from .layers.sequence import _EmbeddingModule, _RecurrentModule
 from .schema import GraphSpec
@@ -94,6 +95,44 @@ class PositionalEncoding(nn.Module):
     def forward(self, x):
         return self.drop(x + self.pe[:, : x.size(1)])
 ''',
+    "SeqPool": '''
+class SeqPool(nn.Module):
+    """Collapse a (B, L, F) sequence to (B, F): the last or first step, the mean or the max."""
+
+    def __init__(self, mode):
+        super().__init__()
+        self.mode = mode
+
+    def forward(self, x):
+        if self.mode == "last":
+            return x[:, -1]
+        if self.mode == "first":
+            return x[:, 0]
+        if self.mode == "mean":
+            return x.mean(dim=1)
+        return x.amax(dim=1)
+''',
+    "ImageToSeq": '''
+class ImageToSeq(nn.Module):
+    """Read a (B, C, H, W) feature map as a sequence: rows, columns, pixels or patches."""
+
+    def __init__(self, mode, patch=4):
+        super().__init__()
+        self.mode = mode
+        self.patch = patch
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        if self.mode == "rows":
+            return x.permute(0, 2, 1, 3).reshape(b, h, c * w)
+        if self.mode == "columns":
+            return x.permute(0, 3, 1, 2).reshape(b, w, c * h)
+        if self.mode == "pixels":
+            return x.flatten(2).transpose(1, 2)
+        p = self.patch
+        x = x.unfold(2, p, p).unfold(3, p, p).permute(0, 2, 3, 1, 4, 5)
+        return x.reshape(b, (h // p) * (w // p), c * p * p)
+''',
 }
 
 
@@ -134,6 +173,16 @@ def _module_expr(m: nn.Module, needs: set[str], indent: str = "            ") ->
         return f"Recurrent(nn.{m.rnn!r}, {bool(m.return_sequence)})"
     if isinstance(m, nn.TransformerEncoderLayer):
         return _transformer_src(m)
+    if isinstance(m, SeqPool):  # Stage 14 connection transforms
+        needs.add("SeqPool")
+        return f"SeqPool({m.mode!r})"
+    if isinstance(m, ImageToSeq):
+        needs.add("ImageToSeq")
+        return f"ImageToSeq({m.mode!r}, {int(m.patch)})"
+    if isinstance(m, nn.Sequential) and not isinstance(m, Block):  # e.g. a connection's flatten + unflatten
+        inner = [_module_expr(sub, needs, indent + "    ") for sub in m]
+        joined = (",\n" + indent + "    ").join(inner)
+        return "nn.Sequential(\n" + indent + "    " + joined + ",\n" + indent + ")"
     if isinstance(m, Block):  # a Repeat node: its flattened inner chain, in order
         inner = [_module_expr(sub, needs, indent + "    ") for sub in m.layers]
         joined = (",\n" + indent + "    ").join(inner)
@@ -263,6 +312,15 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
             has_module[nid] = True
         else:
             has_module[nid] = False
+    # Stage 14: the connections' transforms, registered after the layers (as in the app)
+    edge_keys = model._edge_keys
+    for key in edge_keys.values():
+        init_lines.append(f"        self.{key} = {_module_expr(model._edge_mods[key], needs)}")
+
+    def along(src: str, dst: str) -> str:
+        """What ``src`` sends to ``dst`` in the generated forward()."""
+        key = edge_keys.get((src, dst))
+        return f"self.{key}(h[{src!r}])" if key else f"h[{src!r}]"
 
     # forward: replicate the DAG walk (merges combine predecessors; everyone else
     # takes its single predecessor), applying each node's module where it has one.
@@ -273,14 +331,14 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
             rhs = "x"
         elif nid in merge_ids:
             node = node_by_id[nid]
-            parts = [f"h[{p!r}]" for p in preds[nid]]
+            parts = [along(p, nid) for p in preds[nid]]
             if node.type == "Concat":
                 dim = int(node.params.get("dim", 0)) + 1  # +1: tensors carry a batch dim
                 rhs = f"torch.cat([{', '.join(parts)}], dim={dim})"
             else:  # Add
                 rhs = " + ".join(parts)
         else:
-            rhs = f"h[{preds[nid][0]!r}]"
+            rhs = along(preds[nid][0], nid)
         if has_module[nid]:
             fwd_lines.append(f"        h[{ref}] = self.{_key(nid)}({rhs})")
         else:
@@ -300,7 +358,7 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     if "PositionalEncoding" in needs:
         out.append("import math")
     out.append("")
-    for name in ("TokenEmbedding", "Recurrent", "SelfAttention", "PositionalEncoding"):
+    for name in ("TokenEmbedding", "Recurrent", "SelfAttention", "PositionalEncoding", "SeqPool", "ImageToSeq"):
         if name in needs:
             out.append(_HELPERS[name].strip("\n"))
             out.append("")

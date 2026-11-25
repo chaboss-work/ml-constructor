@@ -19,7 +19,33 @@ class ShapeError(ValueError):
     This is the seed of the project's "smart adapters" vision: instead of a
     cryptic tensor error deep inside the forward pass, the builder reports
     exactly which connection is invalid and why, pointing at the node id.
+
+    Stage 14 adds machine-readable context so the editor can point at the
+    culprit: ``node_id`` (the layer), ``edge`` (``(source, target)`` of the
+    connection) and ``hint`` (what to do about it).
     """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        node_id: str | None = None,
+        edge: tuple[str, str] | None = None,
+        hint: str | None = None,
+    ):
+        super().__init__(message)
+        self.node_id = node_id
+        self.edge = edge
+        self.hint = hint
+
+    def to_detail(self) -> dict:
+        """The structured part of a 422 response."""
+        return {
+            "message": str(self),
+            "node_id": self.node_id,
+            "edge": list(self.edge) if self.edge else None,
+            "hint": self.hint,
+        }
 
 
 def numel(shape: Shape | None) -> int:

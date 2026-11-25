@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from math import prod
 
-from .builder import _node_from_spec, topology
+from .builder import plan_graph
 from .layers.base import LayerNode
 from .schema import AdapterProposal, GraphSpec, NodeSpec
 from .shapes import Shape, ShapeError
@@ -59,57 +59,39 @@ def _first_fixing_adapter(src_shape: Shape, target: LayerNode):
 
 
 def suggest_for_graph(spec: GraphSpec) -> list[AdapterProposal]:
-    """Walk the graph in topological order and, for every single-input edge whose
-    target cannot consume the source shape, propose an adapter if one fixes it.
+    """For every single-input edge whose target cannot consume the source shape,
+    propose an adapter node if one fixes it.
 
-    Unlike :func:`~mlconstructor.builder.build_model` this never raises on a shape
-    mismatch — it collects the fixable ones — and it tolerates a partial graph
+    Since Stage 14 connections adapt shapes on their own ("auto"), so this only
+    fires where a connection is pinned to a transform that does not fit (e.g.
+    "Direct"). It never raises on a shape mismatch and tolerates a partial graph
     (any number of Input/Output nodes), so the editor can call it while wiring.
     """
-    nodes = {n.id: _node_from_spec(n) for n in spec.nodes}
-    order, preds, _succ = topology(spec)
-
-    out_shape: dict[str, Shape] = {}
+    plan = plan_graph(spec, tolerant=True)
     proposals: list[AdapterProposal] = []
-
-    for nid in order:
-        node = nodes[nid]
-        ps = preds[nid]
-        if not node.needs_input:  # source node: shape from itself
-            try:
-                out_shape[nid] = node.out_shape(None)
-            except ShapeError:
-                pass
+    for exc in plan.errors:
+        if not exc.edge:
             continue
-        if node.is_merge:  # merge node: needs every predecessor's shape
-            if len(ps) >= 2 and all(p in out_shape for p in ps):
-                try:
-                    out_shape[nid] = node.out_shape_merge([out_shape[p] for p in ps])
-                except ShapeError:
-                    pass
+        src, dst = exc.edge
+        node = plan.nodes.get(dst)
+        if node is None or node.is_merge or src not in plan.out_shapes:
             continue
-        # ordinary single-input layer
-        if len(ps) != 1 or ps[0] not in out_shape:
+        in_sh = plan.out_shapes[src]
+        fix = _first_fixing_adapter(in_sh, node)
+        if fix is None:
             continue
-        in_sh = out_shape[ps[0]]
-        try:
-            out_shape[nid] = node.out_shape(in_sh)
-        except ShapeError:
-            fix = _first_fixing_adapter(in_sh, node)
-            if fix is not None:
-                atype, params, adapted = fix
-                proposals.append(
-                    AdapterProposal(
-                        source_id=ps[0],
-                        target_id=nid,
-                        adapter_type=atype,
-                        params=params,
-                        reason=_reason(atype, node.type_name, in_sh, adapted),
-                        in_shape=list(in_sh),
-                        out_shape=list(adapted),
-                    )
-                )
-                out_shape[nid] = node.out_shape(adapted)  # continue downstream as if inserted
+        atype, params, adapted = fix
+        proposals.append(
+            AdapterProposal(
+                source_id=src,
+                target_id=dst,
+                adapter_type=atype,
+                params=params,
+                reason=_reason(atype, node.type_name, in_sh, adapted),
+                in_shape=list(in_sh),
+                out_shape=list(adapted),
+            )
+        )
     return proposals
 
 
@@ -137,4 +119,8 @@ def apply_adapter(spec: GraphSpec, proposal: AdapterProposal) -> GraphSpec:
             edges.append([src, dst])
     if not replaced:
         raise ValueError(f"edge {proposal.source_id!r} -> {proposal.target_id!r} not found in the graph")
-    return GraphSpec(nodes=nodes, edges=edges, train=spec.train)
+    # the replaced edge's own setting goes with it; every other connection keeps its setting
+    settings = [
+        s for s in spec.edge_settings if not (s.source == proposal.source_id and s.target == proposal.target_id)
+    ]
+    return GraphSpec(nodes=nodes, edges=edges, train=spec.train, edge_settings=settings)

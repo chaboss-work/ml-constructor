@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+from .connections import AUTO, TRANSFORMS
 from .datasets import canonical_dataset_id
 from .registry import LAYER_REGISTRY
 from .schema import (
@@ -72,13 +73,22 @@ def _v0_to_v1(raw: dict) -> dict:
         "format": PROJECT_FORMAT,
         "version": 1,
         "name": raw.get("name") or "Imported graph",
-        "graph": {"nodes": raw.get("nodes", []), "edges": raw.get("edges", [])},
+        "graph": {
+            "nodes": raw.get("nodes", []),
+            "edges": raw.get("edges", []),
+            "edge_settings": raw.get("edge_settings", []) or [],
+        },
         "train": raw.get("train", {}) or {},
     }
 
 
+def _v1_to_v2(raw: dict) -> dict:
+    """Stage 14 adds per-connection settings; a format-1 file has none (all "auto")."""
+    return {**raw, "version": 2}
+
+
 #: ``version -> function`` upgrading a raw dict by exactly one version.
-_MIGRATIONS: dict[int, Callable[[dict], dict]] = {0: _v0_to_v1}
+_MIGRATIONS: dict[int, Callable[[dict], dict]] = {0: _v0_to_v1, 1: _v1_to_v2}
 
 
 def detect_version(raw: Any) -> int:
@@ -161,6 +171,26 @@ def normalize_project(raw: Any) -> ProjectLoadResult:
                 message=f"Dropped the edge {edge[0]!r} → {edge[1]!r}: it points at a missing node.",
             ))
     project.graph.edges = kept
+
+    edge_set = {(e[0], e[1]) for e in kept}
+    settings = []
+    for s in project.graph.edge_settings:
+        if (s.source, s.target) not in edge_set:
+            warnings.append(ProjectWarning(
+                code="dangling_setting",
+                message=f"Dropped the settings of the connection {s.source!r} → {s.target!r}: there is no such connection.",
+            ))
+        elif s.transform != AUTO and s.transform not in TRANSFORMS:
+            warnings.append(ProjectWarning(
+                code="unknown_transform",
+                message=(
+                    f"The connection {s.source!r} → {s.target!r} uses an unknown transform "
+                    f"{s.transform!r}; it is set back to Auto."
+                ),
+            ))
+        else:
+            settings.append(s)
+    project.graph.edge_settings = settings
 
     if nodes and any(n.position is None for n in nodes):
         warnings.append(ProjectWarning(

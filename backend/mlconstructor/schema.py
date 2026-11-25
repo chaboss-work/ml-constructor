@@ -54,12 +54,28 @@ class TrainSpec(BaseModel):
     device: Literal["cpu", "cuda", "auto"] = "cpu"
 
 
+class EdgeSetting(BaseModel):
+    """Stage 14 — how one connection reshapes what flows through it.
+
+    ``transform`` is ``"auto"`` (pick the simplest transform that makes the shapes
+    fit — nothing at all when they already do), ``"none"`` (pass through as is) or
+    a concrete transform from :mod:`mlconstructor.connections` with its ``params``.
+    Edges without a setting use ``"auto"``."""
+
+    source: str
+    target: str
+    transform: str = "auto"
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
 class GraphSpec(BaseModel):
     """A full graph: nodes + directed edges ``[source_id, target_id]`` + train cfg."""
 
     nodes: list[NodeSpec]
     edges: list[list[str]] = Field(default_factory=list)
     train: TrainSpec = Field(default_factory=TrainSpec)
+    #: Stage 14 — per-connection transforms; edges not listed here use "auto".
+    edge_settings: list[EdgeSetting] = Field(default_factory=list)
 
     @field_validator("edges")
     @classmethod
@@ -83,6 +99,8 @@ class ParamDef(BaseModel):
     min: float | None = None
     max: float | None = None
     help: str | None = None
+    #: Stage 14 — a fixed set of allowed values (the editor shows a selector).
+    choices: list[str] | None = None
 
 
 class LayerInfo(BaseModel):
@@ -104,11 +122,72 @@ class LayerSummary(BaseModel):
     num_params: int
 
 
+class EdgeSummary(BaseModel):
+    """Stage 14 — what one connection does in the built model."""
+
+    source: str
+    target: str
+    #: the transform in use ("none" = passed through unchanged)
+    transform: str
+    #: True when "auto" picked it (the user did not choose one)
+    auto: bool
+    #: short text for the badge on the wire, e.g. "flatten" or "→ 2×8×8" ("" = nothing to show)
+    label: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    in_shape: list[int]
+    out_shape: list[int]
+    num_params: int = 0
+
+
 class BuildResult(BaseModel):
     ok: bool
     order: list[str]
     layers: list[LayerSummary]
     total_params: int
+    #: Stage 14 — every connection with its transform (shapes on both ends).
+    edges: list[EdgeSummary] = Field(default_factory=list)
+
+
+class ConnectionOption(BaseModel):
+    """One choice for a connection's transform, as the editor's selector shows it."""
+
+    transform: str
+    label: str
+    description: str
+    learnable: bool = False
+    params: list[ParamDef] = Field(default_factory=list)
+    #: suggested parameter sets, best first (the first one is the default)
+    presets: list[dict[str, Any]] = Field(default_factory=list)
+    #: whether the target accepts the result (with the default preset)
+    fits: bool = False
+    out_shape: list[int] | None = None
+    #: why it does not fit (or a short remark when it does)
+    note: str | None = None
+
+
+class ConnectionOptionsRequest(BaseModel):
+    spec: GraphSpec
+    source: str
+    target: str
+
+
+class ConnectionOptions(BaseModel):
+    """Everything the connection inspector needs for one edge."""
+
+    source: str
+    target: str
+    #: the shape arriving from the source (None if it cannot be computed yet)
+    in_shape: list[int] | None = None
+    #: the edge's current setting ("auto" or a concrete transform)
+    current: str = "auto"
+    current_params: dict[str, Any] = Field(default_factory=dict)
+    #: what "auto" resolves to right now (None if it finds nothing)
+    auto_transform: str | None = None
+    auto_params: dict[str, Any] = Field(default_factory=dict)
+    auto_out_shape: list[int] | None = None
+    #: why the connection does not work at the moment (None when it does)
+    problem: str | None = None
+    options: list[ConnectionOption] = Field(default_factory=list)
 
 
 class TrainResult(BaseModel):
@@ -225,7 +304,8 @@ class ExportResult(BaseModel):
 # Projects: save / open / autosave (Stage 13)
 # --------------------------------------------------------------------------- #
 PROJECT_FORMAT = "mlconstructor.project"
-PROJECT_FORMAT_VERSION = 1
+#: 1 — Stage 13; 2 — Stage 14 adds per-connection settings (``graph.edge_settings``).
+PROJECT_FORMAT_VERSION = 2
 
 
 class NodePosition(BaseModel):
@@ -242,6 +322,7 @@ class ProjectNode(NodeSpec):
 class ProjectGraph(BaseModel):
     nodes: list[ProjectNode] = Field(default_factory=list)
     edges: list[list[str]] = Field(default_factory=list)
+    edge_settings: list[EdgeSetting] = Field(default_factory=list)
 
     @field_validator("edges")
     @classmethod

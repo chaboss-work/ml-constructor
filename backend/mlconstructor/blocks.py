@@ -77,6 +77,7 @@ class GraphModule(nn.Module):
         merges: dict[str, Callable],
         input_id: str,
         output_id: str,
+        edge_modules: dict[tuple[str, str], nn.Module] | None = None,
     ):
         super().__init__()
         self.order = list(order)
@@ -86,11 +87,25 @@ class GraphModule(nn.Module):
         self.merge_ids = set(merges.keys())
         self._merges = dict(merges)  # id -> callable(list[Tensor]) -> Tensor (plain functions)
         self._mods = nn.ModuleDict({self._key(k): v for k, v in modules_by_id.items()})
+        # Stage 14: a connection's transform (flatten, fold into an image, …) runs on
+        # the value travelling along that edge, before the target node sees it.
+        self._edge_keys: dict[tuple[str, str], str] = {}
+        edge_mods: dict[str, nn.Module] = {}
+        for i, ((src, dst), mod) in enumerate((edge_modules or {}).items()):
+            key = f"e{i}_{self._key(src)[2:]}__{self._key(dst)[2:]}"
+            self._edge_keys[(src, dst)] = key
+            edge_mods[key] = mod
+        self._edge_mods = nn.ModuleDict(edge_mods)
 
     @staticmethod
     def _key(node_id: str) -> str:
         # ModuleDict keys cannot contain '.'; make a safe, unique-ish key.
         return "n_" + "".join(c if c.isalnum() else "_" for c in node_id)
+
+    def _along(self, outs: dict[str, torch.Tensor], src: str, dst: str) -> torch.Tensor:
+        """The value ``src`` sends to ``dst``, after the connection's transform."""
+        key = self._edge_keys.get((src, dst))
+        return self._edge_mods[key](outs[src]) if key is not None else outs[src]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         outs: dict[str, torch.Tensor] = {}
@@ -99,9 +114,9 @@ class GraphModule(nn.Module):
             if nid == self.input_id:
                 v = x
             elif nid in self.merge_ids:
-                v = self._merges[nid]([outs[p] for p in ps])
+                v = self._merges[nid]([self._along(outs, p, nid) for p in ps])
             else:
-                v = outs[ps[0]]
+                v = self._along(outs, ps[0], nid)
             key = self._key(nid)
             if key in self._mods:
                 v = self._mods[key](v)

@@ -9,10 +9,13 @@
  * directly — what this very app wrote into browser storage.
  */
 
-import { EditorEdge, EditorNode, ProjectFile, ProjectNode, TrainCfg } from './graph.models';
+import { EdgeSetting, EditorEdge, EditorNode, ProjectFile, ProjectNode, TrainCfg } from './graph.models';
 
 export const PROJECT_FORMAT = 'mlconstructor.project';
-export const PROJECT_FORMAT_VERSION = 1;
+/** 1 — Stage 13; 2 — Stage 14 adds per-connection settings (graph.edge_settings). */
+export const PROJECT_FORMAT_VERSION = 2;
+/** A connection with no setting adapts shapes on its own. */
+export const AUTO = 'auto';
 export const PROJECT_FILE_SUFFIX = '.mlc.json';
 /** Same cap as the backend (one project file, pasted rows included). */
 export const MAX_PROJECT_BYTES = 5 * 1024 * 1024;
@@ -79,6 +82,7 @@ export function toProjectFile(s: EditorSnapshot): ProjectFile {
     graph: {
       nodes: s.nodes.map((n) => ({ id: n.id, type: n.type, params: n.params, position: { x: n.x, y: n.y } })),
       edges: s.edges.map((e) => [e.source, e.target]),
+      edge_settings: edgeSettings(s.edges),
     },
     train,
     editor: { custom_text: s.customText, view: { ...s.view } },
@@ -88,6 +92,7 @@ export function toProjectFile(s: EditorSnapshot): ProjectFile {
 export function fromProjectFile(p: ProjectFile): EditorSnapshot {
   const specNodes: ProjectNode[] = p.graph?.nodes ?? [];
   const specEdges = (p.graph?.edges ?? []).filter((e) => Array.isArray(e) && e.length === 2);
+  const settings = new Map((p.graph?.edge_settings ?? []).map((s) => [`${s.source}->${s.target}`, s]));
   // Nodes saved with a position keep it. Nodes without one (a bare graph spec, or a
   // hand-edited file) are laid out by depth; when some nodes do have positions, the
   // laid-out ones go to the right of them so nothing lands on top of the user's work.
@@ -114,12 +119,24 @@ export function fromProjectFile(p: ProjectFile): EditorSnapshot {
     description: p.description ?? '',
     createdAt: p.created_at ?? null,
     nodes,
-    edges: specEdges.map(([source, target]) => ({ source, target })),
+    edges: specEdges.map(([source, target]) => {
+      const s = settings.get(`${source}->${target}`);
+      return s && s.transform && s.transform !== AUTO
+        ? { source, target, transform: s.transform, params: structuredClone(s.params ?? {}) }
+        : { source, target };
+    }),
     train: train as Partial<TrainCfg>,
     trainExtra,
     customText: p.editor?.custom_text ?? '',
     view,
   };
+}
+
+/** The connections that do not simply use "auto", as the backend expects them. */
+export function edgeSettings(edges: EditorEdge[]): EdgeSetting[] {
+  return edges
+    .filter((e) => e.transform && e.transform !== AUTO)
+    .map((e) => ({ source: e.source, target: e.target, transform: e.transform as string, params: e.params ?? {} }));
 }
 
 function isPoint(pos: ProjectNode['position']): boolean {

@@ -13,6 +13,8 @@ export interface ParamDef {
   min?: number | null;
   max?: number | null;
   help?: string | null;
+  /** Stage 14 — a fixed set of allowed values (rendered as a selector). */
+  choices?: string[] | null;
 }
 
 export interface LayerInfo {
@@ -35,6 +37,70 @@ export interface EditorNode {
 export interface EditorEdge {
   source: string;
   target: string;
+  /** Stage 14 — how this connection reshapes its data: "auto" (default), "none" or a transform. */
+  transform?: string;
+  params?: Record<string, unknown>;
+}
+
+/** Stage 14 — a connection's transform, as sent to the backend (edges without one use "auto"). */
+export interface EdgeSetting {
+  source: string;
+  target: string;
+  transform: string;
+  params: Record<string, unknown>;
+}
+
+/** Stage 14 — what one connection does in the built model. */
+export interface EdgeSummary {
+  source: string;
+  target: string;
+  /** the transform in use ("none" = passed through unchanged) */
+  transform: string;
+  /** true when "auto" picked it */
+  auto: boolean;
+  /** short text for the wire ("" = nothing to show) */
+  label: string;
+  params: Record<string, unknown>;
+  in_shape: number[];
+  out_shape: number[];
+  num_params: number;
+}
+
+/** Stage 14 — one choice in a connection's transform selector. */
+export interface ConnectionOption {
+  transform: string;
+  label: string;
+  description: string;
+  learnable: boolean;
+  params: ParamDef[];
+  /** suggested parameter sets, best first */
+  presets: Record<string, unknown>[];
+  /** whether the target accepts the result (with the first preset) */
+  fits: boolean;
+  out_shape: number[] | null;
+  note: string | null;
+}
+
+/** Stage 14 — everything the connection inspector shows for one edge. */
+export interface ConnectionOptions {
+  source: string;
+  target: string;
+  in_shape: number[] | null;
+  current: string;
+  current_params: Record<string, unknown>;
+  auto_transform: string | null;
+  auto_params: Record<string, unknown>;
+  auto_out_shape: number[] | null;
+  problem: string | null;
+  options: ConnectionOption[];
+}
+
+/** Stage 14 — the structured part of a 422 response: where the problem is and what to do. */
+export interface GraphErrorInfo {
+  message: string;
+  node_id: string | null;
+  edge: string[] | null;
+  hint: string | null;
 }
 
 export interface TrainCfg {
@@ -74,6 +140,8 @@ export interface GraphSpec {
   nodes: { id: string; type: string; params: Record<string, unknown> }[];
   edges: string[][];
   train: Partial<TrainCfg>;
+  /** Stage 14 — per-connection transforms; edges not listed use "auto". */
+  edge_settings?: EdgeSetting[];
 }
 
 export interface LayerSummary {
@@ -89,6 +157,8 @@ export interface BuildResult {
   order: string[];
   layers: LayerSummary[];
   total_params: number;
+  /** Stage 14 — every connection with its transform. Optional: older backends omit it. */
+  edges?: EdgeSummary[];
 }
 
 export interface TrainResult {
@@ -196,7 +266,7 @@ export interface ProjectFile {
   description?: string;
   created_at?: string | null;
   updated_at?: string | null;
-  graph: { nodes: ProjectNode[]; edges: string[][] };
+  graph: { nodes: ProjectNode[]; edges: string[][]; edge_settings?: EdgeSetting[] };
   train: Partial<TrainCfg> & Record<string, unknown>;
   editor?: { custom_text?: string; view?: ProjectView };
 }
@@ -237,4 +307,6 @@ export interface HealthInfo {
   layers: number;
   cuda_available?: boolean;
   server_projects?: boolean;
+  /** Stage 14 — the latest stage whose API this backend serves (absent on older ones). */
+  api?: number;
 }

@@ -63,8 +63,8 @@ const SNAP: EditorSnapshot = {
   ],
   edges: [
     { source: 'input_1', target: 'conv2d_2' },
-    { source: 'conv2d_2', target: 'repeat_3' },
-    { source: 'repeat_3', target: 'output_4' },
+    { source: 'conv2d_2', target: 'repeat_3', transform: 'flatten', params: {} },
+    { source: 'repeat_3', target: 'output_4', transform: 'seq_pool', params: { mode: 'mean' } },
   ],
   train: {
     dataset: 'custom',
@@ -135,10 +135,23 @@ describe('project file <-> editor state', () => {
     expect(s.train.custom_rows).toEqual(SNAP.train.custom_rows);
   });
 
+  it('saves only the connections that do not use auto', () => {
+    const file = toProjectFile(SNAP);
+    expect(file.graph.edge_settings).toEqual([
+      { source: 'conv2d_2', target: 'repeat_3', transform: 'flatten', params: {} },
+      { source: 'repeat_3', target: 'output_4', transform: 'seq_pool', params: { mode: 'mean' } },
+    ]);
+    // an explicit "auto" is the same as no setting
+    const autoAll = toProjectFile({ ...SNAP, edges: SNAP.edges.map((e) => ({ ...e, transform: 'auto' })) });
+    expect(autoAll.graph.edge_settings).toEqual([]);
+    expect(fingerprint(autoAll)).not.toBe(fingerprint(file)); // changing a connection is an edit
+  });
+
   it('reads only the current format directly', () => {
     const file = toProjectFile(SNAP);
     expect(readCurrentFormat(file)).not.toBeNull();
-    expect(readCurrentFormat({ ...file, version: 2 })).toBeNull(); // newer -> backend decides
+    expect(readCurrentFormat({ ...file, version: PROJECT_FORMAT_VERSION + 1 })).toBeNull(); // newer -> backend decides
+    expect(readCurrentFormat({ ...file, version: 1 })).toBeNull(); // older -> the backend migrates it
     expect(readCurrentFormat({ nodes: [], edges: [] })).toBeNull(); // bare spec -> backend migrates
     expect(readCurrentFormat([1, 2])).toBeNull();
     expect(readCurrentFormat({ ...file, graph: { nodes: [{ id: 1 }], edges: [] } })).toBeNull();

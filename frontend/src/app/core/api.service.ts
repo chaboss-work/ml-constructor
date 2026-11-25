@@ -5,6 +5,7 @@ import { Observable } from 'rxjs';
 import {
   ArchitectureInfo,
   BuildResult,
+  ConnectionOptions,
   DataPreview,
   DatasetInfo,
   ExportResult,
@@ -78,6 +79,12 @@ export class ApiService {
       `${API_BASE}/export/pytorch?include_training=${includeTraining}`,
       spec,
     );
+  }
+
+  /** The connection inspector (Stage 14): the shape arriving on one edge, what
+   * "auto" picks, and every transform that applies (with presets and reasons). */
+  connectionOptions(spec: GraphSpec, source: string, target: string): Observable<ConnectionOptions> {
+    return this.http.post<ConnectionOptions>(`${API_BASE}/connections/options`, { spec, source, target });
   }
 
   // ---- projects (Stage 13) ----

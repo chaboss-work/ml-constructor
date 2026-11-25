@@ -61,6 +61,7 @@ The core is deliberately OOP:
 │  │  ├─ blocks.py             NeuralNetwork, Block (repeatable)
 │  │  ├─ builder.py            graph spec → NeuralNetwork
 │  │  ├─ trainer.py            tiny synthetic-data training loop
+│  │  ├─ projects.py           project files: format, migrations, server store
 │  │  └─ schema.py             the UI⇄backend contract (pydantic)
 │  ├─ app.py                   FastAPI entry point
 │  ├─ tests/test_end_to_end.py the M1 proof
@@ -68,7 +69,8 @@ The core is deliberately OOP:
 └─ frontend/                    Angular 22 + Ionic 9 node editor
    └─ src/app/
       ├─ editor/                the node-editor page (canvas, palette, inspector)
-      └─ core/                  api.service.ts, graph.models.ts (contract mirror)
+      └─ core/                  api.service.ts, graph.models.ts (contract mirror),
+                                project.ts (save / open / autosave)
 ```
 
 ## Quickstart — backend
@@ -138,6 +140,20 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
 
 > **v1 scope:** a single linear chain (one `Input` → one `Output`). Branch/merge
 > nodes (Add, Concat, residuals) and real datasets are planned — see below.
+
+## Projects (`.mlc.json`)
+
+Your work is kept: the editor autosaves a draft in the browser and brings it back after
+a reload. **Save** (Ctrl+S) keeps a project in the browser, **Download** writes a
+`.mlc.json` file that opens on any ML Constructor (pick it, or drop it onto the
+canvas), and a self-hosted instance can keep projects on the server too. A project
+file holds the graph with node positions, the training setup (pasted rows included)
+and a format version — older files, and a bare graph spec like the one above, are
+upgraded when opened.
+
+* `POST /projects/normalize` → any supported file version → the current format + warnings.
+* `GET /projects`, `POST /projects`, `GET | PUT | DELETE /projects/{name}` → the optional
+  server store (`MLC_SERVER_PROJECTS=0` switches it off, `MLC_PROJECTS_DIR` moves it).
 
 ## Roadmap
 

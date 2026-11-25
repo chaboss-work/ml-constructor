@@ -169,6 +169,247 @@ accessibility — maintained across every stage.
 
 ---
 
+## Phase 2 — from a builder to a workbench · *in progress*
+
+Phase 1 (Stages 0–12) built the core: draw a network, train it, export it. Phase 2
+turns the builder into a workbench you can live in — a polished, interactive editor
+whose work you can save, a real **data workbench** (tables, parsers, a column mapper
+with warnings), a look **inside** the trained model, and **your own layers** with your
+own math. The rule stays the same: every stage is a self-contained increment — tested,
+deployed to the live app, published on GitHub and turned into a narrated video on the
+project channels.
+
+The stages come in four blocks, ordered by dependency:
+
+- **A · Interface foundation** (13–16) — save your work, a new look, a truly
+  interactive editor, a Russian interface.
+- **B · The model in action** (17–18) — try the trained model on your own input and
+  see what happens inside it.
+- **C · Data workbench** (19–22) — datasets as tables, a universal column → input
+  mapper with warnings, and parsers that build datasets from raw material (text for
+  language models, exported price candles for time series).
+- **D · Custom layers** (23–24) — your own activation formulas, gradients and weighted
+  layers, saved under your own names.
+
+| Stage | Block | In one line | Video |
+|---|---|---|---|
+| 13 | A | Projects: save, open, autosave — **done** | Close the tab, come back — it's all there |
+| 14 | A | A new look: design system, themes, live training on the canvas | Before / after |
+| 15 | A | Interactive editor: drag & drop, multi-select, undo / redo, mini-map | A ResNet in under a minute |
+| 16 | A | Russian interface (EN / RU) | The app in Russian |
+| 17 | B | Try the model: draw a digit, see the prediction | Draw a digit — it guesses |
+| 18 | B | Inside the model: validation, confusion matrix, activations | What is inside a neural network |
+| 19 | C | Datasets as tables: browse, statistics, edit, import | Fix your data like a spreadsheet |
+| 20 | C | Column → input mapper with warnings; regression | Plug any table into a network |
+| 21 | C | Text → dataset for language models; text generation | Feed it a book |
+| 22 | C | Time series from exported candles (e.g. SOLUSDT) | A network on SOLUSDT candles |
+| 23 | D | Your own activations: a formula editor | Invent an activation function |
+| 24 | D | Your own gradients and weighted layers | A layer from scratch |
+
+Cross-cutting rules for Phase 2: user formulas are read by a **safe math parser** and
+are never executed as code; file parsers have size limits; project files carry a format
+version, so older files keep opening; from Stage 16 on, every new string ships in
+English and Russian.
+
+### Stage 13 — Projects: save, open, autosave · **DONE (2026-11-25)**
+Your work stops disappearing on a page refresh.
+- A versioned project file (`.mlc.json`): the graph with node positions, training
+  settings, the chosen dataset (including pasted custom rows) and metadata (name,
+  description, dates).
+- **Save** to a file, **open** from a file, **autosave** in the browser with restore
+  after a reload, **recent projects**, new / save as / rename / duplicate.
+- Optional **server-side projects** for a self-hosted instance (open the same project
+  from another device).
+- Format migrations, so files from older versions keep opening.
+- *Done when:* save → open reproduces the graph exactly (tested), autosave survives a
+  reload, and an older-format file opens.
+- *Video:* build a network, close the tab, come back — everything is there; send the
+  file to a friend.
+- **Shipped:** the versioned `.mlc.json` format (format 1; a bare graph spec opens as
+  format 0 and is upgraded). Migrations live in the backend — `POST /projects/normalize`
+  opens any supported version and reports unknown layers, dropped broken edges and
+  missing positions. The draft autosaves in the browser and comes back after a reload;
+  **Save** (Ctrl+S) keeps projects in the browser (the list doubles as recent projects),
+  with save as copy, rename / description and delete; **Download** a file and **open**
+  one (or drop it onto the canvas); optional server-side projects
+  (`GET/POST/PUT/DELETE /projects`, strict names, size and count limits,
+  `MLC_SERVER_PROJECTS=0` to switch off, `MLC_PROJECTS_DIR` to move). A template from the
+  library now starts a new project. Tested: save → open is exact for a CNN, a GPT with a
+  nested Repeat block and pasted custom rows, and the reopened graphs build identically
+  (6 backend tests + 16 front-end unit tests); checked live in the browser — the
+  autosave survives a reload and an old-format file opens.
+
+### Stage 14 — A new look · *planned*
+An editor that is attractive at first sight.
+- A design system — palette, typography, spacing, elevation — with **dark and light
+  themes** and a switch.
+- Nodes colour-coded by family (input / output, convolution, dense, activation,
+  normalization, sequence, attention, merge, block), with icons, a compact and a
+  detailed view, and tensor-shape and parameter-count badges.
+- Edges as smooth curves with an animated **data flow**, a hover highlight and the
+  tensor shape shown right on the wire.
+- **Live training on the canvas:** nodes glow as a batch passes through, a progress
+  ring, and the final accuracy shown on the Output node.
+- A cleaner inspector — grouped parameters, sliders and toggles, inline help — with
+  smooth transitions and micro-interactions throughout.
+- *Done when:* every screen uses the design system in both themes, and the training
+  animation does not slow training down.
+- *Video:* before / after.
+
+### Stage 15 — An interactive editor · *planned*
+Editing that feels like a real tool.
+- **Drag & drop** layers from the palette onto the canvas; connect by **dragging from
+  port to port**, with valid targets highlighted and shape mismatches flagged while you
+  hover (reusing the Stage 5 smart adapters).
+- **Multi-select** (box / Shift), move and delete groups; **copy / paste / duplicate**;
+  **undo / redo**, built on the Stage 13 serialization.
+- A **mini-map**, fit-to-screen, **auto-layout** on demand, snap-to-grid and alignment.
+- A **context menu** (insert a layer, wrap in a Repeat block, disable, delete),
+  **keyboard shortcuts** with a cheat sheet, and search on the canvas.
+- *Done when:* every action can be undone, the shortcuts work, and editor end-to-end
+  tests cover drag, connect, copy / paste and undo.
+- *Video:* building a ResNet in under a minute with drag & drop and shortcuts.
+
+### Stage 16 — Russian interface (EN / RU) · *planned*
+- A translation layer for the UI with a language switch, remembered per browser.
+- Every UI string, layer description and parameter hint in English and Russian; the
+  backend's layer catalogue and error messages become translatable (stable error codes
+  plus translated text).
+- From this stage on, every new string ships in both languages.
+- *Done when:* the whole app works in either language with no untranslated strings (a
+  check fails the build on a missing key).
+- *Video:* the app in Russian, for the Russian-speaking audience.
+
+### Stage 17 — Try the model · *planned*
+Use the network you have just trained.
+- The backend keeps the session's last trained model (and can load a saved checkpoint);
+  `POST /predict` returns class probabilities.
+- A **Try it** panel: for images a **drawing canvas** (MNIST-style preprocessing —
+  centring and scaling to 28×28) and image upload; for vectors and custom data, a value
+  or row input.
+- Probability bars for every class, the top 3 and the confidence; compare two models on
+  the same input.
+- *Done when:* a drawn digit is classified by the trained MNIST model in the live app,
+  and the predictions match the backend's offline result.
+- *Video:* draw a digit — the network guesses it.
+
+### Stage 18 — Inside the model · *planned*
+See what the network has learned — and where it struggles.
+- A **train / validation split** (plus early stopping), with train-versus-validation
+  curves that make overfitting visible.
+- A **confusion matrix** and per-class accuracy; a **gallery of mistakes** (what gets
+  mistaken for what).
+- **Activation maps** of the convolution layers for a chosen example, and the
+  first-layer filters.
+- **Weight and gradient histograms** per layer over time, with warnings for vanishing or
+  exploding gradients.
+- *Done when:* all views work for the library architectures on MNIST and CIFAR-10 and
+  are covered by tests.
+- *Video:* what is going on inside a neural network.
+
+### Stage 19 — Datasets as tables · *planned*
+A real view of the data instead of a few preview rows.
+- One table model for every dataset — columns with types (number, category, text,
+  image, time) and rows — built-in datasets included.
+- Visual browsing: images as a thumbnail grid, text as text, time series as charts,
+  numbers as a table.
+- Column statistics: min / max / mean / standard deviation, missing values, unique
+  values, histograms, class balance.
+- **Editing:** cells, add / delete rows and columns, filter, sort, search.
+- Import CSV / TSV / JSON (more formats later), export, and a train / validation / test
+  split with a preview.
+- *Done when:* a CSV can be imported, inspected, edited and saved with the project, and
+  large tables page smoothly.
+- *Video:* look at and fix your data like in a spreadsheet.
+
+### Stage 20 — Column mapper & data warnings · *planned*
+A universal editor that wires table columns to the model.
+- Columns on one side, the model's inputs on the other, connected by dragging; one
+  column is picked as the **target**. The task follows from the target:
+  **classification** (categories) or **regression** (numbers — the trainer gains MSE /
+  MAE losses).
+- Transforms in place: scaling (min-max / z-score), category encoding (one-hot / label),
+  missing-value filling, log transform.
+- A **validator** with errors, warnings and hints — each with a one-click fix where
+  possible:
+  - a model input has no column (not selected);
+  - a column is constant or all zeros (it carries no information);
+  - one column feeds several inputs, or two columns are identical (duplicates);
+  - the selected columns do not match the Input shape;
+  - a non-numeric column without an encoding; missing values, NaN or infinity;
+  - the target column is among the inputs, or an input looks suspiciously like the
+    target (target leakage);
+  - class imbalance or too few rows per class; wildly different feature scales;
+  - for time series, a feature that peeks into the future.
+- The mapping is saved with the project.
+- *Done when:* every warning has a test that triggers it, and a mapped CSV trains end to
+  end in both task types.
+- *Video:* plug any table into a network — the editor warns you before you train.
+
+### Stage 21 — Text → dataset for language models · *planned*
+Feed raw material, get a dataset built for the model.
+- Load material (txt / md; pdf and docx converted to text) or paste it.
+- A parser that cleans the text, tokenizes it (by characters, or with a BPE vocabulary
+  trained on the material itself — no external service), and cuts fixed-length context
+  windows into "context → next token" training pairs.
+- A preview: tokens in colour, vocabulary size, number of windows; warnings for too
+  little text, a vocabulary too large for the model, or a window longer than the text.
+- One click wires the dataset to the library GPT, with the vocabulary and output size
+  adjusted automatically.
+- **Generation:** the trained model continues your text (temperature, top-k).
+- *Done when:* a small text trains a GPT in the live app and it writes in the
+  material's style; parser tests cover tokenization and windowing.
+- *Video:* feed it a book — the model writes in its style.
+
+### Stage 22 — Time series: price candles · *planned*
+Build a dataset from an exported timeframe, e.g. SOLUSDT candles.
+- Import exported candles (CSV: time, open, high, low, close, volume); columns are
+  detected and gaps in time are reported.
+- A parser with lookback windows, configurable features (returns, log price, volume,
+  SMA / EMA / RSI / volatility) and a target: the direction after H candles (up / down /
+  flat by a threshold — classification) or the return (regression).
+- A **strictly chronological split** (no shuffling) and warnings for look-ahead leakage,
+  non-stationarity and class imbalance.
+- A candlestick chart with the target and the windows marked and, after training, the
+  predictions over the test period.
+- Honest framing: a learning and research example — not a trading system and not
+  financial advice; no orders, no wallets.
+- *Done when:* an exported candle file goes from import to a trained model and a
+  test-period chart, and the leakage checks are tested.
+- *Video:* a neural network on SOLUSDT candles — and why it is harder than it looks.
+
+### Stage 23 — Your own activations: a formula editor · *planned*
+Create layers with your own math and keep them under your own names.
+- **Create a layer from…**: take any layer as the parent (ReLU, GELU, Sigmoid, …) and
+  open its formula.
+- Write `f(x; a, b, …)` with coefficients that are fixed or **trainable**, with initial
+  values and ranges. A **safe math parser** — an allow-list of operators and functions,
+  never executed as code — compiles it to torch operations.
+- A live plot of `f(x)` and its derivative `f'(x)` (via autograd), coefficient sliders
+  that redraw instantly, and checks for NaN / infinity, a gradient that vanishes over a
+  wide range (a "dead" function) and explosive growth.
+- Save to **My layers** with a name, a description and a family: the layer appears in
+  the palette and behaves like any other (shapes, parameters; the PyTorch export
+  generates a class with your formula).
+- Stored with the project and in a personal layer library.
+- *Done when:* a custom activation trains a network in the live app and exports to
+  standalone PyTorch, and the parser rejects anything outside the allow-list (tested).
+- *Video:* invent an activation function and train a network with it.
+
+### Stage 24 — Your own gradients & weighted layers · *planned*
+- A **custom backward**: write your own derivative (a surrogate gradient) for step,
+  threshold, quantization or spiking functions, and compare it with the automatic one.
+- **Layers with weights**: a formula over the input and trainable tensors (W, b, …)
+  with inferred shapes — e.g. a polynomial layer, a gate, your own normalization.
+- **Save a sub-graph as a layer** — a composite custom layer built on the Repeat / Block
+  machinery.
+- Sharing: export / import a layer library as a file, with version checks.
+- *Done when:* a surrogate-gradient layer and a weighted custom layer train end to end
+  and export to PyTorch, and a saved sub-graph reloads as a single layer.
+- *Video:* a layer from scratch — formula, weights and gradient.
+
+---
+
 ## Как это работает (кратко, по-русски)
 
 ML Constructor — визуальная IDE для сборки нейросетей, «ComfyUI для нейросетей»:
@@ -249,3 +490,244 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   стрим на CUDA работает. Заодно исправлен скрытый баг Этапа 11 — проба числа классов шла на
   CPU, когда модель уже на GPU, — с регрессионным тестом без GPU.
 * **Постоянно:** высокий уровень ООП, тесты, документация, производительность.
+
+### Фаза 2 — от конструктора к мастерской (идёт)
+
+Фаза 1 (Этапы 0–12) построила ядро: нарисовать сеть, обучить, экспортировать. Фаза 2
+превращает конструктор в мастерскую, в которой удобно жить: красивый интерактивный
+редактор с сохранением работы, полноценный **цех данных** (таблицы, парсеры, редактор
+«колонки → входы» с предупреждениями), взгляд **внутрь** обученной модели и **свои слои**
+со своей математикой. Правило прежнее: каждый этап — самостоятельный инкремент: тесты,
+деплой в живое приложение, GitHub и озвученный ролик в каналах проекта.
+
+Четыре блока, по порядку зависимостей:
+
+- **A · Фундамент интерфейса** (13–16) — сохранение работы, новый облик, по-настоящему
+  интерактивный редактор, русский интерфейс.
+- **B · Модель в деле** (17–18) — проверить обученную сеть на своём примере и заглянуть
+  внутрь.
+- **C · Цех данных** (19–22) — датасеты как таблицы, универсальный редактор «колонки →
+  входы» с предупреждениями и парсеры, которые собирают датасет из сырого материала
+  (текст для языковых моделей, выгруженные свечи для временных рядов).
+- **D · Свои слои** (23–24) — свои формулы активации, градиенты и слои с весами — под
+  своими названиями.
+
+| Этап | Блок | Коротко | Ролик |
+|---|---|---|---|
+| 13 | A | Проекты: сохранить, открыть, автосохранение — **готово** | Закрыл вкладку, вернулся — всё на месте |
+| 14 | A | Новый облик: дизайн-система, темы, живое обучение на холсте | Было / стало |
+| 15 | A | Интерактивный редактор: перетаскивание, мультивыделение, отмена, мини-карта | ResNet меньше чем за минуту |
+| 16 | A | Русский интерфейс (EN / RU) | Приложение на русском |
+| 17 | B | Проверка модели: нарисуй цифру — увидишь предсказание | Нарисовал цифру — сеть угадала |
+| 18 | B | Внутри модели: валидация, матрица ошибок, активации | Что внутри у нейросети |
+| 19 | C | Датасеты как таблицы: просмотр, статистика, правка, импорт | Правим данные, как в таблице |
+| 20 | C | Редактор «колонки → входы» с предупреждениями; регрессия | Подключаем любую таблицу к сети |
+| 21 | C | Текст → датасет для языковых моделей; генерация текста | Скормили книгу |
+| 22 | C | Временные ряды из выгруженных свечей (например, SOLUSDT) | Нейросеть на свечах SOLUSDT |
+| 23 | D | Свои функции активации: редактор формул | Придумали свою активацию |
+| 24 | D | Свои градиенты и слои с весами | Слой с нуля |
+
+Сквозные правила фазы 2: пользовательские формулы разбирает **безопасный математический
+парсер** — они никогда не исполняются как код; у парсеров файлов есть лимиты размера; у
+файлов проектов есть версия формата, поэтому старые файлы продолжают открываться; с
+Этапа 16 каждая новая строка интерфейса — сразу на английском и русском.
+
+#### Этап 13 — Проекты: сохранить, открыть, автосохранение · ГОТОВО (25.11)
+Работа больше не пропадает при обновлении страницы.
+- Файл проекта с версией формата (`.mlc.json`): граф с позициями нод, настройки обучения,
+  выбранный датасет (включая вставленные свои строки) и метаданные (название, описание,
+  даты).
+- **Сохранить** в файл, **открыть** из файла, **автосохранение** в браузере с
+  восстановлением после перезагрузки, **недавние проекты**, новый / сохранить как /
+  переименовать / дублировать.
+- По желанию — **проекты на сервере** для своей установки (открыть тот же проект с
+  другого устройства).
+- Миграции формата: файлы старых версий продолжают открываться.
+- *Готово, когда:* «сохранить → открыть» воспроизводит граф один в один (проверено
+  тестами), автосохранение переживает перезагрузку, файл старого формата открывается.
+- *Ролик:* собрал сеть, закрыл вкладку, вернулся — всё на месте; отправил файл другу.
+- **Сделано:** формат `.mlc.json` с версией (формат 1; «голая» спецификация графа
+  открывается как формат 0 и обновляется). Миграции живут в бэкенде —
+  `POST /projects/normalize` открывает любую поддерживаемую версию и сообщает о
+  неизвестных слоях, удалённых битых связях и нодах без позиций. Черновик автоматически
+  сохраняется в браузере и возвращается после перезагрузки; **Save** (Ctrl+S) хранит
+  проекты в браузере (этот список и есть недавние проекты), есть «сохранить копию»,
+  переименование / описание и удаление; **скачать** файл и **открыть** его (или бросить
+  на холст); по желанию — проекты на сервере (`GET/POST/PUT/DELETE /projects`, строгие
+  имена, лимиты размера и количества, `MLC_SERVER_PROJECTS=0` выключает,
+  `MLC_PROJECTS_DIR` переносит). Шаблон из библиотеки теперь начинает новый проект.
+  Проверено: «сохранить → открыть» точно для CNN, GPT со вложенным блоком Repeat и
+  вставленных своих строк, открытые графы собираются в те же модели (6 тестов бэкенда +
+  16 юнит-тестов фронта); вживую в браузере — автосохранение переживает перезагрузку,
+  файл старого формата открывается.
+
+#### Этап 14 — Новый облик
+Редактор, который цепляет с первого взгляда.
+- Дизайн-система — палитра, типографика, отступы, тени — с **тёмной и светлой темами** и
+  переключателем.
+- Ноды раскрашены по семействам (вход / выход, свёртки, плотные, активации, нормализация,
+  последовательности, внимание, слияния, блоки), с иконками, компактным и подробным видом,
+  бейджами формы тензора и числа параметров.
+- Рёбра — плавные кривые с анимацией **потока данных**, подсветкой при наведении и формой
+  тензора прямо на связи.
+- **Живое обучение на холсте:** ноды светятся, когда через них проходит батч, кольцо
+  прогресса, итоговая точность на ноде Output.
+- Аккуратный инспектор — группы параметров, слайдеры и переключатели, подсказки на месте —
+  и плавные переходы с микроанимациями повсюду.
+- *Готово, когда:* все экраны на дизайн-системе в обеих темах, а анимация обучения не
+  замедляет само обучение.
+- *Ролик:* было / стало.
+
+#### Этап 15 — Интерактивный редактор
+Редактирование, как в настоящем инструменте.
+- **Перетаскивание** слоёв из палитры на холст; соединение **протягиванием от порта к
+  порту** — допустимые цели подсвечиваются, несовпадение форм видно ещё при наведении (на
+  базе умных адаптеров Этапа 5).
+- **Мультивыделение** (рамкой / Shift), перенос и удаление групп; **копировать / вставить /
+  дублировать**; **отменить / повторить** — на сериализации Этапа 13.
+- **Мини-карта**, «вписать в экран», **авто-раскладка** по кнопке, привязка к сетке и
+  выравнивание.
+- **Контекстное меню** (вставить слой, обернуть в блок Repeat, отключить, удалить),
+  **горячие клавиши** со шпаргалкой, поиск по холсту.
+- *Готово, когда:* любое действие отменяется, горячие клавиши работают, а сквозные тесты
+  редактора покрывают перетаскивание, соединение, копирование и отмену.
+- *Ролик:* собираем ResNet меньше чем за минуту мышкой и горячими клавишами.
+
+#### Этап 16 — Русский интерфейс (EN / RU)
+- Слой переводов интерфейса с переключателем языка (запоминается в браузере).
+- Все строки интерфейса, описания слоёв и подсказки параметров — на английском и русском;
+  каталог слоёв и сообщения об ошибках бэкенда становятся переводимыми (стабильные коды
+  ошибок плюс переведённый текст).
+- С этого этапа каждая новая строка — сразу на двух языках.
+- *Готово, когда:* всё приложение работает на любом из языков без непереведённых строк
+  (проверка роняет сборку при пропущенном ключе).
+- *Ролик:* приложение на русском — для русскоязычной аудитории.
+
+#### Этап 17 — Проверка модели
+Применить только что обученную сеть.
+- Бэкенд хранит последнюю обученную модель сессии (и умеет загрузить сохранённый
+  чекпоинт); `POST /predict` возвращает вероятности классов.
+- Панель **«Проверить»**: для картинок — **холст для рисования** (предобработка как у
+  MNIST: центрирование и масштаб до 28×28) и загрузка изображения; для векторов и своих
+  данных — ввод значений или строки.
+- Столбики вероятностей по всем классам, топ-3 и уверенность; сравнение двух моделей на
+  одном примере.
+- *Готово, когда:* нарисованную цифру распознаёт обученная MNIST-модель в живом
+  приложении, а предсказания совпадают с офлайн-результатом бэкенда.
+- *Ролик:* нарисовал цифру — сеть угадала.
+
+#### Этап 18 — Внутри модели
+Увидеть, что выучила сеть и где она ошибается.
+- **Разделение на обучение и валидацию** (плюс ранняя остановка), кривые обучения против
+  валидации — переобучение видно сразу.
+- **Матрица ошибок** и точность по классам; **галерея ошибок** (что с чем путается).
+- **Карты активаций** свёрточных слоёв для выбранного примера и фильтры первого слоя.
+- **Гистограммы весов и градиентов** по слоям во времени — с предупреждениями о затухающих
+  или взрывающихся градиентах.
+- *Готово, когда:* все виды работают для архитектур библиотеки на MNIST и CIFAR-10 и
+  покрыты тестами.
+- *Ролик:* что происходит внутри нейросети.
+
+#### Этап 19 — Датасеты как таблицы
+Настоящий просмотр данных вместо пары строк превью.
+- Единая табличная модель для любого датасета — колонки с типами (число, категория,
+  текст, изображение, время) и строки, — включая встроенные датасеты.
+- Визуальный просмотр: картинки — сеткой миниатюр, текст — текстом, временные ряды —
+  графиками, числа — таблицей.
+- Статистика колонок: минимум / максимум / среднее / разброс, пропуски, уникальные
+  значения, гистограммы, баланс классов.
+- **Редактирование:** ячейки, добавить / удалить строки и колонки, фильтр, сортировка,
+  поиск.
+- Импорт CSV / TSV / JSON (другие форматы — позже), экспорт и разбиение на обучение /
+  валидацию / тест с предпросмотром.
+- *Готово, когда:* CSV импортируется, просматривается, правится и сохраняется вместе с
+  проектом, а большие таблицы листаются плавно.
+- *Ролик:* смотрим и правим свои данные, как в таблице.
+
+#### Этап 20 — Редактор «колонки → входы» и предупреждения
+Универсальный редактор, который подключает колонки таблицы к модели.
+- Колонки — с одной стороны, входы модели — с другой, соединяются перетаскиванием; одна
+  колонка выбирается **целевой**. Тип задачи следует из цели: **классификация**
+  (категории) или **регрессия** (числа — тренер получает функции потерь MSE / MAE).
+- Преобразования на месте: масштабирование (min-max / z-score), кодирование категорий
+  (one-hot / номер), заполнение пропусков, логарифм.
+- **Валидатор** с ошибками, предупреждениями и подсказками — где можно, с исправлением в
+  один клик:
+  - вход модели не получил колонку (не выбран);
+  - колонка константная или целиком из нулей (не несёт информации);
+  - одна колонка подана на несколько входов или две колонки одинаковы (дубликаты);
+  - выбранные колонки не совпадают с формой Input;
+  - нечисловая колонка без кодирования; пропуски, NaN или бесконечность;
+  - целевая колонка оказалась среди входов или вход подозрительно похож на цель (утечка
+    цели);
+  - дисбаланс классов или слишком мало строк на класс; сильно разный масштаб признаков;
+  - для временных рядов — признак, который подглядывает в будущее.
+- Маппинг сохраняется в проект.
+- *Готово, когда:* у каждого предупреждения есть тест, который его вызывает, а размеченный
+  CSV обучается от начала до конца в обоих типах задач.
+- *Ролик:* подключаем любую таблицу к сети — редактор предупреждает об ошибках ещё до
+  обучения.
+
+#### Этап 21 — Текст → датасет для языковых моделей
+Подаём сырой материал — получаем датасет, собранный под модель.
+- Загрузка материала (txt / md; pdf и docx — с переводом в текст) или вставка текста.
+- Парсер чистит текст, токенизирует его (по символам или словарём BPE, обученным на самом
+  материале, — без внешних сервисов) и нарезает окна контекста фиксированной длины на
+  пары «контекст → следующий токен».
+- Предпросмотр: токены цветом, размер словаря, число окон; предупреждения: слишком мало
+  текста, словарь слишком велик для модели, окно длиннее текста.
+- В один клик датасет подключается к GPT из библиотеки — размер словаря и выхода
+  подстраиваются сами.
+- **Генерация:** обученная модель дописывает ваш текст (температура, top-k).
+- *Готово, когда:* небольшой текст обучает GPT в живом приложении, и она пишет в стиле
+  материала; тесты парсера покрывают токенизацию и нарезку окон.
+- *Ролик:* скормили книгу — модель пишет в её стиле.
+
+#### Этап 22 — Временные ряды: свечи
+Датасет из выгруженного таймфрейма, например свечей SOLUSDT.
+- Импорт выгруженных свечей (CSV: время, open, high, low, close, volume); колонки
+  распознаются, дыры во времени — показываются.
+- Парсер: окна истории (lookback), настраиваемые признаки (доходности, логарифм цены,
+  объём, SMA / EMA / RSI / волатильность) и цель — направление через H свечей (рост /
+  падение / флэт по порогу — классификация) или доходность (регрессия).
+- **Строго хронологическое разбиение** (без перемешивания) и предупреждения об утечке
+  будущего, нестационарности и дисбалансе классов.
+- Свечной график с разметкой цели и окон, а после обучения — предсказания на тестовом
+  периоде.
+- Честная подача: учебный и исследовательский пример — не торговая система и не
+  финансовый совет; никаких ордеров и кошельков.
+- *Готово, когда:* выгруженный файл свечей проходит путь от импорта до обученной модели и
+  графика тестового периода, а проверки утечки покрыты тестами.
+- *Ролик:* нейросеть на свечах SOLUSDT — и почему это сложнее, чем кажется.
+
+#### Этап 23 — Свои функции активации: редактор формул
+Создавать слои со своей математикой и хранить их под своими названиями.
+- **«Создать слой на основе…»:** берём любой слой как родительский (ReLU, GELU, Sigmoid и
+  т. д.) и открываем его формулу.
+- Пишем `f(x; a, b, …)` с коэффициентами — фиксированными или **обучаемыми**, с
+  начальными значениями и диапазонами. **Безопасный математический парсер** — белый
+  список операций и функций, никогда не исполняется как код — переводит формулу в
+  операции torch.
+- Живой график `f(x)` и её производной `f'(x)` (через autograd), слайдеры коэффициентов с
+  мгновенной перерисовкой и проверки на NaN / бесконечность, на градиент, который исчезает
+  на широком диапазоне («мёртвая» функция), и на взрывной рост.
+- Сохранение в **«Мои слои»** с названием, описанием и семейством: слой появляется в
+  палитре и ведёт себя как любой другой (формы, параметры; экспорт в PyTorch генерирует
+  класс с вашей формулой).
+- Хранится в проекте и в личной библиотеке слоёв.
+- *Готово, когда:* своя активация обучает сеть в живом приложении и экспортируется в
+  автономный PyTorch, а парсер отклоняет всё вне белого списка (проверено тестами).
+- *Ролик:* придумали свою функцию активации и обучили на ней сеть.
+
+#### Этап 24 — Свои градиенты и слои с весами
+- **Свой backward:** собственная формула производной (surrogate gradient) для
+  ступенчатых, пороговых, квантующих или спайковых функций и сравнение с автоматической
+  производной.
+- **Слои с весами:** формула над входом и обучаемыми тензорами (W, b, …) с выводом форм —
+  например, полиномиальный слой, гейт, своя нормализация.
+- **Сохранить подграф как слой** — составной свой слой на механике Repeat / Block.
+- Обмен: экспорт / импорт библиотеки слоёв файлом с проверкой версий.
+- *Готово, когда:* слой с surrogate-градиентом и свой слой с весами обучаются от начала
+  до конца и экспортируются в PyTorch, а сохранённый подграф загружается обратно одним
+  слоем.
+- *Ролик:* слой с нуля — формула, веса и градиент.

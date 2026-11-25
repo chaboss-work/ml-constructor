@@ -51,6 +51,15 @@ CNN_MLP = {
 }
 
 
+def _pinned(graph: dict, src: str, dst: str, transform: str = "none", **params) -> dict:
+    """``graph`` with the connection ``src -> dst`` pinned to ``transform`` (Stage 14).
+    Pinned to "none" (Direct), a connection passes data through unchanged — the way
+    every connection behaved before Stage 14 made them adapt shapes on their own."""
+    settings = [s for s in graph.get("edge_settings", []) if (s["source"], s["target"]) != (src, dst)]
+    settings.append({"source": src, "target": dst, "transform": transform, "params": params})
+    return {**graph, "edge_settings": settings}
+
+
 def test_layer_catalog():
     cat = mlc.catalog()
     types = {c.type for c in cat}
@@ -102,14 +111,18 @@ def test_shape_error_is_clear():
         ],
         "edges": [["in", "fc"], ["fc", "out"]],
     }
-    spec = GraphSpec.model_validate(bad)
+    # Pinned to "Direct", the connection cannot work: a clear error that points at it.
     try:
-        mlc.build_model(spec)
+        mlc.build_model(GraphSpec.model_validate(_pinned(bad, "in", "fc")))
+        raise AssertionError("expected a ShapeError for a Linear fed a 3-D feature map")
     except ShapeError as exc:
-        assert "fc" in str(exc)
+        assert "fc" in str(exc) and exc.edge == ("in", "fc") and exc.node_id == "fc" and exc.hint, exc
         print(f"[validate] caught clear ShapeError: {exc}")
-        return
-    raise AssertionError("expected a ShapeError for a Linear fed a 3-D feature map")
+    # Left on "auto" (the default since Stage 14), the connection flattens the image itself.
+    _m, build = mlc.build_model(GraphSpec.model_validate(bad))
+    edge = next(e for e in build.edges if (e.source, e.target) == ("in", "fc"))
+    assert (edge.transform, edge.auto, edge.label, edge.out_shape) == ("flatten", True, "flatten", [784]), edge
+    print("[validate] on auto the same connection flattens 1×28×28 -> 784 by itself")
 
 
 def test_block_repeat():
@@ -183,10 +196,30 @@ def test_merge_needs_two_inputs():
     try:
         mlc.build_model(spec)
     except ShapeError as exc:
-        assert "sum" in str(exc) and ">= 2" in str(exc)
+        assert "sum" in str(exc) and "only 1 is connected" in str(exc), exc
+        assert exc.node_id == "sum" and "two branches" in exc.hint, (exc.node_id, exc.hint)
         print(f"[validate] Add with 1 input rejected: {exc}")
         return
     raise AssertionError("expected a ShapeError for a merge node with one input")
+
+
+def test_layer_without_input_says_how_to_connect():
+    spec = GraphSpec.model_validate({
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [8]}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 3}},
+            {"id": "lone", "type": "ReLU", "params": {}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "fc"], ["fc", "out"], ["lone", "out"]],
+    })
+    from mlconstructor.builder import plan_graph
+
+    plan = plan_graph(spec, tolerant=True)
+    lone = next(e for e in plan.errors if e.node_id == "lone")
+    # a layer with nothing connected: say so and how to connect — not "use a merge node"
+    assert "has no input" in str(lone) and "port" in lone.hint and "merge" not in str(lone), (str(lone), lone.hint)
+    print(f"[validate] a layer with no input: {lone} → {lone.hint}")
 
 
 def test_stage2_layers():
@@ -344,12 +377,13 @@ def test_embedding_needs_1d_sequence():
         "edges": [["in", "emb"], ["emb", "out"]],
     })
     try:
-        mlc.build_model(spec)
+        mlc.build_model(GraphSpec.model_validate(_pinned(spec.model_dump(), "in", "emb")))
+        raise AssertionError("expected a ShapeError for an Embedding fed a 2-D shape")
     except ShapeError as exc:
-        assert "emb" in str(exc)
+        assert "emb" in str(exc) and exc.edge == ("in", "emb"), exc
         print(f"[validate] Embedding fed 2-D rejected: {exc}")
-        return
-    raise AssertionError("expected a ShapeError for an Embedding fed a 2-D shape")
+    _m, build = mlc.build_model(spec)  # auto: the 3×4 grid is read as 12 token ids
+    assert build.edges[0].transform == "flatten" and build.edges[0].out_shape == [12], build.edges[0]
 
 
 # --------------------------------------------------------------------------- #
@@ -455,7 +489,8 @@ CONV_NO_FLATTEN = {
 
 
 def test_suggest_flatten_for_conv_to_linear():
-    spec = GraphSpec.model_validate(CONV_NO_FLATTEN)
+    # since Stage 14 an "auto" connection flattens by itself; a Direct one still needs the adapter node
+    spec = GraphSpec.model_validate(_pinned(CONV_NO_FLATTEN, "conv", "fc"))
     props = suggest_for_graph(spec)
     assert len(props) == 1, props
     p = props[0]
@@ -465,7 +500,7 @@ def test_suggest_flatten_for_conv_to_linear():
 
 
 def test_apply_adapter_makes_graph_build():
-    spec = GraphSpec.model_validate(CONV_NO_FLATTEN)
+    spec = GraphSpec.model_validate(_pinned(CONV_NO_FLATTEN, "conv", "fc"))
     try:
         mlc.build_model(spec)
         raise AssertionError("expected the un-flattened Conv->Linear graph to fail to build")
@@ -477,6 +512,7 @@ def test_apply_adapter_makes_graph_build():
     assert len(flats) == 1 and flats[0].out_shape == [4 * 26 * 26], build.order
     # the inserted Flatten sits on the conv->fc edge
     assert build.order.index("conv") < build.order.index(flats[0].id) < build.order.index("fc")
+    assert fixed.edge_settings == [], fixed.edge_settings  # the replaced edge's Direct pin went with it
     print(f"[apply] inserted {flats[0].id} -> graph builds, params={build.total_params:,}")
 
 
@@ -495,6 +531,8 @@ def test_suggest_flatten_for_sequence_to_linear():
         ],
         "edges": [["in", "lstm"], ["lstm", "fc"], ["fc", "out"]],
     })
+    assert suggest_for_graph(spec) == []  # auto (the default) adapts the sequence by itself
+    spec = GraphSpec.model_validate(_pinned(spec.model_dump(), "lstm", "fc"))
     props = suggest_for_graph(spec)
     assert len(props) == 1 and props[0].adapter_type == "Flatten"
     assert props[0].in_shape == [5, 6] and props[0].out_shape == [30]
@@ -1061,9 +1099,11 @@ def test_probe_runs_on_the_model_device():
 # --------------------------------------------------------------------------- #
 def _project_from(graph: dict, name: str = "Test project") -> dict:
     """A current-format project dict for a graph, every node placed on the canvas."""
+    from mlconstructor.schema import PROJECT_FORMAT_VERSION
+
     return {
         "format": "mlconstructor.project",
-        "version": 1,
+        "version": PROJECT_FORMAT_VERSION,
         "name": name,
         "description": "made by the test suite",
         "graph": {
@@ -1072,6 +1112,7 @@ def _project_from(graph: dict, name: str = "Test project") -> dict:
                 for i, n in enumerate(graph["nodes"])
             ],
             "edges": [list(e) for e in graph["edges"]],
+            "edge_settings": [dict(s) for s in graph.get("edge_settings", [])],
         },
         "train": dict(graph.get("train", {})),
         "editor": {"custom_text": "1, 2, 0\n# a comment", "view": {"pan_x": -12.5, "pan_y": 40.0, "zoom": 0.8}},
@@ -1084,6 +1125,7 @@ def _graph_spec_of(project) -> GraphSpec:
         "nodes": [n.model_dump(exclude={"position"}) for n in project.graph.nodes],
         "edges": project.graph.edges,
         "train": project.train.model_dump(),
+        "edge_settings": [s.model_dump() for s in project.graph.edge_settings],
     })
 
 
@@ -1121,7 +1163,10 @@ def test_project_opens_a_bare_graph_spec():
     # it opens, is upgraded, and its nodes have no positions (the editor lays them out).
     bare = get_architecture("resnet").model_dump()
     res = mlc.normalize_project(bare)
-    assert res.migrated_from == 0 and res.project.version == 1 and res.project.name == "Imported graph"
+    from mlconstructor.schema import PROJECT_FORMAT_VERSION
+
+    assert res.migrated_from == 0 and res.project.version == PROJECT_FORMAT_VERSION
+    assert res.project.name == "Imported graph"
     assert {w.code for w in res.warnings} == {"migrated", "missing_positions"}, res.warnings
     assert [n.id for n in res.project.graph.nodes] == [n["id"] for n in bare["nodes"]]
     assert all(n.position is None for n in res.project.graph.nodes)
@@ -1129,7 +1174,7 @@ def test_project_opens_a_bare_graph_spec():
     assert bare["train"]["dataset"] == "synthetic" and res.project.train.dataset == "blobs"  # legacy alias
     assert res.project.train == TrainSpec.model_validate({**bare["train"], "dataset": "blobs"})
     _m, b = mlc.build_model(_graph_spec_of(res.project))
-    print(f"[project] bare graph spec (format 0) opens: upgraded to 1, {len(bare['nodes'])} nodes to lay out, "
+    print(f"[project] bare graph spec (format 0) opens: upgraded to {PROJECT_FORMAT_VERSION}, {len(bare['nodes'])} nodes to lay out, "
           f"{b.total_params:,} params")
 
 
@@ -1343,6 +1388,335 @@ def test_project_http_endpoints():
     print("[project] HTTP: normalize (any version, 413 / 422), server CRUD, bad names refused, store switch")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 14 — smart connections: every edge adapts shapes ("auto"), or uses the
+# transform the user picked, with its parameters; a connection can be inspected.
+# --------------------------------------------------------------------------- #
+#: The graph from the user's screenshot (25.11): an MLP with a Conv2d and an LSTM
+#: wired onto a dense layer. Before Stage 14 it failed with "conv2d_12 expects a
+#: 3-D input (C,H,W), got shape (128,)".
+SCREENSHOT_GRAPH = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [64]}},
+        {"id": "fc1", "type": "Linear", "params": {"out_features": 128}},
+        {"id": "act1", "type": "ReLU", "params": {}},
+        {"id": "drop", "type": "Dropout", "params": {"p": 0.1}},
+        {"id": "fc2", "type": "Linear", "params": {"out_features": 64}},
+        {"id": "conv2d_12", "type": "Conv2d", "params": {"out_channels": 16, "kernel_size": 3}},
+        {"id": "lstm_13", "type": "LSTM", "params": {"hidden_size": 64}},
+        {"id": "concat_10", "type": "Concat", "params": {}},
+        {"id": "relu_11", "type": "ReLU", "params": {}},
+        {"id": "fc3", "type": "Linear", "params": {"out_features": 10}},
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [
+        ["in", "fc1"], ["fc1", "act1"], ["act1", "drop"], ["drop", "fc2"], ["drop", "conv2d_12"],
+        ["conv2d_12", "lstm_13"], ["fc2", "concat_10"], ["lstm_13", "concat_10"], ["concat_10", "relu_11"],
+        ["relu_11", "fc3"], ["fc3", "out"],
+    ],
+    "train": {"epochs": 3, "lr": 0.01, "batch_size": 64, "samples": 256, "seed": 0},
+}
+
+
+def test_screenshot_graph_builds_and_trains():
+    spec = GraphSpec.model_validate(SCREENSHOT_GRAPH)
+    model, build = mlc.build_model(spec)
+    adapted = {(e.source, e.target): e for e in build.edges if e.transform != "none"}
+    assert set(adapted) == {("drop", "conv2d_12"), ("conv2d_12", "lstm_13")}, adapted
+    to_img = adapted[("drop", "conv2d_12")]
+    assert (to_img.transform, to_img.out_shape, to_img.label, to_img.auto) == ("to_image", [2, 8, 8], "→ 2×8×8", True)
+    rows = adapted[("conv2d_12", "lstm_13")]
+    assert (rows.transform, rows.params, rows.out_shape) == ("image_to_sequence", {"mode": "rows"}, [6, 96])
+    res = mlc.train_model(model, tuple(build.layers[0].out_shape), spec.train)
+    assert res.final_accuracy > 0.9 and res.final_loss < res.loss_curve[0], res
+    print(f"[connections] screenshot graph builds by itself (→2×8×8, rows) and trains: acc={res.final_accuracy:.3f}")
+
+
+def _auto_edge(in_shape, target: dict, then: list[dict] | None = None):
+    """What "auto" puts on Input(in_shape) -> target (followed by ``then`` and an Output)."""
+    from mlconstructor.builder import plan_graph
+
+    nodes = [{"id": "in", "type": "Input", "params": {"shape": list(in_shape)}}, {"id": "t", **target}]
+    edges = [["in", "t"]]
+    prev = "t"
+    for i, extra in enumerate(then or []):
+        nodes.append({"id": f"x{i}", **extra})
+        edges.append([prev, f"x{i}"])
+        prev = f"x{i}"
+    nodes.append({"id": "out", "type": "Output", "params": {}})
+    edges.append([prev, "out"])
+    plan = plan_graph(GraphSpec.model_validate({"nodes": nodes, "edges": edges}))
+    r = plan.edges[("in", "t")]
+    return r.transform.kind, r.transform.resolved_params(r.in_shape), list(r.out_shape)
+
+
+def test_connection_auto_choices():
+    linear = {"type": "Linear", "params": {"out_features": 4}}
+    conv = {"type": "Conv2d", "params": {"out_channels": 4, "kernel_size": 3}}
+    lstm = {"type": "LSTM", "params": {"hidden_size": 8}}
+    cases = [
+        ((1, 28, 28), linear, None, ("flatten", {}, [784])),
+        ((16, 6, 6), lstm, None, ("image_to_sequence", {"mode": "rows"}, [6, 96])),
+        ((128,), conv, None, ("to_image", {"channels": 2, "height": 8, "width": 8}, [2, 8, 8])),
+        ((784,), conv, None, ("to_image", {"channels": 1, "height": 28, "width": 28}, [1, 28, 28])),
+        ((10,), conv, None, ("project", {"shape": [1, 8, 8]}, [1, 8, 8])),  # no fitting picture -> learn one
+        ((5, 6), linear, None, ("flatten", {}, [30])),
+        ((64,), lstm, None, ("to_sequence", {"length": 1}, [1, 64])),
+        ((5, 6), conv, None, ("to_image", {"channels": 1, "height": 5, "width": 6}, [1, 5, 6])),
+        ((7, 3, 3), linear, [{"type": "ReLU", "params": {}}], ("flatten", {}, [63])),
+        ((32,), linear, None, ("none", {}, [32])),  # shapes already fit: nothing at all
+    ]
+    for in_shape, target, then, expected in cases:
+        got = _auto_edge(in_shape, target, then)
+        assert got == expected, (in_shape, target["type"], got, expected)
+    # a sequence into the Output is flattened too (Output takes one score per class)
+    _m, b = mlc.build_model(GraphSpec.model_validate({
+        "nodes": [{"id": "in", "type": "Input", "params": {"shape": [5, 6]}},
+                  {"id": "rnn", "type": "GRU", "params": {"hidden_size": 3, "return_sequence": True}},
+                  {"id": "out", "type": "Output", "params": {}}],
+        "edges": [["in", "rnn"], ["rnn", "out"]],
+    }))
+    assert (b.edges[-1].transform, b.edges[-1].out_shape) == ("flatten", [15]), b.edges[-1]
+    print(f"[connections] auto picks the simplest fitting transform in {len(cases) + 1} situations")
+
+
+def test_every_transform_matches_its_module():
+    from mlconstructor.connections import make_transform
+
+    cases = [
+        ("none", {}, (5,)), ("flatten", {}, (3, 4, 4)), ("flatten", {}, (6, 2)),
+        ("global_pool", {"mode": "avg"}, (3, 5, 5)), ("global_pool", {"mode": "max"}, (3, 5, 5)),
+        ("seq_pool", {"mode": "last"}, (4, 6)), ("seq_pool", {"mode": "first"}, (4, 6)),
+        ("seq_pool", {"mode": "mean"}, (4, 6)), ("seq_pool", {"mode": "max"}, (4, 6)),
+        ("to_image", {"channels": 2, "height": 4, "width": 4}, (32,)),
+        ("to_image", {"channels": 1, "height": 4, "width": 6}, (4, 6)),
+        ("to_sequence", {"length": 1}, (12,)), ("to_sequence", {"length": 4}, (12,)),
+        ("image_to_sequence", {"mode": "rows"}, (3, 4, 5)), ("image_to_sequence", {"mode": "columns"}, (3, 4, 5)),
+        ("image_to_sequence", {"mode": "pixels"}, (3, 4, 5)),
+        ("image_to_sequence", {"mode": "patches", "patch": 2}, (3, 4, 6)),
+        ("reshape", {"shape": [2, 3]}, (6,)), ("reshape", {"shape": [6]}, (2, 3)),
+        ("project", {"shape": [7]}, (5,)), ("project", {"shape": [4, 9]}, (4, 6)),
+        ("project", {"shape": [8, 5, 5]}, (3, 5, 5)), ("project", {"shape": [8, 2, 2]}, (3, 5, 5)),
+        ("project", {"shape": [1, 8, 8]}, (10,)),
+    ]
+    x_seq = torch.arange(2 * 3 * 4 * 5, dtype=torch.float).reshape(2, 3, 4, 5)
+    for kind, params, in_shape in cases:
+        t = make_transform(kind, params)
+        out = t.out_shape(in_shape)
+        mod = t.build(in_shape)
+        y = torch.randn(2, *in_shape) if mod is not None else None
+        if mod is not None:
+            assert tuple(mod(y).shape[1:]) == tuple(out), (kind, params, in_shape, tuple(mod(y).shape), out)
+    # the rows / pixels readings put the right values in the right steps
+    from mlconstructor.connections import ImageToSeq
+
+    rows = ImageToSeq("rows")(x_seq)
+    assert torch.equal(rows[0, 1], x_seq[0, :, 1, :].reshape(-1))  # step 1 = row 1 of every channel
+    pixels = ImageToSeq("pixels")(x_seq)
+    assert torch.equal(pixels[0, 7], x_seq[0, :, 1, 2])  # step 7 = the pixel (1, 2), all channels
+    print(f"[connections] {len(cases)} transform settings: declared shape == module output, values in place")
+
+
+def test_connection_choice_and_clear_errors():
+    seq_graph = {
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [5, 4]}},
+            {"id": "lstm", "type": "LSTM", "params": {"hidden_size": 6, "return_sequence": True}},
+            {"id": "fc", "type": "Linear", "params": {"out_features": 3}},
+            {"id": "out", "type": "Output", "params": {}},
+        ],
+        "edges": [["in", "lstm"], ["lstm", "fc"], ["fc", "out"]],
+    }
+    # the user's choice is used (mean over time instead of auto's flatten)
+    _m, b = mlc.build_model(GraphSpec.model_validate(_pinned(seq_graph, "lstm", "fc", "seq_pool", mode="mean")))
+    e = next(x for x in b.edges if x.target == "fc")
+    assert (e.transform, e.auto, e.params, e.out_shape, e.label) == ("seq_pool", False, {"mode": "mean"}, [6], "mean")
+    # a choice that cannot take the data, or whose result the layer refuses: clear, pointed errors
+    bad_cases = [
+        (_pinned(seq_graph, "lstm", "fc", "global_pool"), "cannot take"),  # pooling an image, but this is a sequence
+        (_pinned(seq_graph, "lstm", "fc", "to_sequence", length=1), "cannot take"),
+        (_pinned(seq_graph, "lstm", "fc", "image_to_sequence"), "cannot take"),
+        (_pinned(seq_graph, "lstm", "fc", "reshape", shape=[5, 6]), "cannot take that"),  # still 2-D for a Linear
+        (_pinned(seq_graph, "lstm", "fc", "to_image", channels=1, height=3, width=3), "multiply to 30"),
+    ]
+    for graph, phrase in bad_cases:
+        try:
+            mlc.build_model(GraphSpec.model_validate(graph))
+            raise AssertionError(f"expected an error for {graph['edge_settings']}")
+        except ShapeError as exc:
+            assert phrase in str(exc) and exc.edge == ("lstm", "fc") and exc.hint, (phrase, str(exc))
+    try:
+        mlc.build_model(GraphSpec.model_validate(_pinned(seq_graph, "lstm", "fc", "teleport")))
+        raise AssertionError("expected an unknown-transform error")
+    except ValueError as exc:
+        assert "unknown connection transform" in str(exc), exc
+    print("[connections] the picked transform is used; bad picks fail clearly, pointing at the connection")
+
+
+def test_merge_inputs_are_matched_automatically():
+    head = [{"id": "fc", "type": "Linear", "params": {"out_features": 3}}, {"id": "out", "type": "Output", "params": {}}]
+    tail = [["m", "fc"], ["fc", "out"]]
+    # Add: two vectors of different length -> a learnable projection on the second input
+    add_vec = GraphSpec.model_validate({
+        "nodes": [{"id": "in", "type": "Input", "params": {"shape": [16]}},
+                  {"id": "a", "type": "Linear", "params": {"out_features": 24}},
+                  {"id": "b", "type": "Linear", "params": {"out_features": 16}},
+                  {"id": "m", "type": "Add", "params": {}}] + head,
+        "edges": [["in", "a"], ["in", "b"], ["a", "m"], ["b", "m"]] + tail,
+    })
+    _m, b = mlc.build_model(add_vec)
+    e = next(x for x in b.edges if (x.source, x.target) == ("b", "m"))
+    assert (e.transform, e.out_shape, e.num_params) == ("project", [24], 16 * 24 + 24), e
+    # Add: an image and a vector holding the same number of values -> a free reshape
+    add_img = GraphSpec.model_validate({
+        "nodes": [{"id": "in", "type": "Input", "params": {"shape": [2, 4, 4]}},
+                  {"id": "c", "type": "Conv2d", "params": {"out_channels": 2, "kernel_size": 3, "padding": 1}},
+                  {"id": "f", "type": "Flatten", "params": {}},
+                  {"id": "m", "type": "Add", "params": {}}] + head,
+        "edges": [["in", "c"], ["in", "f"], ["c", "m"], ["f", "m"]] + tail,
+    })
+    _m, b = mlc.build_model(add_img)
+    e = next(x for x in b.edges if (x.source, x.target) == ("f", "m"))
+    assert (e.transform, e.out_shape, e.num_params) == ("reshape", [2, 4, 4], 0), e
+    # Concat: an image and a vector -> the image is flattened, the vector stays
+    concat = GraphSpec.model_validate({
+        "nodes": [{"id": "in", "type": "Input", "params": {"shape": [1, 8, 8]}},
+                  {"id": "c", "type": "Conv2d", "params": {"out_channels": 2, "kernel_size": 3, "padding": 1}},
+                  {"id": "f", "type": "Flatten", "params": {}},
+                  {"id": "l", "type": "Linear", "params": {"out_features": 5}},
+                  {"id": "m", "type": "Concat", "params": {}}] + head,
+        "edges": [["in", "c"], ["in", "f"], ["f", "l"], ["c", "m"], ["l", "m"]] + tail,
+    })
+    model, b = mlc.build_model(concat)
+    by = {(x.source, x.target): x for x in b.edges}
+    assert (by[("c", "m")].transform, by[("c", "m")].out_shape) == ("flatten", [128]), by[("c", "m")]
+    assert by[("l", "m")].transform == "none"
+    assert next(s for s in b.layers if s.id == "m").out_shape == [133]
+    assert tuple(model(torch.zeros(2, 1, 8, 8)).shape) == (2, 3)
+    # ResNet's own skip connections still need nothing (shapes already match)
+    _m, b = mlc.build_model(get_architecture("resnet"))
+    assert all(x.transform == "none" for x in b.edges), [x for x in b.edges if x.transform != "none"]
+    print("[connections] Add inputs projected / reshaped, Concat inputs flattened; ResNet untouched")
+
+
+def test_architectures_unchanged_by_connections():
+    expected_params = {}
+    for aid in ARCH_IDS:
+        _m, b = mlc.build_model(get_architecture(aid))
+        assert all(e.transform == "none" for e in b.edges), (aid, [e for e in b.edges if e.transform != "none"])
+        expected_params[aid] = b.total_params
+    print(f"[connections] every library architecture builds with plain connections: {expected_params}")
+
+
+def test_export_reproduces_connections_exactly():
+    graphs = {
+        "screenshot": GraphSpec.model_validate(SCREENSHOT_GRAPH),
+        "merge": GraphSpec.model_validate(_pinned({
+            "nodes": [
+                {"id": "in", "type": "Input", "params": {"shape": [64]}},
+                {"id": "fc1", "type": "Linear", "params": {"out_features": 128}},
+                {"id": "conv", "type": "Conv2d", "params": {"out_channels": 8, "kernel_size": 3}},
+                {"id": "lstm", "type": "LSTM", "params": {"hidden_size": 16, "return_sequence": True}},
+                {"id": "fc2", "type": "Linear", "params": {"out_features": 24}},
+                {"id": "add", "type": "Add", "params": {}},
+                {"id": "out", "type": "Output", "params": {}},
+            ],
+            "edges": [["in", "fc1"], ["fc1", "conv"], ["conv", "lstm"], ["lstm", "add"], ["fc1", "fc2"],
+                      ["fc2", "add"], ["add", "out"]],
+        }, "lstm", "add", "seq_pool", mode="mean")),
+        "patches": GraphSpec.model_validate(_pinned({
+            "nodes": [
+                {"id": "in", "type": "Input", "params": {"shape": [1, 28, 28]}},
+                {"id": "att", "type": "MultiheadAttention", "params": {"num_heads": 2}},
+                {"id": "out", "type": "Output", "params": {}},
+            ],
+            "edges": [["in", "att"], ["att", "out"]],
+        }, "in", "att", "image_to_sequence", mode="patches", patch=4)),
+    }
+    for name, spec in graphs.items():
+        model, build = mlc.build_model(spec)
+        code = mlc.generate_pytorch(spec, include_training=False)
+        assert "mlconstructor" not in code, name
+        gen = _exec_exported(code)["Model"]()
+        with torch.no_grad():
+            for p_gen, p_app in zip(gen.parameters(), model.parameters(), strict=True):
+                p_gen.copy_(p_app)  # same weights in the same order...
+        model.eval()
+        gen.eval()
+        x = torch.randn(3, *build.layers[0].out_shape)
+        assert torch.allclose(gen(x), model(x), atol=1e-6), name  # ...give the same outputs
+        print(f"[export:{name}] connections exported exactly: params={build.total_params:,}")
+
+
+def test_connection_options_for_the_inspector():
+    spec = GraphSpec.model_validate(SCREENSHOT_GRAPH)
+    opts = mlc.connection_options(spec, "drop", "conv2d_12")
+    assert opts.in_shape == [128] and opts.current == "auto" and opts.problem is None
+    assert (opts.auto_transform, opts.auto_out_shape) == ("to_image", [2, 8, 8])
+    by = {o.transform: o for o in opts.options}
+    assert "flatten" not in by and "image_to_sequence" not in by  # they need an image / a 2-D input
+    assert by["to_image"].fits and by["to_image"].presets[0] == {"channels": 2, "height": 8, "width": 8}
+    assert not by["none"].fits and "3-D" in by["none"].note  # Direct: Conv2d needs C×H×W
+    assert not by["to_sequence"].fits and by["project"].learnable
+    assert by["project"].presets[0] == {"shape": [2, 8, 8]}  # offered with auto's shape
+    # into a merge node: Concat with the other input as it is
+    opts = mlc.connection_options(spec, "lstm_13", "concat_10")
+    assert opts.in_shape == [64] and opts.auto_transform == "none"
+    # a connection pinned to a bad transform reports the problem, and the options still come
+    bad = GraphSpec.model_validate(_pinned(SCREENSHOT_GRAPH, "drop", "conv2d_12"))
+    opts = mlc.connection_options(bad, "drop", "conv2d_12")
+    assert opts.current == "none" and opts.problem and "3-D" in opts.problem and opts.options
+    try:
+        mlc.connection_options(spec, "in", "out")
+        raise AssertionError("expected an error for a connection that does not exist")
+    except ValueError:
+        pass
+    print("[connections] inspector: shape in, auto's pick, every option with fits / presets / reasons")
+
+
+def test_project_format_2_keeps_connection_settings():
+    from mlconstructor.schema import PROJECT_FORMAT_VERSION
+
+    pinned = _pinned(SCREENSHOT_GRAPH, "conv2d_12", "lstm_13", "image_to_sequence", mode="columns")
+    raw = _project_from(pinned)
+    res = mlc.normalize_project(json.loads(mlc.normalize_project(raw).project.model_dump_json()))
+    assert res.warnings == [] and [s.model_dump() for s in res.project.graph.edge_settings] == pinned["edge_settings"]
+    _m, b = mlc.build_model(_graph_spec_of(res.project))
+    e = next(x for x in b.edges if x.target == "lstm_13")
+    assert (e.transform, e.params, e.auto) == ("image_to_sequence", {"mode": "columns"}, False)
+    # a format-1 file (Stage 13) opens and is upgraded: its connections are all auto
+    v1 = {**_project_from(SCREENSHOT_GRAPH), "version": 1}
+    del v1["graph"]["edge_settings"]
+    res = mlc.normalize_project(v1)
+    assert res.migrated_from == 1 and res.project.version == PROJECT_FORMAT_VERSION
+    assert [w.code for w in res.warnings] == ["migrated"] and res.project.graph.edge_settings == []
+    # settings for a missing connection, or with an unknown transform, are dropped with a warning
+    junk = _project_from({**SCREENSHOT_GRAPH, "edge_settings": [
+        {"source": "fc1", "target": "out", "transform": "flatten", "params": {}},
+        {"source": "fc3", "target": "out", "transform": "teleport", "params": {}},
+    ]})
+    res = mlc.normalize_project(junk)
+    assert sorted(w.code for w in res.warnings) == ["dangling_setting", "unknown_transform"], res.warnings
+    assert res.project.graph.edge_settings == []
+    print("[project] format 2 keeps connection settings; format 1 upgrades; junk settings dropped with warnings")
+
+
+def test_connection_http_endpoints():
+    spec = json.dumps({"spec": SCREENSHOT_GRAPH, "source": "drop", "target": "conv2d_12"}).encode()
+    st, res = _asgi("POST", "/connections/options", spec)
+    assert st == 200 and res["auto_transform"] == "to_image" and res["in_shape"] == [128], res
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] == mlc.API_LEVEL >= 14, health  # the editor warns below this level
+    st, res = _asgi("POST", "/build", json.dumps(SCREENSHOT_GRAPH).encode())
+    assert st == 200 and any(e["transform"] == "to_image" for e in res["edges"]), res
+    bad = _pinned(SCREENSHOT_GRAPH, "drop", "conv2d_12")
+    st, res = _asgi("POST", "/build", json.dumps(bad).encode())
+    assert st == 422 and isinstance(res["detail"], str), res  # the plain message stays where it was...
+    assert res["error"]["edge"] == ["drop", "conv2d_12"] and res["error"]["node_id"] == "conv2d_12", res
+    assert res["error"]["hint"], res  # ...and the structured part says where and what to do
+    print("[connections] HTTP: /connections/options, /build edges, structured 422 (edge, node, hint)")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -1352,6 +1726,7 @@ if __name__ == "__main__":
     test_branch_add_builds_and_trains()
     test_concat_merge()
     test_merge_needs_two_inputs()
+    test_layer_without_input_says_how_to_connect()
     test_stage2_layers()
     test_conv_transpose_upsamples()
     test_lstm_sequence_trains()
@@ -1400,7 +1775,17 @@ if __name__ == "__main__":
     test_project_rejects_bad_files()
     test_server_project_store()
     test_project_http_endpoints()
+    test_screenshot_graph_builds_and_trains()
+    test_connection_auto_choices()
+    test_every_transform_matches_its_module()
+    test_connection_choice_and_clear_errors()
+    test_merge_inputs_are_matched_automatically()
+    test_architectures_unchanged_by_connections()
+    test_export_reproduces_connections_exactly()
+    test_connection_options_for_the_inspector()
+    test_project_format_2_keeps_connection_settings()
+    test_connection_http_endpoints()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
-        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13)"
+        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14)"
     )

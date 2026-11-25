@@ -9,6 +9,8 @@ Endpoints:
     GET  /layers   the layer palette the UI renders
     POST /build    graph spec -> model summary (shapes, param counts) or 422
     POST /train    graph spec -> tiny training run -> loss curve + accuracy
+    POST /projects/normalize   any project file version -> current format + warnings
+    GET/PUT/DELETE /projects[/{slug}]   the optional server-side project store
 """
 
 from __future__ import annotations
@@ -16,12 +18,14 @@ from __future__ import annotations
 import json
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import mlconstructor as mlc
+from mlconstructor.projects import MAX_PROJECT_BYTES
 from mlconstructor.schema import (
     ArchitectureInfo,
     BuildResult,
@@ -30,6 +34,9 @@ from mlconstructor.schema import (
     ExportResult,
     GraphSpec,
     LayerInfo,
+    ProjectLoadResult,
+    ProjectSaveResult,
+    ProjectSummary,
     SuggestResult,
     TrainResult,
 )
@@ -58,6 +65,7 @@ def health() -> dict:
         "version": mlc.__version__,
         "layers": len(mlc.LAYER_REGISTRY),
         "cuda_available": bool(torch.cuda.is_available()),
+        "server_projects": mlc.server_projects_enabled(),
     }
 
 
@@ -164,6 +172,103 @@ def export_pytorch(spec: GraphSpec, include_training: bool = True) -> ExportResu
         return ExportResult(ok=True, filename="model.py", code=code)
     except _USER_ERRORS as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+
+# --- Projects: open any format version, optional server-side store (Stage 13) --
+async def _read_project_json(request: Request) -> object:
+    """The request body as JSON, refusing anything over the project size limit
+    before it is parsed. Raw JSON on purpose: older formats (and a bare graph spec)
+    must be migrated *before* they are validated against the current model."""
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_PROJECT_BYTES:
+        raise HTTPException(status_code=413, detail=f"project file is over {MAX_PROJECT_BYTES // 2**20} MB")
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_PROJECT_BYTES:
+            raise HTTPException(status_code=413, detail=f"project file is over {MAX_PROJECT_BYTES // 2**20} MB")
+    try:
+        return json.loads(bytes(body).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise HTTPException(status_code=422, detail="not a valid JSON file")
+
+
+def _require_server_projects() -> None:
+    if not mlc.server_projects_enabled():
+        raise HTTPException(status_code=404, detail="server-side projects are switched off on this instance")
+
+
+@app.post("/projects/normalize", response_model=ProjectLoadResult)
+async def projects_normalize(request: Request) -> ProjectLoadResult:
+    """Open a project file of any supported version — or a bare graph spec — and
+    return it in the current format with warnings (migrated, unknown layers, broken
+    edges, missing positions). Stateless: nothing is stored."""
+    raw = await _read_project_json(request)
+    try:
+        return await run_in_threadpool(mlc.normalize_project, raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/projects", response_model=list[ProjectSummary])
+def projects_list() -> list[ProjectSummary]:
+    """Projects stored on this server, most recently saved first."""
+    _require_server_projects()
+    return mlc.list_projects()
+
+
+@app.post("/projects", response_model=ProjectSaveResult)
+async def projects_create(request: Request) -> ProjectSaveResult:
+    """Store a new project on the server under a fresh name derived from its title."""
+    _require_server_projects()
+    raw = await _read_project_json(request)
+
+    def _create() -> ProjectSaveResult:
+        return mlc.create_project(mlc.normalize_project(raw).project)
+
+    try:
+        return await run_in_threadpool(_create)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.get("/projects/{slug}", response_model=ProjectLoadResult)
+def projects_get(slug: str) -> ProjectLoadResult:
+    _require_server_projects()
+    try:
+        return mlc.load_project(slug)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.put("/projects/{slug}", response_model=ProjectSaveResult)
+async def projects_put(slug: str, request: Request) -> ProjectSaveResult:
+    """Save (create or overwrite) a project on the server. The body is a project
+    file of any supported version; it is stored in the current format."""
+    _require_server_projects()
+    raw = await _read_project_json(request)
+
+    def _save() -> ProjectSaveResult:
+        return mlc.save_project(slug, mlc.normalize_project(raw).project)
+
+    try:
+        return await run_in_threadpool(_save)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@app.delete("/projects/{slug}")
+def projects_delete(slug: str) -> dict:
+    _require_server_projects()
+    try:
+        mlc.delete_project(slug)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=exc.args[0])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"ok": True, "slug": slug}
 
 
 # --- Serve the built frontend so one process hosts the whole app on :8050 -----

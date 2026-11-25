@@ -9,7 +9,12 @@ import {
   DatasetInfo,
   ExportResult,
   GraphSpec,
+  HealthInfo,
   LayerInfo,
+  ProjectFile,
+  ProjectLoadResult,
+  ProjectSaveResult,
+  ProjectSummary,
   SuggestResult,
   TrainEvent,
   TrainResult,
@@ -27,10 +32,8 @@ export class ApiService {
   private http = inject(HttpClient);
   readonly base = API_BASE;
 
-  health(): Observable<{ status: string; version: string; layers: number; cuda_available?: boolean }> {
-    return this.http.get<{ status: string; version: string; layers: number; cuda_available?: boolean }>(
-      `${API_BASE}/health`,
-    );
+  health(): Observable<HealthInfo> {
+    return this.http.get<HealthInfo>(`${API_BASE}/health`);
   }
 
   layers(): Observable<LayerInfo[]> {
@@ -75,6 +78,35 @@ export class ApiService {
       `${API_BASE}/export/pytorch?include_training=${includeTraining}`,
       spec,
     );
+  }
+
+  // ---- projects (Stage 13) ----
+  /** Open a project file of any supported version (or a bare graph spec): the
+   * backend migrates it to the current format and reports warnings. */
+  normalizeProject(raw: unknown): Observable<ProjectLoadResult> {
+    return this.http.post<ProjectLoadResult>(`${API_BASE}/projects/normalize`, raw);
+  }
+
+  /** Projects stored on the server (when the instance enables them). */
+  listProjects(): Observable<ProjectSummary[]> {
+    return this.http.get<ProjectSummary[]>(`${API_BASE}/projects`);
+  }
+
+  getProject(slug: string): Observable<ProjectLoadResult> {
+    return this.http.get<ProjectLoadResult>(`${API_BASE}/projects/${encodeURIComponent(slug)}`);
+  }
+
+  /** Store a new project on the server; it picks a free name from the title. */
+  createProject(project: ProjectFile): Observable<ProjectSaveResult> {
+    return this.http.post<ProjectSaveResult>(`${API_BASE}/projects`, project);
+  }
+
+  saveProject(slug: string, project: ProjectFile): Observable<ProjectSaveResult> {
+    return this.http.put<ProjectSaveResult>(`${API_BASE}/projects/${encodeURIComponent(slug)}`, project);
+  }
+
+  deleteProject(slug: string): Observable<{ ok: boolean; slug: string }> {
+    return this.http.delete<{ ok: boolean; slug: string }>(`${API_BASE}/projects/${encodeURIComponent(slug)}`);
   }
 
   /** Live training (Stage 11): POST the graph and stream NDJSON progress events,

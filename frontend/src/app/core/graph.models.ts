@@ -172,3 +172,69 @@ export interface ExportResult {
   filename: string;
   code: string;
 }
+
+/** Projects (Stage 13): the versioned `.mlc.json` file — the graph with node
+ * positions, the training setup and metadata. Mirrors schema.ProjectFile. */
+export interface ProjectNode {
+  id: string;
+  type: string;
+  params: Record<string, unknown>;
+  /** Where the node sits on the canvas; null/absent = lay it out automatically. */
+  position?: { x: number; y: number } | null;
+}
+
+export interface ProjectView {
+  pan_x: number;
+  pan_y: number;
+  zoom: number;
+}
+
+export interface ProjectFile {
+  format: 'mlconstructor.project';
+  version: number;
+  name: string;
+  description?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  graph: { nodes: ProjectNode[]; edges: string[][] };
+  train: Partial<TrainCfg> & Record<string, unknown>;
+  editor?: { custom_text?: string; view?: ProjectView };
+}
+
+/** Something worth telling the user when a project opens (it still opens). */
+export interface ProjectWarning {
+  code: string;
+  message: string;
+  node_id?: string | null;
+}
+
+export interface ProjectLoadResult {
+  ok: boolean;
+  project: ProjectFile;
+  /** The format version the file was upgraded from (null = it already was current). */
+  migrated_from?: number | null;
+  warnings: ProjectWarning[];
+}
+
+/** A project in the optional server-side store. */
+export interface ProjectSummary {
+  slug: string;
+  name: string;
+  updated_at?: string | null;
+  node_count: number;
+}
+
+export interface ProjectSaveResult {
+  ok: boolean;
+  slug: string;
+  updated_at: string;
+}
+
+/** GET /health. `server_projects` (Stage 13) is absent on older backends. */
+export interface HealthInfo {
+  status: string;
+  version: string;
+  layers: number;
+  cuda_available?: boolean;
+  server_projects?: boolean;
+}

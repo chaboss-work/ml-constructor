@@ -22,11 +22,15 @@ import {
   AdapterProposal,
   ArchitectureInfo,
   BuildResult,
+  ConnectionOption,
+  ConnectionOptions,
   DataPreview,
   DataSampleRow,
   DatasetInfo,
+  EdgeSummary,
   EditorEdge,
   EditorNode,
+  GraphErrorInfo,
   GraphSpec,
   LayerInfo,
   ParamDef,
@@ -37,6 +41,7 @@ import {
   TrainResult,
 } from '../core/graph.models';
 import {
+  AUTO,
   DEFAULT_VIEW,
   EditorSnapshot,
   LocalProjectMeta,
@@ -44,6 +49,7 @@ import {
   ProjectOrigin,
   ProjectStorage,
   UI_TRAIN_KEYS,
+  edgeSettings,
   fingerprint,
   fromProjectFile,
   layoutGraph,
@@ -55,6 +61,11 @@ import {
 const NODE_W = 174;
 const NODE_H = 78;
 const AUTOSAVE_DELAY_MS = 700;
+const ANALYSIS_DELAY_MS = 450;
+/** The backend API this page needs: Stage 14 (smart connections, structured errors). */
+const REQUIRED_API = 14;
+const OUTDATED_MSG =
+  'The server still runs an older backend: connection settings, automatic adaptation and hints need a restart of the backend.';
 const ORIGINS: readonly ProjectOrigin[] = ['new', 'browser', 'server', 'file'];
 
 interface Notice {
@@ -84,7 +95,7 @@ interface Notice {
     IonSearchbar,
   ],
   templateUrl: './editor.page.html',
-  styleUrls: ['./editor.page.scss', './projects.scss'],
+  styleUrls: ['./editor.page.scss', './projects.scss', './connections.scss'],
 })
 export class EditorPage {
   private api = inject(ApiService);
@@ -161,6 +172,22 @@ export class EditorPage {
   selectedId = signal<string | null>(null);
   connectFrom = signal<string | null>(null);
 
+  // ---- smart connections (Stage 14) ----
+  /** the selected connection, as "source->target" */
+  selectedEdge = signal<string | null>(null);
+  /** the live build after each edit: shapes on the nodes, transforms on the wires */
+  analysis = signal<BuildResult | null>(null);
+  /** why the graph does not build yet (soft: shown without pressing Build) */
+  analysisError = signal<GraphErrorInfo | null>(null);
+  /** where the last explicit Build / Train failed (for the red highlight) */
+  runErrorInfo = signal<GraphErrorInfo | null>(null);
+  connOptions = signal<ConnectionOptions | null>(null);
+  connError = signal<string | null>(null);
+  /** The server runs an older backend than this page (a restart updates it). */
+  backendOutdated = signal(false);
+  private analysisTimer: ReturnType<typeof setTimeout> | null = null;
+  private analysisSeq = 0;
+
   // ---- view ----
   pan = signal<{ x: number; y: number }>({ x: DEFAULT_VIEW.pan_x, y: DEFAULT_VIEW.pan_y });
   zoom = signal(DEFAULT_VIEW.zoom);
@@ -214,6 +241,7 @@ export class EditorPage {
     this.api.health().subscribe({
       next: (h) => {
         this.cudaAvailable.set(!!h.cuda_available);
+        this.backendOutdated.set((h.api ?? 0) < REQUIRED_API);
         this.serverEnabled.set(!!h.server_projects);
       },
       error: () => {
@@ -228,6 +256,10 @@ export class EditorPage {
     effect(() => {
       this.snapshot(); // track every piece of project state...
       if (this.autosaveArmed) this.scheduleAutosave(); // ...and save a draft shortly after a change
+    });
+    effect(() => {
+      this.graphKey(); // layers, parameters and connections — not positions...
+      this.scheduleAnalysis(); // ...rebuild shortly after a change: live shapes and transforms
     });
     this.autosaveArmed = restored !== 'pending';
   }
@@ -267,16 +299,42 @@ export class EditorPage {
       .map((l) => l.type),
   );
 
+  /** The explicit Build's result, else the live one. */
+  liveBuild = computed(() => this.buildResult() ?? this.analysis());
+
   shapeById = computed(() => {
     const map = new Map<string, number[] | null>();
-    const b = this.buildResult();
+    const b = this.liveBuild();
     if (b) for (const s of b.layers) map.set(s.id, s.out_shape);
     return map;
   });
 
+  edgeInfo = computed(() => new Map((this.liveBuild()?.edges ?? []).map((e) => [`${e.source}->${e.target}`, e])));
+
+  /** Where the current problem is: the explicit Build's error first, else the live one. */
+  private problem = computed(() => this.runErrorInfo() ?? this.analysisError());
+  problemNode = computed(() => this.problem()?.node_id ?? null);
+  problemEdge = computed(() => {
+    const e = this.problem()?.edge;
+    return e && e.length === 2 ? `${e[0]}->${e[1]}` : null;
+  });
+
   edgeViews = computed(() => {
     const byId = new Map(this.nodes().map((n) => [n.id, n]));
-    const views: { id: string; d: string }[] = [];
+    const info = this.edgeInfo();
+    const selected = this.selectedEdge();
+    const bad = this.problemEdge();
+    const views: {
+      id: string;
+      d: string;
+      mx: number;
+      my: number;
+      label: string;
+      auto: boolean;
+      selected: boolean;
+      problem: boolean;
+      title: string;
+    }[] = [];
     for (const e of this.edges()) {
       const s = byId.get(e.source);
       const t = byId.get(e.target);
@@ -286,10 +344,61 @@ export class EditorPage {
       const x2 = t.x + NODE_W / 2;
       const y2 = t.y;
       const k = Math.max(36, Math.abs(y2 - y1) / 2);
-      views.push({ id: `${e.source}->${e.target}`, d: `M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}` });
+      const id = `${e.source}->${e.target}`;
+      const live = info.get(id);
+      const pinned = !!e.transform && e.transform !== AUTO;
+      const label = live?.label ?? (pinned ? (e.transform as string) : '');
+      const shapes = live ? ` · [${live.in_shape.join('×')}] → [${live.out_shape.join('×')}]` : '';
+      views.push({
+        id,
+        d: `M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}`,
+        mx: (x1 + x2) / 2, // the curve's midpoint (its control points share the ends' x)
+        my: (y1 + y2) / 2,
+        label,
+        auto: live ? live.auto : !pinned,
+        selected: id === selected,
+        problem: id === bad,
+        title: `${e.source} → ${e.target}${label ? ' · ' + label : ''}${shapes} — click to set up`,
+      });
     }
     return views;
   });
+
+  // ---- the connection inspector ----
+  selectedEdgeObj = computed(() => {
+    const key = this.selectedEdge();
+    return key ? (this.edges().find((e) => `${e.source}->${e.target}` === key) ?? null) : null;
+  });
+
+  selectedEdgeInfo = computed<EdgeSummary | null>(() => {
+    const key = this.selectedEdge();
+    return key ? (this.edgeInfo().get(key) ?? null) : null;
+  });
+
+  /** The option matching the selected connection's pinned transform (null on auto). */
+  currentOption = computed<ConnectionOption | null>(() => {
+    const e = this.selectedEdgeObj();
+    if (!e?.transform || e.transform === AUTO) return null;
+    return this.connOptions()?.options.find((o) => o.transform === e.transform) ?? null;
+  });
+
+  /** What "auto" does right now, for the selector's first entry. */
+  autoSummary = computed(() => {
+    const o = this.connOptions();
+    if (!o?.auto_transform) return '';
+    if (o.auto_transform === 'none') return ' — now: no change needed';
+    const label = o.options.find((x) => x.transform === o.auto_transform)?.label ?? o.auto_transform;
+    return ` — now: ${label}${o.auto_out_shape ? ' → ' + o.auto_out_shape.join('×') : ''}`;
+  });
+
+  // layers, parameters and connection settings — what the live build depends on (not positions)
+  private graphKey = computed(() =>
+    JSON.stringify({
+      n: this.nodes().map((n) => [n.id, n.type, n.params]),
+      e: this.edges().map((e) => [e.source, e.target, e.transform ?? AUTO, e.params ?? {}]),
+      i: this.nodes().length,
+    }),
+  );
 
   canvasTransform = computed(() => {
     const p = this.pan();
@@ -399,6 +508,7 @@ export class EditorPage {
   // -------------------------------------------------------------- selection
   select(id: string): void {
     this.selectedId.set(id);
+    this.selectedEdge.set(null);
   }
 
   deleteSelected(): void {
@@ -407,7 +517,128 @@ export class EditorPage {
     this.nodes.update((ns) => ns.filter((n) => n.id !== id));
     this.edges.update((es) => es.filter((e) => e.source !== id && e.target !== id));
     this.selectedId.set(null);
+    this.selectedEdge.set(null);
     this.invalidateBuild();
+  }
+
+  // ------------------------------------------------- connections (Stage 14)
+  selectEdge(key: string, ev: Event): void {
+    ev.stopPropagation();
+    this.selectedEdge.set(key);
+    this.selectedId.set(null);
+    this.connectFrom.set(null);
+    this.connOptions.set(null);
+    this.loadConnectionOptions();
+  }
+
+  deleteSelectedEdge(): void {
+    const key = this.selectedEdge();
+    if (!key) return;
+    this.edges.update((es) => es.filter((e) => `${e.source}->${e.target}` !== key));
+    this.selectedEdge.set(null);
+    this.connOptions.set(null);
+    this.invalidateBuild();
+  }
+
+  /** Ask the backend what this connection can do: the shape arriving, auto's pick, every option. */
+  private loadConnectionOptions(): void {
+    const e = this.selectedEdgeObj();
+    if (!e) {
+      this.connOptions.set(null);
+      return;
+    }
+    const key = `${e.source}->${e.target}`;
+    this.connError.set(null);
+    this.api.connectionOptions(this.toSpec(), e.source, e.target).subscribe({
+      next: (o) => {
+        if (this.selectedEdge() === key) this.connOptions.set(o);
+      },
+      error: (err) => {
+        if (this.selectedEdge() !== key) return;
+        this.connOptions.set(null);
+        this.connError.set(
+          err?.status === 404 || err?.status === 405 ? OUTDATED_MSG : this.errMsg(err),
+        );
+      },
+    });
+  }
+
+  private updateSelectedEdge(patch: (e: EditorEdge) => EditorEdge): void {
+    const key = this.selectedEdge();
+    if (!key) return;
+    this.edges.update((es) => es.map((e) => (`${e.source}->${e.target}` === key ? patch(e) : e)));
+    this.invalidateBuild();
+  }
+
+  /** Pick the connection's transform: "auto", or one option (with its first preset). */
+  setEdgeTransform(kind: string): void {
+    if (!kind || kind === AUTO) {
+      this.updateSelectedEdge(({ source, target }) => ({ source, target }));
+      return;
+    }
+    const opt = this.connOptions()?.options.find((o) => o.transform === kind);
+    const params = structuredClone(opt?.presets[0] ?? {});
+    this.updateSelectedEdge((e) => ({ source: e.source, target: e.target, transform: kind, params }));
+  }
+
+  applyEdgePreset(preset: Record<string, unknown>): void {
+    this.updateSelectedEdge((e) => ({ ...e, params: structuredClone(preset) }));
+  }
+
+  setEdgeParam(p: ParamDef, raw: unknown): void {
+    const val = this.coerceParam(p, raw);
+    this.updateSelectedEdge((e) => ({ ...e, params: { ...(e.params ?? {}), [p.name]: val } }));
+  }
+
+  /** The value an edge parameter shows: its own, else the option's default preset, else the def's default. */
+  edgeParam(p: ParamDef): string | number | boolean {
+    const own = this.selectedEdgeObj()?.params?.[p.name];
+    const v = own ?? this.currentOption()?.presets[0]?.[p.name] ?? p.default;
+    if (p.type === 'intlist') return Array.isArray(v) ? v.join(', ') : String(v ?? '');
+    return v as string | number | boolean;
+  }
+
+  presetLabel(p: Record<string, unknown>): string {
+    if ('channels' in p) return `${p['channels']}×${p['height']}×${p['width']}`;
+    if ('shape' in p) return Array.isArray(p['shape']) ? (p['shape'] as number[]).join('×') : String(p['shape']);
+    if ('length' in p) return `${p['length']} step${p['length'] === 1 ? '' : 's'}`;
+    if ('mode' in p) return p['mode'] === 'patches' ? `patches ${p['patch']}²` : String(p['mode']);
+    return Object.values(p).join(', ');
+  }
+
+  isPresetActive(p: Record<string, unknown>): boolean {
+    const own = this.selectedEdgeObj()?.params ?? {};
+    return Object.entries(p).every(([k, v]) => JSON.stringify(own[k]) === JSON.stringify(v));
+  }
+
+  private scheduleAnalysis(): void {
+    if (this.analysisTimer) clearTimeout(this.analysisTimer);
+    this.analysisTimer = setTimeout(() => this.runAnalysis(), ANALYSIS_DELAY_MS);
+  }
+
+  /** Build the graph in the background after each edit: live shapes on the nodes,
+   * live transforms on the wires, and a gentle note when it does not build yet. */
+  private runAnalysis(): void {
+    this.analysisTimer = null;
+    const seq = ++this.analysisSeq;
+    if (!this.nodes().length) {
+      this.analysis.set(null);
+      this.analysisError.set(null);
+      return;
+    }
+    this.api.build(this.toSpec()).subscribe({
+      next: (r) => {
+        if (seq !== this.analysisSeq) return; // a newer edit is on its way
+        this.analysis.set(r);
+        this.analysisError.set(null);
+      },
+      error: (e) => {
+        if (seq !== this.analysisSeq) return;
+        this.analysis.set(null);
+        this.analysisError.set(e?.status === 0 ? null : this.errInfo(e));
+      },
+    });
+    if (this.selectedEdge()) this.loadConnectionOptions();
   }
 
   clearGraph(): void {
@@ -469,6 +700,7 @@ export class EditorPage {
     this.lastX = ev.clientX;
     this.lastY = ev.clientY;
     this.selectedId.set(null);
+    this.selectedEdge.set(null);
     this.cancelConnect();
   }
 
@@ -600,11 +832,14 @@ export class EditorPage {
     if (this.resumeCheckpoint()) train.resume = true;
     // The GPU only where this backend has one: a project saved on a CUDA machine still trains elsewhere.
     if (this.device() !== 'cpu' && this.cudaAvailable()) train.device = this.device();
-    return {
+    const spec: GraphSpec = {
       nodes: this.nodes().map((n) => ({ id: n.id, type: n.type, params: n.params })),
       edges: this.edges().map((e) => [e.source, e.target]),
       train,
     };
+    const settings = edgeSettings(this.edges());
+    if (settings.length) spec.edge_settings = settings; // only when a connection is not on auto
+    return spec;
   }
 
   /** The training settings the editor's controls hold, as saved in a project. */
@@ -626,6 +861,7 @@ export class EditorPage {
   onBuild(): void {
     this.busy.set(true);
     this.runError.set(null);
+    this.runErrorInfo.set(null);
     this.proposals.set([]);
     this.trainResult.set(null);
     const spec = this.toSpec();
@@ -637,6 +873,7 @@ export class EditorPage {
       error: (e) => {
         this.buildResult.set(null);
         this.runError.set(this.errMsg(e));
+        this.runErrorInfo.set(this.errInfo(e));
         this.busy.set(false);
         this.fetchSuggestions(spec); // offer a one-click adapter if a shape mismatch is fixable
       },
@@ -650,6 +887,7 @@ export class EditorPage {
     }
     this.busy.set(true);
     this.runError.set(null);
+    this.runErrorInfo.set(null);
     this.proposals.set([]);
     this.trainResult.set(null);
     this.liveLoss.set([]);
@@ -853,6 +1091,13 @@ export class EditorPage {
   private invalidateBuild(): void {
     this.buildResult.set(null);
     this.proposals.set([]);
+    this.runErrorInfo.set(null);
+  }
+
+  /** The structured part of a 422 (where the problem is, what to do), or just the message. */
+  private errInfo(e: unknown): GraphErrorInfo {
+    const err = e as { error?: { error?: GraphErrorInfo } };
+    return err?.error?.error ?? { message: this.errMsg(e), node_id: null, edge: null, hint: null };
   }
 
   private errMsg(e: unknown): string {
@@ -1132,6 +1377,24 @@ export class EditorPage {
     if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && ev.code === 'KeyS') {
       ev.preventDefault();
       this.saveProject();
+      return;
+    }
+    // Delete / Backspace removes the selected connection or node — unless you are typing
+    if (ev.key === 'Delete' || ev.key === 'Backspace') {
+      const el = ev.target as HTMLElement | null;
+      const typing =
+        !!el &&
+        (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) ||
+          el.isContentEditable ||
+          !!el.closest?.('ion-input, ion-searchbar, ion-textarea, ion-select'));
+      if (typing || this.projectsOpen() || this.dataModalOpen() || this.exportModalOpen()) return;
+      if (this.selectedEdge()) {
+        ev.preventDefault();
+        this.deleteSelectedEdge();
+      } else if (this.selectedId()) {
+        ev.preventDefault();
+        this.deleteSelected();
+      }
     }
   }
 
@@ -1167,11 +1430,15 @@ export class EditorPage {
     this.pan.set({ x: s.view.pan_x, y: s.view.pan_y });
     this.zoom.set(s.view.zoom);
     this.selectedId.set(null);
+    this.selectedEdge.set(null);
     this.innerSel.set(null);
     this.connectFrom.set(null);
     this.buildResult.set(null);
     this.trainResult.set(null);
     this.runError.set(null);
+    this.runErrorInfo.set(null);
+    this.analysis.set(null);
+    this.analysisError.set(null);
     this.proposals.set([]);
     this.liveLoss.set([]);
     this.liveAcc.set([]);

@@ -77,14 +77,36 @@
       <div class="canvas" [style.transform]="canvasTransform()">
         <svg class="edges" width="4000" height="4000">
           @for (e of edgeViews(); track e.id) {
-            <path class="edge" [attr.d]="e.d"></path>
+            <path class="edge" [class.sel]="e.selected" [class.problem]="e.problem" [attr.d]="e.d"></path>
+            <!-- a wide invisible stroke: easy to click -->
+            <path class="edge-hit" [attr.d]="e.d" (pointerdown)="selectEdge(e.id, $event)">
+              <title>{{ e.title }}</title>
+            </path>
           }
         </svg>
+
+        @for (e of edgeViews(); track e.id) {
+          @if (e.label) {
+            <div
+              class="edge-badge"
+              [class.auto]="e.auto"
+              [class.sel]="e.selected"
+              [class.problem]="e.problem"
+              [style.left.px]="e.mx"
+              [style.top.px]="e.my"
+              [title]="e.title"
+              (pointerdown)="selectEdge(e.id, $event)"
+            >
+              {{ e.label }}
+            </div>
+          }
+        }
 
         @for (n of nodes(); track n.id) {
           <div
             class="node"
             [class.sel]="n.id === selectedId()"
+            [class.problem]="n.id === problemNode()"
             [style.left.px]="n.x"
             [style.top.px]="n.y"
             [style.width.px]="NODE_W"
@@ -118,6 +140,12 @@
         <div class="hint">Click another node's top port (input) to connect · click the canvas to cancel</div>
       }
       <div class="zoomhint">{{ zoom() * 100 | number: '1.0-0' }}%</div>
+      @if (backendOutdated()) {
+        <div class="outdated" (pointerdown)="$event.stopPropagation()">
+          ⚠ The server still runs an older backend than this page. Connections will not adapt by themselves and
+          errors come without hints until the backend is restarted.
+        </div>
+      }
       @if (dropHover()) {
         <div class="drop-hint">Drop a .mlc.json project file to open it</div>
       }
@@ -142,7 +170,88 @@
     <!-- ==================== inspector ==================== -->
     <aside class="panel inspector">
       <div class="panel-h">Inspector</div>
-      @if (selectedNode(); as n) {
+      @if (selectedEdgeObj(); as ce) {
+        <!-- ============ a connection (Stage 14) ============ -->
+        <div class="pad conn">
+          <div class="insp-title">Connection <ion-note>· {{ ce.source }} → {{ ce.target }}</ion-note></div>
+          @if (selectedEdgeInfo(); as ei) {
+            <div class="conn-shapes">
+              [{{ ei.in_shape.join('×') }}] → [{{ ei.out_shape.join('×') }}]
+              @if (ei.num_params) {
+                <span class="conn-weights">· {{ ei.num_params | number }} weights</span>
+              }
+            </div>
+          } @else if (connOptions()?.in_shape; as ish) {
+            <div class="conn-shapes">arriving: [{{ ish.join('×') }}]</div>
+          }
+
+          <label class="conn-label" for="conn-transform">Transform</label>
+          <select id="conn-transform" class="ds-select" (change)="setEdgeTransform($any($event).target.value)">
+            <option value="auto" [selected]="!ce.transform || ce.transform === 'auto'">
+              Auto (recommended){{ autoSummary() }}
+            </option>
+            @for (o of connOptions()?.options ?? []; track o.transform) {
+              <option
+                [value]="o.transform"
+                [selected]="o.transform === ce.transform"
+                [disabled]="!o.fits && o.transform !== ce.transform"
+                [title]="o.note || o.description"
+              >
+                {{ o.label }}{{ o.learnable ? ' · learns weights' : '' }}{{ o.fits ? '' : ' — does not fit here' }}
+              </option>
+            }
+          </select>
+
+          @if (currentOption(); as opt) {
+            <div class="conn-desc">{{ opt.description }}</div>
+            @if (opt.presets.length > 1) {
+              <div class="conn-presets">
+                @for (p of opt.presets.slice(0, 6); track $index) {
+                  <button type="button" class="chip" [class.on]="isPresetActive(p)" (click)="applyEdgePreset(p)">
+                    {{ presetLabel(p) }}
+                  </button>
+                }
+              </div>
+            }
+            @for (p of opt.params; track p.name) {
+              <label class="conn-label">{{ p.label || p.name }}</label>
+              @if (p.choices?.length) {
+                <select class="ds-select" (change)="setEdgeParam(p, $any($event).target.value)">
+                  @for (c of p.choices; track c) {
+                    <option [value]="c" [selected]="edgeParam(p) === c">{{ c }}</option>
+                  }
+                </select>
+              } @else {
+                <input
+                  class="conn-input"
+                  [type]="p.type === 'int' || p.type === 'float' ? 'number' : 'text'"
+                  [value]="edgeParam(p)"
+                  (input)="setEdgeParam(p, $any($event).target.value)"
+                />
+              }
+              @if (p.help) {
+                <ion-note class="help">{{ p.help }}</ion-note>
+              }
+            }
+          } @else if (!ce.transform || ce.transform === 'auto') {
+            <div class="conn-desc">
+              Auto picks the simplest change that lets {{ ce.target }} take what {{ ce.source }} sends — nothing at
+              all when the shapes already fit. Pick a transform above to choose yourself.
+            </div>
+          }
+
+          @if (connOptions()?.problem; as pr) {
+            <ion-note color="danger" class="block conn-problem">{{ pr }}</ion-note>
+          }
+          @if (connError()) {
+            <ion-note color="warning" class="block conn-problem">{{ connError() }}</ion-note>
+          }
+          <ion-button expand="block" fill="outline" color="danger" size="small" (click)="deleteSelectedEdge()">
+            Delete connection
+          </ion-button>
+          <ion-note class="muted block conn-tip">Tip: select a connection or a node and press Delete.</ion-note>
+        </div>
+      } @else if (selectedNode(); as n) {
         <div class="pad">
           <div class="insp-title">{{ nodeTitle(n) }} <ion-note>· {{ n.id }}</ion-note></div>
           @if (selectedInfo(); as info) {
@@ -233,7 +342,7 @@
         </div>
       } @else {
         <ion-note class="pad block muted">
-          Click a node to edit its parameters.<br />
+          Click a node to edit its parameters, or a connection (a line) to set how it reshapes the data.<br />
           To connect: click a node's bottom port (output), then another node's top port (input).
         </ion-note>
       }
@@ -316,6 +425,16 @@
         }
         @if (runError()) {
           <ion-note color="danger" class="block">{{ runError() }}</ion-note>
+          @if (runErrorInfo()?.hint; as h) {
+            <ion-note class="block hint-line">→ {{ h }}</ion-note>
+          }
+        } @else if (analysisError(); as ae) {
+          <div class="soft-problem">
+            <div>⚠ The graph does not build yet: {{ ae.message }}</div>
+            @if (ae.hint) {
+              <div class="hint-line">→ {{ ae.hint }}</div>
+            }
+          </div>
         }
         @if (proposals().length) {
           <div class="fixes">

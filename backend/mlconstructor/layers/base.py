@@ -51,12 +51,13 @@ class LayerNode(ABC):
         """Validate the incoming shape, raising :class:`ShapeError` with node
         context on mismatch (clear message instead of a deep torch crash)."""
         if in_shape is None:
-            raise ShapeError(f"node {self.id!r} ({self.type_name}) expects an input but has none")
+            raise ShapeError(f"node {self.id!r} ({self.type_name}) expects an input but has none", node_id=self.id)
         if ndim is not None and len(in_shape) != ndim:
             extra = f" {what}" if what else ""
             raise ShapeError(
                 f"node {self.id!r} ({self.type_name}) expects a {ndim}-D input{extra}, "
-                f"got shape {tuple(in_shape)}"
+                f"got shape {tuple(in_shape)}",
+                node_id=self.id,
             )
         return in_shape
 

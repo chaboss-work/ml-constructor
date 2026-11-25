@@ -44,13 +44,16 @@ class InputNode(LayerNode):
 
 @register("Output")
 class OutputNode(LayerNode):
-    """Marks the network output. Pass-through (no parameters)."""
+    """Marks the network output: one score per class. Pass-through (no parameters).
+
+    It takes a flat vector — a classifier's class scores. Since Stage 14 a
+    connection into it flattens a sequence or a feature map automatically."""
 
     category = "io"
     label = "Output"
 
     def out_shape(self, in_shape: Shape | None) -> Shape:
-        return self._require_shape(in_shape)
+        return self._require_shape(in_shape, ndim=1, what="(one score per class)")
 
     def build(self, in_shape: Shape | None) -> Optional[nn.Module]:
         return None

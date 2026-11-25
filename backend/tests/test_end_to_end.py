@@ -14,6 +14,7 @@ Or via pytest: .venv\\Scripts\\python.exe -m pytest tests -q
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -1054,6 +1055,294 @@ def test_probe_runs_on_the_model_device():
     print("[probe] class-count probe follows the model's device (meta) — Stage 11 CUDA crash fixed")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 13 — projects: a versioned file format with migrations and warnings, plus
+# the optional server-side store (exercised in a temp folder, and over HTTP).
+# --------------------------------------------------------------------------- #
+def _project_from(graph: dict, name: str = "Test project") -> dict:
+    """A current-format project dict for a graph, every node placed on the canvas."""
+    return {
+        "format": "mlconstructor.project",
+        "version": 1,
+        "name": name,
+        "description": "made by the test suite",
+        "graph": {
+            "nodes": [
+                {**n, "position": {"x": 70.0 + 13.5 * i, "y": 24.0 + 112.25 * i}}
+                for i, n in enumerate(graph["nodes"])
+            ],
+            "edges": [list(e) for e in graph["edges"]],
+        },
+        "train": dict(graph.get("train", {})),
+        "editor": {"custom_text": "1, 2, 0\n# a comment", "view": {"pan_x": -12.5, "pan_y": 40.0, "zoom": 0.8}},
+    }
+
+
+def _graph_spec_of(project) -> GraphSpec:
+    """The plain GraphSpec a saved project trains with (positions dropped)."""
+    return GraphSpec.model_validate({
+        "nodes": [n.model_dump(exclude={"position"}) for n in project.graph.nodes],
+        "edges": project.graph.edges,
+        "train": project.train.model_dump(),
+    })
+
+
+def test_project_round_trip_is_exact():
+    gpt = get_architecture("gpt").model_dump()  # nested params: a Repeat block's inner layers
+    custom = _custom_graph(CUSTOM_ROWS, epochs=7).model_dump()  # pasted rows travel with the project
+    for graph in (CNN_MLP, gpt, custom):
+        raw = _project_from(graph)
+        first = mlc.normalize_project(raw)
+        assert first.ok and first.migrated_from is None and first.warnings == [], first.warnings
+        saved = json.loads(first.project.model_dump_json())   # what "Save" writes
+        again = mlc.normalize_project(saved)                  # what "Open" reads back
+        assert again.project == first.project and again.warnings == []
+        # ids, types, params (nested ones too), positions, edges, train setup and view survive exactly
+        for got, want in zip(again.project.graph.nodes, raw["graph"]["nodes"], strict=True):
+            assert (got.id, got.type, got.params) == (want["id"], want["type"], want["params"])
+            assert (got.position.x, got.position.y) == (want["position"]["x"], want["position"]["y"])
+        assert again.project.graph.edges == raw["graph"]["edges"]
+        for key, value in raw["train"].items():
+            if key == "dataset":  # the legacy default "synthetic" opens as its catalogue id
+                value = {"synthetic": "blobs"}.get(value, value)
+            assert getattr(again.project.train, key) == value, key
+        assert again.project.editor.model_dump() == raw["editor"]
+        assert (again.project.name, again.project.description) == (raw["name"], raw["description"])
+        # ... and the reopened project builds into exactly the same model
+        _m, b_open = mlc.build_model(_graph_spec_of(again.project))
+        _m, b_orig = mlc.build_model(GraphSpec.model_validate(graph))
+        assert (b_open.total_params, b_open.order) == (b_orig.total_params, b_orig.order)
+    assert again.project.train.custom_rows == CUSTOM_ROWS and again.project.train.dataset == "custom"
+    print("[project] save -> open is exact for CNN / GPT (Repeat) / custom rows; reopened graphs build identically")
+
+
+def test_project_opens_a_bare_graph_spec():
+    # "Version 0" = a bare graph spec (the JSON of /architectures/{id} or /build):
+    # it opens, is upgraded, and its nodes have no positions (the editor lays them out).
+    bare = get_architecture("resnet").model_dump()
+    res = mlc.normalize_project(bare)
+    assert res.migrated_from == 0 and res.project.version == 1 and res.project.name == "Imported graph"
+    assert {w.code for w in res.warnings} == {"migrated", "missing_positions"}, res.warnings
+    assert [n.id for n in res.project.graph.nodes] == [n["id"] for n in bare["nodes"]]
+    assert all(n.position is None for n in res.project.graph.nodes)
+    assert res.project.graph.edges == bare["edges"]
+    assert bare["train"]["dataset"] == "synthetic" and res.project.train.dataset == "blobs"  # legacy alias
+    assert res.project.train == TrainSpec.model_validate({**bare["train"], "dataset": "blobs"})
+    _m, b = mlc.build_model(_graph_spec_of(res.project))
+    print(f"[project] bare graph spec (format 0) opens: upgraded to 1, {len(bare['nodes'])} nodes to lay out, "
+          f"{b.total_params:,} params")
+
+
+def test_project_warnings_and_repairs():
+    raw = _project_from(CNN_MLP)
+    raw["graph"]["nodes"].append({"id": "mystery", "type": "QuantumLayer", "params": {}, "position": {"x": 1, "y": 2}})
+    raw["graph"]["nodes"].append({"id": "loose", "type": "ReLU", "params": {}})  # no position
+    raw["graph"]["edges"] += [["fc2", "ghost"], ["mystery", "loose"]]
+    res = mlc.normalize_project(raw)
+    codes = [w.code for w in res.warnings]
+    assert sorted(codes) == ["dangling_edge", "missing_positions", "unknown_layer"], codes
+    unknown = next(w for w in res.warnings if w.code == "unknown_layer")
+    assert unknown.node_id == "mystery" and "QuantumLayer" in unknown.message
+    assert ["fc2", "ghost"] not in res.project.graph.edges  # the broken edge is dropped...
+    assert ["mystery", "loose"] in res.project.graph.edges  # ...a valid one to an unknown layer is kept
+    assert len(res.project.graph.nodes) == len(CNN_MLP["nodes"]) + 2  # nothing the user made is lost
+    print("[project] unknown layer kept + warned, dangling edge dropped + warned, missing position warned")
+
+
+def test_project_rejects_bad_files():
+    from mlconstructor import projects as P
+
+    dup = _project_from(CNN_MLP)
+    dup["graph"]["nodes"].append(dict(dup["graph"]["nodes"][0]))
+    bad = {
+        "not an object": [1, 2, 3],
+        "not a project": {"hello": "world"},
+        "newer format": {"format": "mlconstructor.project", "version": 99},
+        "bad version": {"format": "mlconstructor.project", "version": "1"},
+        "bad edge": {"format": "mlconstructor.project", "version": 1, "graph": {"edges": [["a"]]}},
+        "bad train": {"format": "mlconstructor.project", "version": 1, "train": {"epochs": 0}},
+        "duplicate ids": dup,
+    }
+    msgs = {}
+    for case, raw in bad.items():
+        try:
+            mlc.normalize_project(raw)
+            raise AssertionError(f"{case}: expected a clear error")
+        except ValueError as exc:
+            msgs[case] = str(exc)
+    assert "newer version" in msgs["newer format"] and "update" in msgs["newer format"]
+    assert "invalid format version" in msgs["bad version"]
+    assert "graph.edges" in msgs["bad edge"] and "train.epochs" in msgs["bad train"]
+    assert "duplicate node ids: in" in msgs["duplicate ids"]
+    old = P.MAX_NODES
+    P.MAX_NODES = 3
+    try:
+        try:
+            mlc.normalize_project(_project_from(CNN_MLP))
+            raise AssertionError("expected the node limit to trip")
+        except ValueError as exc:
+            assert "limit is 3" in str(exc), exc
+    finally:
+        P.MAX_NODES = old
+    print(f"[project] {len(msgs) + 1} kinds of bad file rejected with clear messages")
+
+
+def test_server_project_store():
+    import tempfile
+
+    from mlconstructor import projects as P
+
+    loaded = mlc.normalize_project(_project_from(CNN_MLP, name="Моя сеть")).project
+    with tempfile.TemporaryDirectory() as root:
+        assert mlc.list_projects(root) == []
+        first = mlc.create_project(loaded, root)
+        second = mlc.create_project(loaded, root)  # the same title gets a fresh name, never overwrites
+        assert (first.slug, second.slug) == ("moya-set", "moya-set-2"), (first.slug, second.slug)
+        assert not [f for f in os.listdir(root) if f.endswith(".tmp")]  # atomic writes leave no temp files
+        listing = mlc.list_projects(root)
+        assert {s.slug for s in listing} == {"moya-set", "moya-set-2"}
+        assert all(s.name == "Моя сеть" and s.node_count == len(CNN_MLP["nodes"]) for s in listing)
+        back = mlc.load_project("moya-set", root)
+        assert back.project.graph == loaded.graph and back.project.train == loaded.train
+        assert back.project.created_at and back.project.updated_at
+        again = mlc.save_project("moya-set", back.project, root)  # overwrite keeps the creation date
+        assert mlc.load_project("moya-set", root).project.created_at == back.project.created_at
+        assert again.updated_at >= back.project.updated_at
+        mlc.delete_project("moya-set-2", root)
+        assert [s.slug for s in mlc.list_projects(root)] == ["moya-set"]
+        # path traversal and junk names are refused before any file is touched
+        for evil in ["../evil", "..", "a/b", "a\\b", "", "Caps", "-x", "x.y", "x" * 65, "c:evil"]:
+            for op in (mlc.load_project, mlc.delete_project):
+                try:
+                    op(evil, root)
+                    raise AssertionError(f"{evil!r} accepted by {op.__name__}")
+                except ValueError:
+                    pass
+            try:
+                mlc.save_project(evil, loaded, root)
+                raise AssertionError(f"{evil!r} accepted by save_project")
+            except ValueError:
+                pass
+        try:
+            mlc.load_project("missing", root)
+            raise AssertionError("expected KeyError for a missing project")
+        except KeyError:
+            pass
+        # limits: the file size and the number of stored projects
+        old_bytes, old_count = P.MAX_PROJECT_BYTES, P.MAX_PROJECTS
+        P.MAX_PROJECT_BYTES, P.MAX_PROJECTS = 8192, 2
+        try:
+            big = loaded.model_copy(update={"train": loaded.train.model_copy(update={"custom_rows": CUSTOM_ROWS * 40})})
+            try:
+                mlc.save_project("big", big, root)
+                raise AssertionError("expected the size limit to trip")
+            except ValueError as exc:
+                assert "too large" in str(exc), exc
+            mlc.create_project(loaded, root)  # 2 of 2
+            try:
+                mlc.create_project(loaded, root)
+                raise AssertionError("expected the project-count limit to trip")
+            except ValueError as exc:
+                assert "limit 2" in str(exc), exc
+        finally:
+            P.MAX_PROJECT_BYTES, P.MAX_PROJECTS = old_bytes, old_count
+        # a damaged file never breaks the listing
+        with open(os.path.join(root, "broken.mlc.json"), "w", encoding="utf-8") as f:
+            f.write("{not json")
+        assert sorted(s.slug for s in mlc.list_projects(root)) == ["moya-set", "moya-set-2"]
+    assert mlc.slugify("Моя сеть!") == "moya-set" and mlc.slugify("***") == "project"
+    print("[project] server store: create/list/load/overwrite/delete, unique names, traversal refused, limits hold")
+
+
+def _asgi(method: str, path: str, body: bytes = b"", content_length: bool = True) -> tuple[int, object]:
+    """Call the FastAPI app in-process over raw ASGI (no network, no httpx)."""
+    import asyncio
+
+    from app import app as asgi_app
+
+    headers = [(b"content-type", b"application/json")]
+    if content_length:
+        headers.append((b"content-length", str(len(body)).encode()))
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": method,
+        "scheme": "http", "path": path, "raw_path": path.encode(), "root_path": "", "query_string": b"",
+        "headers": headers, "client": ("127.0.0.1", 50000), "server": ("127.0.0.1", 8050),
+    }
+    pending = [body[i:i + 65536] for i in range(0, len(body), 65536)] or [b""]
+    out = {"status": 0, "body": b""}
+
+    async def receive():
+        if pending:
+            chunk = pending.pop(0)
+            return {"type": "http.request", "body": chunk, "more_body": bool(pending)}
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            out["status"] = message["status"]
+        elif message["type"] == "http.response.body":
+            out["body"] += message.get("body", b"")
+
+    asyncio.run(asgi_app(scope, receive, send))
+    return out["status"], (json.loads(out["body"]) if out["body"] else None)
+
+
+def test_project_http_endpoints():
+    import tempfile
+
+    from mlconstructor import projects as P
+
+    raw = json.dumps(_project_from(CNN_MLP, name="Через HTTP")).encode()
+    old_dir = P._PROJECTS_DIR
+    with tempfile.TemporaryDirectory() as root:
+        P._PROJECTS_DIR = root  # keep the real store untouched
+        try:
+            st, health = _asgi("GET", "/health")
+            assert st == 200 and health["server_projects"] is True, health
+            st, res = _asgi("POST", "/projects/normalize", raw)
+            assert st == 200 and res["migrated_from"] is None and res["warnings"] == [], res
+            st, res = _asgi("POST", "/projects/normalize", json.dumps(get_architecture("mlp").model_dump()).encode())
+            assert st == 200 and res["migrated_from"] == 0, res
+            st, res = _asgi("POST", "/projects/normalize", b"{oops")
+            assert st == 422 and "JSON" in res["detail"], res
+            st, res = _asgi("POST", "/projects/normalize", b'{"format": "mlconstructor.project", "version": 7}')
+            assert st == 422 and "newer version" in res["detail"], res
+            huge = b" " * (P.MAX_PROJECT_BYTES + 1)
+            st, _ = _asgi("POST", "/projects/normalize", huge)  # refused from the declared size
+            assert st == 413, st
+            st, _ = _asgi("POST", "/projects/normalize", huge, content_length=False)  # and while streaming
+            assert st == 413, st
+            st, saved = _asgi("POST", "/projects", raw)
+            assert st == 200 and saved["slug"] == "cherez-http", saved
+            st, listing = _asgi("GET", "/projects")
+            assert st == 200 and [p["slug"] for p in listing] == ["cherez-http"], listing
+            st, opened = _asgi("GET", "/projects/cherez-http")
+            assert st == 200 and opened["project"]["graph"] == json.loads(raw)["graph"], opened
+            st, saved = _asgi("PUT", "/projects/cherez-http", raw)
+            assert st == 200 and saved["slug"] == "cherez-http", saved
+            st, res = _asgi("GET", "/projects/..%2Fevil")
+            assert st in (404, 422), (st, res)
+            st, res = _asgi("PUT", "/projects/Bad.Name", raw)
+            assert st == 422 and "invalid project name" in res["detail"], res
+            st, res = _asgi("GET", "/projects/missing")
+            assert st == 404, (st, res)
+            st, res = _asgi("DELETE", "/projects/cherez-http")
+            assert st == 200 and res["ok"] is True, res
+            st, listing = _asgi("GET", "/projects")
+            assert listing == [], listing
+            os.environ["MLC_SERVER_PROJECTS"] = "0"  # the store can be switched off...
+            try:
+                assert _asgi("GET", "/projects")[0] == 404
+                assert _asgi("POST", "/projects", raw)[0] == 404
+                assert _asgi("POST", "/projects/normalize", raw)[0] == 200  # ...opening files still works
+                assert _asgi("GET", "/health")[1]["server_projects"] is False
+            finally:
+                del os.environ["MLC_SERVER_PROJECTS"]
+        finally:
+            P._PROJECTS_DIR = old_dir
+    print("[project] HTTP: normalize (any version, 413 / 422), server CRUD, bad names refused, store switch")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -1105,7 +1394,13 @@ if __name__ == "__main__":
     test_checkpoint_save_and_resume()
     test_device_default_cpu_and_cuda_optin()
     test_probe_runs_on_the_model_device()
+    test_project_round_trip_is_exact()
+    test_project_opens_a_bare_graph_spec()
+    test_project_warnings_and_repairs()
+    test_project_rejects_bad_files()
+    test_server_project_store()
+    test_project_http_endpoints()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
-        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12)"
+        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13)"
     )

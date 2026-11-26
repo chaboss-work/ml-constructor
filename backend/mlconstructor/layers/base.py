@@ -32,6 +32,10 @@ class LayerNode(ABC):
     #: their ``out_shape_merge(in_shapes)`` / ``merge_fn()`` instead of the
     #: single-input ``out_shape`` / ``build``.
     is_merge: ClassVar[bool] = False
+    #: Stage 19 — a layer with several named inputs (a U-Net takes a noisy latent, a
+    #: timestep and a text). They arrive in the order their connections were made:
+    #: the first connection feeds the first port, and so on. Empty = one input.
+    ports: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, node_id: str, params: dict | None = None):
         self.id = node_id
@@ -60,6 +64,21 @@ class LayerNode(ABC):
                 node_id=self.id,
             )
         return in_shape
+
+    # -- several inputs (Stage 19) ------------------------------------------ #
+    def input_ports(self) -> tuple[str, ...]:
+        """The names of this layer's inputs when it takes several; empty when it takes one."""
+        return type(self).ports
+
+    def check_port(self, index: int, shape: Shape) -> Shape:
+        """Check what arrives at one input; raise :class:`ShapeError` when it cannot be used."""
+        return tuple(shape)
+
+    def out_shape_ports(self, shapes: list[Shape]) -> Shape:  # pragma: no cover - overridden
+        raise NotImplementedError
+
+    def build_ports(self, shapes: list[Shape]) -> Optional[nn.Module]:  # pragma: no cover - overridden
+        raise NotImplementedError
 
     # -- to implement ------------------------------------------------------ #
     @abstractmethod

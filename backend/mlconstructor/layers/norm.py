@@ -48,17 +48,29 @@ class BatchNorm1dNode(LayerNode):
 
 @register("LayerNorm")
 class LayerNormNode(LayerNode):
-    """Layer normalization over the whole per-sample shape."""
+    """Layer normalization over the whole per-sample shape — or, with "Each position",
+    over the last axis only, every token on its own (as transformers do)."""
 
     category = "norm"
     label = "LayerNorm"
+
+    @classmethod
+    def param_defs(cls) -> list[ParamDef]:
+        return [
+            # Stage 19: transformers normalize every token on its own
+            ParamDef(name="last_axis", type="bool", default=False, label="Each position (last axis)",
+                     help="On: every token of a sequence is normalized on its own (ViT, CLIP, Whisper). "
+                          "Off: the whole example at once."),
+            ParamDef(name="eps", type="float", default=1e-5, min=0.0, label="Epsilon"),
+        ]
 
     def out_shape(self, in_shape: Shape | None) -> Shape:
         return self._require_shape(in_shape)
 
     def build(self, in_shape: Shape | None) -> nn.Module:
         sh = self._require_shape(in_shape)
-        return nn.LayerNorm(tuple(int(x) for x in sh))
+        dims = (int(sh[-1]),) if bool(self.p("last_axis", False)) else tuple(int(x) for x in sh)
+        return nn.LayerNorm(dims, eps=float(self.p("eps", 1e-5)))
 
 
 @register("GroupNorm")

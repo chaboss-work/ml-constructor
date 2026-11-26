@@ -29,7 +29,11 @@ class InputNode(LayerNode):
                 default=[1, 28, 28],
                 label="Shape",
                 help="Per-sample shape without the batch dimension: (C,H,W) or (features,)",
-            )
+            ),
+            # Stage 19: a model can take several inputs (an image, a text, a timestep)
+            ParamDef(name="name", type="str", default="", label="Name",
+                     help="What this input is (image, text, timestep…): shown on the node and used as the "
+                          "argument's name in the exported code"),
         ]
 
     def out_shape(self, in_shape: Shape | None) -> Shape:
@@ -59,9 +63,15 @@ class OutputNode(LayerNode):
     def param_defs(cls) -> list[ParamDef]:
         return [ParamDef(name="per_token", type="bool", default=False, label="Every position (a language model)",
                          help="On: the next token is scored at every position (L x vocab), as a GPT trains on "
-                              "every character at once. Off: one score per class.")]
+                              "every character at once. Off: one score per class."),
+                # Stage 19: generators output a picture, a latent, points…
+                ParamDef(name="any_shape", type="bool", default=False, label="Any shape (a picture, a latent…)",
+                         help="On: the network's output can be anything — a generated image, a latent, 3-D points. "
+                              "Such a network builds and runs here; training it to generate comes later.")]
 
     def out_shape(self, in_shape: Shape | None) -> Shape:
+        if bool(self.p("any_shape", False)):
+            return self._require_shape(in_shape)
         if bool(self.p("per_token", False)):
             return self._require_shape(in_shape, ndim=2, what="(L, vocab): scores at every position")
         return self._require_shape(in_shape, ndim=1, what="(one score per class)")

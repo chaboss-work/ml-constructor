@@ -9,19 +9,25 @@ Endpoints:
     GET  /layers   the layer palette the UI renders
     POST /build    graph spec -> model summary (shapes, param counts) or 422
     POST /train    graph spec -> tiny training run -> loss curve + accuracy
+    POST /test     the final test: a run's weights on the test rows (Stage 16)
+    GET  /runs/{id}/weights   download a run's weights (.pt)
+    POST /weights/upload      load a weights file into the graph (kept as a run)
     POST /projects/normalize   any project file version -> current format + warnings
     GET/PUT/DELETE /projects[/{slug}]   the optional server-side project store
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
+import urllib.parse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import mlconstructor as mlc
@@ -40,7 +46,11 @@ from mlconstructor.schema import (
     ProjectSaveResult,
     ProjectSummary,
     SuggestResult,
+    TestRequest,
+    TestResult,
     TrainResult,
+    WeightsInfo,
+    WeightsUpload,
 )
 from mlconstructor.shapes import ShapeError
 
@@ -98,14 +108,22 @@ def build(spec: GraphSpec) -> BuildResult:
         return _unprocessable(exc)
 
 
+def _prepare_training(spec: GraphSpec):
+    """Build the model with reproducible starting weights (Stage 16: the run's seed)
+    and load the weights to start from, if any. Returns (model, in_shape, train spec)."""
+    model, result = mlc.build_model(spec, seed=spec.train.seed)
+    if not result.layers or result.layers[0].out_shape is None:
+        raise ShapeError("graph has no Input node to take a shape from")
+    in_shape = tuple(result.layers[0].out_shape)
+    return model, in_shape, mlc.start_from_run(model, spec.train)
+
+
 @app.post("/train", response_model=TrainResult)
 def train(spec: GraphSpec) -> TrainResult:
     try:
-        model, result = mlc.build_model(spec)
-        if not result.layers or result.layers[0].out_shape is None:
-            raise ShapeError("graph has no Input node to take a shape from")
-        in_shape = tuple(result.layers[0].out_shape)
-        return mlc.train_model(model, in_shape, spec.train)
+        model, in_shape, train_spec = _prepare_training(spec)
+        result = mlc.train_model(model, in_shape, train_spec)
+        return mlc.save_trained(model, in_shape, train_spec, result)
     except _USER_ERRORS as exc:
         return _unprocessable(exc)
 
@@ -116,18 +134,16 @@ def train_stream(spec: GraphSpec) -> StreamingResponse:
     ``start`` once, a ``step`` per optimizer step, an ``epoch`` per finished epoch,
     then ``done`` with the full TrainResult. A bad graph still fails fast with 422."""
     try:
-        model, result = mlc.build_model(spec)
-        if not result.layers or result.layers[0].out_shape is None:
-            raise ShapeError("graph has no Input node to take a shape from")
-        in_shape = tuple(result.layers[0].out_shape)
+        model, in_shape, train_spec = _prepare_training(spec)
     except _USER_ERRORS as exc:
         return _unprocessable(exc)
 
     def events():
         try:
-            for event in mlc.train_iter(model, in_shape, spec.train):
-                if event["type"] == "done":
-                    event = {"type": "done", "result": event["result"].model_dump()}
+            for event in mlc.train_iter(model, in_shape, train_spec):
+                if event["type"] == "done":  # keep the trained weights first (Stage 16): the result names them
+                    result = mlc.save_trained(model, in_shape, train_spec, event["result"])
+                    event = {"type": "done", "result": result.model_dump()}
                 yield json.dumps(event) + "\n"
         except _USER_ERRORS as exc:  # a training-time error -> stream it, don't 500
             yield json.dumps({"type": "error", "detail": str(exc), "error": _error_info(exc)}) + "\n"
@@ -200,23 +216,88 @@ def connections_options(req: ConnectionOptionsRequest) -> ConnectionOptions:
         return _unprocessable(exc)
 
 
+# --- Final test & trained weights (Stage 16) --------------------------------------
+@app.post("/test", response_model=TestResult)
+def test(req: TestRequest) -> TestResult:
+    """The final test: a run's weights on the rows kept out of training and out of
+    the epoch-by-epoch validation, plus whether it is a fair check (same split)."""
+    try:
+        return mlc.test_run(req.spec, req.run_id)
+    except mlc.RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except _USER_ERRORS as exc:
+        return _unprocessable(exc)
+
+
+@app.get("/runs/{run_id}/weights")
+def run_weights(run_id: str, name: str = "model") -> Response:
+    """Download a run's weights as a ``.pt`` file (``torch.load(weights_only=True)``
+    reads it; so does ``load_weights()`` in the exported ``model.py``)."""
+    try:
+        path = mlc.run_path(run_id)
+    except mlc.RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    with open(path, "rb") as f:
+        raw = f.read()
+    base = (name or "model").strip()[:80] or "model"
+    ascii_base = "".join(c if c.isascii() and (c.isalnum() or c in "-_ .") else "_" for c in base).strip()
+    if not any(c.isalnum() for c in ascii_base):  # e.g. a Cyrillic name: the UTF-8 filename* carries it
+        ascii_base = "model"
+    quoted = urllib.parse.quote(base + "-weights.pt")
+    disposition = f'attachment; filename="{ascii_base}-weights.pt"; filename*=UTF-8' + "''" + quoted
+    return Response(content=raw, media_type="application/octet-stream", headers={"Content-Disposition": disposition})
+
+
+# base64 makes an upload a third bigger than the file; the graph rides along.
+_MAX_UPLOAD_JSON = mlc.MAX_WEIGHTS_BYTES * 4 // 3 + MAX_PROJECT_BYTES
+
+
+@app.post("/weights/upload", response_model=WeightsInfo)
+async def weights_upload(request: Request) -> WeightsInfo:
+    """Load a weights file (``.pt``, base64 in ``data``) into the graph in ``spec``:
+    it must fit; it is read safely (tensors only) and kept as a run to test or to
+    train from."""
+    too_big = f"weights file is over {mlc.MAX_WEIGHTS_BYTES // 2**20} MB"
+    raw = await _read_json(request, _MAX_UPLOAD_JSON, too_big)
+    try:
+        req = WeightsUpload.model_validate(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"not a weights upload: {exc}")
+    try:
+        data = base64.b64decode(req.data, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=422, detail="the weights file did not arrive intact (bad base64)")
+    if len(data) > mlc.MAX_WEIGHTS_BYTES:
+        raise HTTPException(status_code=413, detail=too_big)
+    try:
+        return await run_in_threadpool(mlc.adopt_weights, req.spec, data)
+    except _USER_ERRORS as exc:
+        return _unprocessable(exc)
+
+
 # --- Projects: open any format version, optional server-side store (Stage 13) --
-async def _read_project_json(request: Request) -> object:
-    """The request body as JSON, refusing anything over the project size limit
-    before it is parsed. Raw JSON on purpose: older formats (and a bare graph spec)
-    must be migrated *before* they are validated against the current model."""
+async def _read_json(request: Request, limit: int, too_big: str) -> object:
+    """The request body as JSON, refusing anything over ``limit`` bytes before it
+    is parsed."""
     declared = request.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > MAX_PROJECT_BYTES:
-        raise HTTPException(status_code=413, detail=f"project file is over {MAX_PROJECT_BYTES // 2**20} MB")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail=too_big)
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
-        if len(body) > MAX_PROJECT_BYTES:
-            raise HTTPException(status_code=413, detail=f"project file is over {MAX_PROJECT_BYTES // 2**20} MB")
+        if len(body) > limit:
+            raise HTTPException(status_code=413, detail=too_big)
     try:
         return json.loads(bytes(body).decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         raise HTTPException(status_code=422, detail="not a valid JSON file")
+
+
+async def _read_project_json(request: Request) -> object:
+    """A project file from the body, within the project size limit. Raw JSON on
+    purpose: older formats (and a bare graph spec) must be migrated *before* they
+    are validated against the current model."""
+    return await _read_json(request, MAX_PROJECT_BYTES, f"project file is over {MAX_PROJECT_BYTES // 2**20} MB")
 
 
 def _require_server_projects() -> None:

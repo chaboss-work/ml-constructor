@@ -152,6 +152,10 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
   dataset, and at their real size (`GET /architectures/{id}_real`), sized on PyTorch's
   "meta" device with the exact parameter count. `/build` reports `trainable: false` above
   25 million parameters; such a model is inspected, never trained.
+* Your own GPT: the `text` dataset (`train.text`) teaches a language model your own text,
+  one character at a time; with the Output's `per_token` on it learns at every position,
+  like a real GPT. `POST /generate` (`{spec, run_id, prompt, length, temperature}`)
+  continues a prompt with the trained weights.
 * `GET /layers` → the palette the editor renders.
 * `edge_settings` (optional) → how a connection reshapes its data; without it every
   connection adapts by itself (flatten, fold into an image, read an image as a

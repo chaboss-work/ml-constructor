@@ -2426,6 +2426,146 @@ def test_stage17_http():
     print(f"[stage17] HTTP: /health api 17; the library lists {len(flags)} flagships with real size + model card")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 18 — your text: a GPT that learns your text at every position and writes.
+# --------------------------------------------------------------------------- #
+from mlconstructor import text as TX  # noqa: E402
+from mlconstructor.datasets import split_rows  # noqa: E402
+
+
+def _your_gpt(**train) -> dict:
+    spec = get_architecture("your_gpt").model_dump()
+    spec["train"].update(train)
+    return spec
+
+
+def test_text_vocab_and_windows():
+    vocab = TX.text_vocab("abracadabra!", 10)
+    assert vocab[:3] == ["a", "b", "r"] and set(vocab) == set("abracadabra!")  # most frequent first
+    small = TX.text_vocab("abracadabra!", 3)
+    assert small == ["a", "b", TX.UNKNOWN], small  # the rarest share one unknown token
+    assert TX.decode_text(TX.encode_text("abcd", small), small) == "ab" + TX.UNKNOWN * 2
+    text = mlc.EXAMPLE_TEXT
+    X, y, groups = TX.text_windows(text, 64, 96, 10**6, 0)
+    vocab = TX.text_vocab(text, 96)
+    ids = TX.encode_text(text, vocab)
+    assert X.shape == y.shape == (len(groups), 64)
+    assert torch.equal(y[:, :-1], X[:, 1:].long())  # every position's label is the next character
+    block = TX.text_block(len(text), 64)
+    for row, g in zip(X.long().tolist()[::97], groups.tolist()[::97]):
+        start = next(i for i in range(g * block, (g + 1) * block) if ids[i:i + 64] == row)
+        assert start + 64 < (g + 1) * block, (start, g)  # a window and its labels stay inside the block
+    X2, y2, g2 = TX.text_windows(text, 64, 96, 500, 0)
+    assert len(X2) == 500 and torch.equal(X2, TX.text_windows(text, 64, 96, 500, 0)[0])  # capped, deterministic
+    print(f"[text] vocabulary by frequency (+unknown), {len(X)} windows of 64 with next-character labels, in blocks")
+
+
+def test_text_split_keeps_blocks_whole():
+    X, y, groups = TX.text_windows(mlc.EXAMPLE_TEXT, 16, 96, 10**6, 3)
+    tr, va, te = split_rows(y, groups, 0.2, 0.1, 3)
+    parts = [set(groups[p].tolist()) for p in (tr, va, te)]
+    assert not (parts[0] & parts[1]) and not (parts[0] & parts[2]) and not (parts[1] & parts[2])  # whole blocks
+    assert sorted(tr.tolist() + va.tolist() + te.tolist()) == list(range(len(y)))
+    n_blocks = len(set(groups.tolist()))
+    assert len(parts[1]) == round(n_blocks * 0.2) and len(parts[2]) == round(n_blocks * 0.1), (len(parts[1]), n_blocks)
+    yy = torch.randint(0, 4, (200,))
+    assert all(torch.equal(a, b) for a, b in zip(split_rows(yy, None, 0.2, 0.1, 5), split_parts(yy, 0.2, 0.1, 5)))
+    print(f"[text] the split keeps {n_blocks} blocks whole: no held-out window has a neighbour in training")
+
+
+def test_your_gpt_learns_and_writes():
+    spec = _your_gpt(samples=1600, epochs=3)
+    st, res = _post("/train", spec)
+    assert st == 200 and res["final_loss"] < res["loss_curve"][0] * 0.75, res["loss_curve"][:3]
+    assert res["final_accuracy"] > 0.3 and res["test_samples"] > 0, res  # every position scored: it learns fast
+    st, g = _post("/generate", {"spec": spec, "run_id": res["run_id"], "prompt": "The little", "length": 60,
+                                "temperature": 0.0})
+    vocab = set(mlc.EXAMPLE_TEXT)
+    assert st == 200 and len(g["text"]) == 60 and set(g["text"]) <= vocab and g["context"] == 64, g
+    again = _post("/generate", {"spec": spec, "run_id": res["run_id"], "prompt": "The little", "length": 60,
+                                "temperature": 0.0})[1]
+    assert again["text"] == g["text"]  # temperature 0: the most likely character every time
+    hot = _post("/generate", {"spec": spec, "run_id": res["run_id"], "prompt": "", "length": 40, "seed": 2})[1]
+    assert hot["prompt"] == mlc.EXAMPLE_TEXT[:64] and len(hot["text"]) == 40  # no prompt: the text's start
+    st, test = _post("/test", {"spec": spec, "run_id": res["run_id"]})
+    assert st == 200 and test["same_split"] is True and 0 < test["accuracy"] < 1, test
+    other = _your_gpt(samples=1600, epochs=3, text=mlc.EXAMPLE_TEXT.replace("network", "machine"))
+    st, unfair = _post("/test", {"spec": other, "run_id": res["run_id"]})
+    assert st == 200 and unfair["same_split"] is False, unfair  # trained on another text: not a fair check
+    print(f"[your gpt] learns the text at every position (train {res['final_accuracy']:.2f}) and writes: "
+          f"«The little{g['text'][:40]}»")
+
+
+def test_text_export_writes_like_the_app():
+    spec = GraphSpec.model_validate(_your_gpt(samples=800, epochs=1))
+    model, _ = mlc.build_model(spec, seed=0)
+    code = mlc.generate_pytorch(spec, include_training=True)
+    assert "TEXT = " in code and "def write" in code and "def split_rows" in code and "mlconstructor" not in code
+    ns = _exec_exported(code)
+    X, y, groups = ns["make_data"](800, (64,), 96, 0)
+    Xa, ya, ga = mlc.make_rows("text", (64,), 96, spec.train, torch.device("cpu"))
+    assert torch.equal(X, Xa) and torch.equal(y, ya) and torch.equal(groups, ga)  # the same rows
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "w.pt")
+        with open(path, "wb") as f:
+            f.write(W.weights_bytes(model, data=None))
+        gen = ns["load_weights"](ns["Model"](), path)
+    vocab = TX.text_vocab(spec.train.text, 96)
+    model.eval()
+    with torch.no_grad():  # the next character is what the LAST position scores highest
+        scores = model(torch.tensor([TX.encode_text("Once", vocab)], dtype=torch.float32))[0, -1, : len(vocab)]
+    assert TX.generate_text(model, vocab, 64, "Once", 1, 0.0) == vocab[int(scores.argmax())]
+    app_text = TX.generate_text(model, vocab, 64, "Once", 30, 0.0)
+    assert ns["write"](gen, "Once", 30, 0.0) == app_text  # the exported file writes exactly like the app
+    print("[your gpt] the exported model.py builds the same rows and writes the same text")
+
+
+def test_text_errors_are_clear():
+    from mlconstructor.trainer import _fit_labels
+
+    out, y = torch.randn(2, 5, 7), torch.randint(0, 7, (2, 5))
+    o, t = _fit_labels(out, y)  # scores at every position learn from every next token
+    assert o.shape == (10, 7) and torch.equal(t, y.reshape(-1))
+    o, t = _fit_labels(out[:, -1], y)  # a last-position model learns from the last label
+    assert o.shape == (2, 7) and torch.equal(t, y[:, -1])
+    st, res = _post("/train", {**get_architecture("cnn").model_dump(),
+                               "train": {"dataset": "text", "text": mlc.EXAMPLE_TEXT}})
+    assert st == 422 and "needs an Input of token ids" in res["detail"], res
+    st, res = _post("/train", _your_gpt(text="far too short"))
+    assert st == 422 and "the text is too short" in res["detail"], res
+    st, res = _post("/train", _your_gpt(text=""))
+    assert st == 422 and "has no text yet" in res["detail"], res
+    st, res = _post("/train", {**_your_gpt(), "train": {**_your_gpt()["train"], "dataset": "tokens"}})
+    assert st == 422 and "scores every position" in res["detail"], res  # per-position output, one label per row
+    small = _your_gpt(samples=400, epochs=1)
+    for n in small["nodes"]:
+        if n["id"] in ("emb", "head"):
+            n["params"]["num_embeddings" if n["id"] == "emb" else "vocab"] = 20
+    st, res = _post("/train", small)
+    assert st == 200 and "the 24 rarest read as one" in res["warnings"][-1], res["warnings"]
+    st, rr = _post("/train", {**get_architecture("qwen3").model_dump(),
+                              "train": {**get_architecture("qwen3").model_dump()["train"], "samples": 300, "epochs": 1}})
+    st, res = _post("/generate", {"spec": get_architecture("qwen3").model_dump(), "run_id": rr["run_id"]})
+    assert st == 422 and "Generate continues text" in res["detail"], res
+    st, b = _post("/build", _your_gpt())
+    assert st == 200 and b["layers"][-1]["out_shape"] == [64, 96], b["layers"][-1]  # scores at every position
+    print("[text] clear messages: wrong input, too short / no text, per-position vs one label, small vocabulary")
+
+
+def test_stage18_http():
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] == mlc.API_LEVEL >= 18, health
+    st, ex = _asgi("GET", "/text/example")
+    assert st == 200 and ex["text"] == mlc.EXAMPLE_TEXT
+    st, prev = _post("/data/preview", _your_gpt())
+    assert st == 200 and prev["text_chars"] == len(mlc.EXAMPLE_TEXT) and prev["distinct_chars"] == 43, prev
+    row = prev["rows"][0]
+    assert len(row["text"]) == 64 and row["label_text"] == mlc.EXAMPLE_TEXT[64], row  # the window, then what follows
+    st, lib = _asgi("GET", "/architectures")
+    assert any(a["id"] == "your_gpt" for a in lib)
+    print("[stage18] HTTP: /health api 18, /text/example, preview shows windows as text, Your GPT in the library")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -2519,8 +2659,14 @@ if __name__ == "__main__":
     test_real_scale_is_inspect_only()
     test_next_token_dataset()
     test_stage17_http()
+    test_text_vocab_and_windows()
+    test_text_split_keeps_blocks_whole()
+    test_your_gpt_learns_and_writes()
+    test_text_export_writes_like_the_app()
+    test_text_errors_are_clear()
+    test_stage18_http()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "
-        "+ Stage 15 + Stage 16 + Stage 17)"
+        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18)"
     )

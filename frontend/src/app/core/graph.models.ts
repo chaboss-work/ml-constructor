@@ -117,6 +117,8 @@ export interface TrainCfg {
   resume?: boolean;
   /** Stage 12 — where to train; the backend defaults to "cpu" (GPU is opt-in). */
   device?: 'cpu' | 'cuda' | 'auto';
+  /** Stage 15 — share of rows held out for validation (0 = off; the backend defaults to 0.2). */
+  val_fraction?: number;
 }
 
 /** Stage 11 — one streamed progress event from POST /train/stream. */
@@ -126,10 +128,16 @@ export interface TrainEvent {
   loss?: number;
   epoch?: number;
   acc?: number;
+  /** Stage 15 — loss and accuracy on the held-out rows after an epoch (null when none). */
+  val_acc?: number | null;
+  val_loss?: number | null;
   device?: string;
   resumed?: boolean;
   total_params?: number;
   samples?: number;
+  /** Stage 15 — how the rows split: trained on vs held out. */
+  train_samples?: number;
+  val_samples?: number;
   num_classes?: number;
   result?: TrainResult;
   detail?: string;
@@ -164,17 +172,30 @@ export interface BuildResult {
 export interface TrainResult {
   ok: boolean;
   loss_curve: number[];
-  /** Full-set accuracy after each epoch (Stage 8). Optional: older backends omit it. */
+  /** Accuracy on the training rows after each epoch (Stage 8). Optional: older backends omit it. */
   acc_curve?: number[];
+  /** Loss and accuracy on the training rows at the end. */
   final_loss: number;
   final_accuracy: number;
   steps: number;
   device: string;
   total_params: number;
-  /** Stage 11 — saved checkpoint key (or null), best full-set accuracy, resumed flag. */
+  /** Stage 11 — saved checkpoint key (or null), best accuracy (held-out when there is a
+   * validation part), resumed flag. */
   checkpoint?: string | null;
   best_accuracy?: number | null;
   resumed?: boolean;
+  /** Stage 15 — the held-out validation part (rows the network never trained on). */
+  val_acc_curve?: number[];
+  val_loss_curve?: number[];
+  final_val_accuracy?: number | null;
+  final_val_loss?: number | null;
+  train_samples?: number | null;
+  val_samples?: number;
+  /** "generalises" | "overfits" | "underfits" | "unknown", and why in plain words. */
+  fit?: string | null;
+  fit_note?: string | null;
+  warnings?: string[];
 }
 
 /** Smart adapters (Stage 5): a node to insert so a connection's shapes line up. */
@@ -221,6 +242,8 @@ export interface DataSampleRow {
   values: number[];
   truncated: boolean;
   total: number;
+  /** Stage 15 — "train" or "validation" (held out). */
+  split?: string;
 }
 
 export interface DataPreview {
@@ -233,6 +256,9 @@ export interface DataPreview {
   num_samples: number;
   feature_count: number;
   rows: DataSampleRow[];
+  /** Stage 15 — rows trained on vs held out for validation. */
+  train_samples?: number | null;
+  val_samples?: number;
 }
 
 /** Export (Stage 8): standalone PyTorch source for the current graph. */

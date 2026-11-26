@@ -432,16 +432,47 @@ Make your own GPT: teach it your own text, then let it write.
   HTTP); the tests caught all 8 bugs planted on purpose in a copy of the code; checked
   live in the browser.
 
-### Stage 19 — Flagships for images, 3D, sound and vision · *planned*
-- New layers: patch embedding, Conv3d, up-sampling, a timestep embedding,
-  cross-attention, adaptive normalization.
-- Library entries: **ViT**, **CLIP**, **Stable Diffusion** (VAE + U-Net with
-  cross-attention + text encoder), **DiT / FLUX-style** diffusion transformers, **3D
-  generators** (triplane / point-cloud models in the spirit of TripoSR), **Whisper**
-  (speech) — the same two scales (mini / real on "meta") and model-card links.
-- *Done when:* each real-scale model matches its published parameter count, and each
-  mini model builds and runs a forward pass.
+### Stage 19 — Flagships for images, 3D, sound and vision · **DONE (2026-11-26)**
+The models behind images, 3D, speech and vision — as plain, editable graphs.
+- **Seven flagships** in the library, each a **mini** model that runs here and its
+  **real** size from the published configuration, built on the meta device: **ViT**-B/16
+  86,567,656 · **CLIP** ViT-L/14 427,616,513 · **Stable Diffusion 1.5** 1,066,235,307
+  (U-Net 859,520,964 + text encoder 123,060,480 + VAE 83,653,863) · **DiT**-XL/2
+  675,129,632 · **FLUX.1** [schnell] 11,891,178,560 ([dev], with its guidance input,
+  11,901,408,320) · **TripoSR** 418,685,036 · **Whisper** large-v3 1,543,490,560 — the
+  Hub's counts to the parameter (DiT: the paper's 675M; TripoSR has no published count,
+  and the size of its checkpoint agrees).
+- **Several inputs:** a graph may have more than one Input — Stable Diffusion takes a
+  picture, noise, a timestep and a text; CLIP an image and a text; Whisper the audio and
+  the text so far. Layers that read several inputs (the U-Net, cross-attention, the DiT
+  and FLUX blocks, adding noise…) take them in the order they were connected, and every
+  wire into them is labelled with the input it feeds ("timestep", "text"). A Repeat block
+  whose layers read a condition takes it once and hands it to every layer.
+- **26 new layers:** patch embedding and unpatchify, position embeddings (learned or
+  fixed), attention / cross-attention / MLP blocks with their pre-norm and residual,
+  timestep embedding, adaptive LayerNorm, the DiT block, FLUX's double- and single-stream
+  blocks, Stable Diffusion's U-Net, VAE encoder and decoder, add noise and predict the
+  clean latent, CLIP's similarity, TripoSR's triplane (tokens, transformer, upsampling,
+  sampling at 3-D points), Conv1d, Conv3d, Upsample, SiLU, Transpose and Slice tokens. A
+  Linear and a LayerNorm can now work on every token, and an Output can be any shape (a
+  picture, points).
+- **Run once:** one forward pass on random inputs — token ids, diffusion steps or noise,
+  by what each input feeds — shows the output's shape, its numbers and the time it took.
+- The ViT mini learns MNIST here (0.90–0.93 on new digits in about 17 s); the others
+  build, run and export — teaching them to generate is the next stage. A several-input
+  graph exports as `forward(self, image, noise, timestep, text)` with a `main()` that
+  runs it once.
 - *Video:* what is inside Stable Diffusion.
+- **Shipped:** `gen_modules.py` (self-contained, copied verbatim by the export) and
+  `layers/gen.py`; ports (`input_ports`, `check_port`, `out_shape_ports`, `build_ports`)
+  in the builder, the connection inspector, `Block` / `Repeat` and the export (`Chain`);
+  `BuildResult.inputs`, `runnable`, `train_note` and `EdgeSummary.port`; `POST /run`;
+  training and the test refuse a several-input network or a picture-shaped output with a
+  reason in plain words; API level 19. Tested: 8 new backend tests (real sizes, the minis
+  run, exact export, several-input wiring and its errors, the new layers and the old
+  meanings unchanged, how the blocks behave, the ViT trains, HTTP); the tests caught all
+  18 bugs planted on purpose in a copy of the code (two of them only after the tests were
+  sharpened); checked live in the browser.
 
 ### Stage 20 — Teach it to generate · *planned*
 Training beyond classification.
@@ -984,17 +1015,47 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   приложение, понятные ошибки, HTTP); тесты поймали все 8 ошибок, нарочно внесённых в копию
   кода; вживую в браузере.
 
-#### Этап 19 — Флагманы для картинок, 3D, звука и зрения (в планах)
-- Новые слои: нарезка на патчи, Conv3d, повышение разрешения, эмбеддинг шага диффузии,
-  перекрёстное внимание, адаптивная нормализация.
-- В библиотеке: **ViT**, **CLIP**, **Stable Diffusion** (VAE + U-Net с перекрёстным
-  вниманием + текстовый энкодер), диффузионные трансформеры **DiT / в духе FLUX**,
-  **3D-генераторы** (модели на трёх плоскостях / облаках точек в духе TripoSR),
-  **Whisper** (речь) — в тех же двух масштабах (мини / настоящий на «meta») и со ссылками
-  на карточки моделей.
-- *Готово, когда:* у каждой модели настоящего масштаба число параметров совпадает с
-  опубликованным, а каждая мини-модель собирается и выполняет прямой проход.
+#### Этап 19 — Флагманы для картинок, 3D, звука и зрения · ГОТОВО (26.11)
+Модели, стоящие за картинками, 3D, речью и зрением, — обычными редактируемыми графами.
+- **Семь флагманов** в библиотеке: у каждого **мини**-модель, которая работает здесь, и
+  **настоящий** размер по опубликованной конфигурации, собранный на meta-устройстве:
+  **ViT**-B/16 86 567 656 · **CLIP** ViT-L/14 427 616 513 · **Stable Diffusion 1.5**
+  1 066 235 307 (U-Net 859 520 964 + текстовый энкодер 123 060 480 + VAE 83 653 863) ·
+  **DiT**-XL/2 675 129 632 · **FLUX.1** [schnell] 11 891 178 560 ([dev] со своим входом
+  guidance — 11 901 408 320) · **TripoSR** 418 685 036 · **Whisper** large-v3
+  1 543 490 560 — до параметра как на Hugging Face (у DiT — 675M из статьи; у TripoSR
+  опубликованного числа нет, и с ним сходится размер его чекпоинта).
+- **Несколько входов:** в графе может быть больше одного Input — Stable Diffusion
+  принимает картинку, шум, шаг и текст; CLIP — картинку и текст; Whisper — звук и уже
+  написанный текст. Слои с несколькими входами (U-Net, перекрёстное внимание, блоки DiT и
+  FLUX, добавление шума…) берут их в порядке подключения, а на каждом проводе к ним
+  подписано, какой вход он питает («timestep», «text»). Блок Repeat, внутренние слои
+  которого читают условие, получает его один раз и раздаёт всем слоям.
+- **26 новых слоёв:** нарезка на патчи и обратная сборка, позиционные таблицы (обучаемые и
+  фиксированные), блоки внимания / перекрёстного внимания / MLP с пре-нормой и residual,
+  эмбеддинг шага диффузии, адаптивная LayerNorm, блок DiT, двух- и однопоточные блоки
+  FLUX, U-Net, энкодер и декодер VAE от Stable Diffusion, добавление шума и предсказание
+  чистого латента, сходство CLIP, триплан TripoSR (токены, трансформер, повышение
+  разрешения, выборка в 3D-точках), Conv1d, Conv3d, Upsample, SiLU, Transpose и Slice
+  tokens. Linear и LayerNorm теперь умеют работать на каждом токене, а Output может быть
+  любой формы (картинка, точки).
+- **Run once:** один прямой проход на случайных входах — номера токенов, шаги диффузии
+  или шум, по тому, что питает вход, — показывает форму выхода, его числа и время.
+- ViT-мини учится здесь на MNIST (0,90–0,93 на новых цифрах примерно за 17 с); остальные
+  собираются, работают и экспортируются — учить их генерировать будем на следующем этапе.
+  Граф с несколькими входами экспортируется как `forward(self, image, noise, timestep,
+  text)` с `main()`, который прогоняет его один раз.
 - *Ролик:* что внутри у Stable Diffusion.
+- **Сделано:** `gen_modules.py` (самодостаточный, экспорт копирует его дословно) и
+  `layers/gen.py`; порты (`input_ports`, `check_port`, `out_shape_ports`, `build_ports`) в
+  сборщике, инспекторе соединений, `Block` / `Repeat` и экспорте (`Chain`);
+  `BuildResult.inputs`, `runnable`, `train_note` и `EdgeSummary.port`; `POST /run`; обучение
+  и тест отказывают сети с несколькими входами или с выходом-картинкой и объясняют причину
+  простыми словами; уровень API 19. Проверено: 8 новых тестов бэкенда (настоящие размеры,
+  мини-модели работают, точный экспорт, проводка нескольких входов и её ошибки, новые слои
+  и прежний смысл старых, поведение блоков, ViT учится, HTTP); тесты поймали все 18 ошибок,
+  нарочно внесённых в копию кода (две — лишь после того, как тесты стали строже); вживую в
+  браузере.
 
 #### Этап 20 — Учим генерировать (в планах)
 Обучение не только классификации.

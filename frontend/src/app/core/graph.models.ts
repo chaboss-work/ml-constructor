@@ -173,6 +173,9 @@ export interface BuildResult {
   total_params: number;
   /** Stage 14 — every connection with its transform. Optional: older backends omit it. */
   edges?: EdgeSummary[];
+  /** Stage 17 — small enough to train here (a real-scale flagship is built to inspect only). */
+  trainable?: boolean;
+  max_train_params?: number | null;
 }
 
 export interface TrainResult {
@@ -264,6 +267,13 @@ export interface ArchitectureInfo {
   tags: string[];
   input_shape: number[];
   node_count: number;
+  /** Stage 17 — flagships: "mini" (trains here) or "real" (the published model: inspect only). */
+  scale?: 'mini' | 'real' | null;
+  real_id?: string | null;
+  real_name?: string | null;
+  /** The real model's parameter count (Hugging Face; DeepSeek-V3: the model card). */
+  real_params?: number | null;
+  hf_url?: string | null;
 }
 
 /** Datasets & data preview (Stage 8). */

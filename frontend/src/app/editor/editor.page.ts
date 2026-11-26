@@ -65,9 +65,27 @@ const NODE_H = 78;
 const AUTOSAVE_DELAY_MS = 700;
 const ANALYSIS_DELAY_MS = 450;
 /** The backend API this page needs: Stage 14 (smart connections, structured errors). */
-const REQUIRED_API = 16;
+const REQUIRED_API = 17;
 const OUTDATED_MSG =
-  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test and saved weights need a restart of the backend.';
+  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights and the flagship models need a restart of the backend.';
+
+/** Stage 17 — a parameter count in words for the library: 8.2B, 671B, 999.9M, 152K. */
+export function humanCount(n: number | null | undefined): string {
+  if (n == null) return '';
+  for (const [size, unit] of [
+    [1e12, 'T'],
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'K'],
+  ] as const) {
+    if (n >= size * 0.9995) {
+      // 999.9M reads as 1B, not 1000M
+      const v = n / size;
+      return `${v >= 100 ? Math.round(v) : Number(v.toFixed(1))}${unit}`;
+    }
+  }
+  return String(n);
+}
 /** Stage 16 — the share of rows kept for the final test unless the project says otherwise. */
 const DEFAULT_TEST_FRACTION = 0.1;
 /** The choices of the "Final test" picker. */
@@ -927,6 +945,17 @@ export class EditorPage {
     return t;
   }
 
+  /** Stage 17 — a parameter count in words (8.2B, 671B) for the library. */
+  human(n: number | null | undefined): string {
+    return humanCount(n);
+  }
+
+  /** Stage 17 — the live build says the network is too big to train here (a real-size flagship). */
+  inspectOnly = computed(() => this.analysis()?.trainable === false);
+
+  /** Stage 17 — where the flagship group starts in the library list. */
+  firstFlagship = computed(() => this.architectures().findIndex((a) => a.scale === 'mini'));
+
   /** Stage 16 — the "Final test" picker. */
   setTestFraction(v: string | number): void {
     const f = Number(v);
@@ -1280,7 +1309,9 @@ export class EditorPage {
   /** Start a new project from a ready architecture: fetch its full graph, lay it
    * out on the canvas, and adopt its recommended training config. The nodes are
    * ordinary, editable layer nodes — the user can re-wire and tune every one. */
-  loadArchitecture(id: string): void {
+  /** Open an architecture from the library. A flagship's real size comes from its mini entry
+   * (`from`): the published model, sized on the meta device — inspect only (Stage 17). */
+  loadArchitecture(id: string, from?: ArchitectureInfo): void {
     if (this.busy() || !this.confirmDiscard()) return;
     this.busy.set(true);
     this.runError.set(null);
@@ -1288,19 +1319,28 @@ export class EditorPage {
     this.api.architecture(id).subscribe({
       next: (spec) => {
         const info = this.architectures().find((a) => a.id === id);
+        const real = !!from && from.real_id === id;
         const t = spec.train ?? {};
         const trainExtra: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(t)) if (!UI_TRAIN_KEYS.includes(k)) trainExtra[k] = v;
+        // Stage 17: a template's connection settings come along (e.g. the LM head reads the last token)
+        const settings = new Map((spec.edge_settings ?? []).map((s) => [`${s.source}->${s.target}`, s]));
+        const name = real ? (from!.real_name ?? id) : (info?.name ?? id);
         this.busy.set(false);
         this.startFresh({
-          name: info?.name ?? id,
-          description: info?.description ?? '',
+          name,
+          description: real ? `${from!.description} Real size: ${from!.hf_url ?? ''}` : (info?.description ?? ''),
           createdAt: null,
           nodes: layoutGraph(spec.nodes, spec.edges),
-          edges: spec.edges.map(([source, target]) => ({ source, target })),
+          edges: spec.edges.map(([source, target]) => {
+            const s = settings.get(`${source}->${target}`);
+            return s ? { source, target, transform: s.transform, params: { ...(s.params ?? {}) } } : { source, target };
+          }),
           train: {
-            // the template brings its recommended schedule; your data choice stays
+            // the template brings its recommended schedule; your data choice stays, unless the
+            // template needs its own task (the flagships learn "next token")
             ...this.uiTrain(),
+            ...(t.dataset && t.dataset !== 'synthetic' ? { dataset: t.dataset } : {}),
             epochs: t.epochs ?? this.epochs(),
             lr: t.lr ?? this.lr(),
             batch_size: t.batch_size ?? this.batchSize(),
@@ -1310,7 +1350,12 @@ export class EditorPage {
           customText: this.customText(),
           view: { pan_x: 48, pan_y: 24, zoom: 0.8 },
         });
-        this.showNotice('info', `New project from the «${info?.name ?? id}» template.`);
+        this.showNotice(
+          'info',
+          real
+            ? `Real size: ${name}, ${(from!.real_params ?? 0).toLocaleString('en-US')} parameters, built on the "meta" device — every layer and shape, no memory. Inspect it here; the mini version trains.`
+            : `New project from the «${name}» template.`,
+        );
       },
       error: (e) => {
         this.runError.set(this.errMsg(e));

@@ -17,7 +17,8 @@
     </ion-title>
     <ion-buttons slot="end">
       <ion-button fill="outline" [disabled]="busy() || !nodes().length" (click)="onBuild()">Build</ion-button>
-      <ion-button fill="solid" color="primary" [disabled]="busy() || !nodes().length" (click)="onTrain()">Train ▶</ion-button>
+      <ion-button fill="solid" color="primary" [disabled]="busy() || !nodes().length || inspectOnly()" (click)="onTrain()"
+        [title]="inspectOnly() ? 'Real size: too big to train here — the mini version trains' : 'Train the network'">Train ▶</ion-button>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
@@ -29,11 +30,28 @@
       @if (architectures().length) {
         <div class="panel-h">Architectures</div>
         <ion-list lines="none" class="arch-list">
-          @for (a of architectures(); track a.id) {
+          @for (a of architectures(); track a.id; let i = $index) {
+            @if (i === firstFlagship()) {
+              <div class="arch-group" title="Each trains here as a mini model; its real size can be inspected">
+                Flagship language models
+              </div>
+            }
             <ion-item button detail="false" [title]="a.description" (click)="loadArchitecture(a.id)">
               <ion-label>
                 <div class="l-name">{{ a.name }}</div>
                 <div class="a-desc">{{ a.description }}</div>
+                @if (a.scale === 'mini' && a.real_id) {
+                  <div class="a-real">
+                    <button class="a-real-btn" (click)="$event.stopPropagation(); loadArchitecture(a.real_id, a)"
+                      [title]="'Open ' + a.real_name + ' at its real size: every layer and shape (inspect only)'">
+                      {{ a.real_name }} · {{ human(a.real_params) }}
+                    </button>
+                    @if (a.hf_url) {
+                      <a class="a-hf" [href]="a.hf_url" target="_blank" rel="noopener noreferrer"
+                        (click)="$event.stopPropagation()" title="The model card on Hugging Face">HF ↗</a>
+                    }
+                  </div>
+                }
               </ion-label>
             </ion-item>
           }
@@ -472,6 +490,14 @@
 
       <div class="panel-h">Result</div>
       <div class="pad result">
+        @if (inspectOnly() && analysis(); as an) {
+          <div class="real-size">
+            <b>Real size · {{ an.total_params | number }} parameters.</b>
+            Built on the "meta" device: every layer and shape of the real model, no memory used. It is
+            too big to train here (the limit is {{ human(an.max_train_params) }}): the mini version in the
+            library trains.
+          </div>
+        }
         @if (!trainResult() && loadedWeights(); as lw) {
           <div class="weights-actions">
             <span class="lw-label">Loaded: {{ lw.info.tensors }} tensors, {{ lw.info.params | number }} parameters</span>

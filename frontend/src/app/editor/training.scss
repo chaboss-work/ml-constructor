@@ -147,3 +147,50 @@
     white-space: nowrap;
   }
 }
+
+// Stage 17 — flagships in the library, the real-size note.
+.arch-group {
+  margin: 10px 12px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.a-real {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  .a-real-btn {
+    border: 1px solid var(--ion-color-tertiary, #5260ff);
+    color: var(--ion-color-tertiary, #5260ff);
+    background: transparent;
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    &:hover {
+      background: rgba(82, 96, 255, 0.08);
+    }
+  }
+  .a-hf {
+    font-size: 11px;
+    color: var(--ion-color-medium, #92949c);
+    text-decoration: none;
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.real-size {
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--ion-color-tertiary, #5260ff);
+  background: rgba(82, 96, 255, 0.08);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}

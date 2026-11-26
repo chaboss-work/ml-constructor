@@ -91,6 +91,32 @@ def _shells(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple
     return X.to(device), y.to(device)
 
 
+def _tokens(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple["torch.Tensor", "torch.Tensor"]:
+    """Next token (Stage 17): the language-model task in miniature.
+
+    Each row is a sequence of token ids that repeats a short random pattern (2 to 4
+    tokens long); the label is the token that comes next. A language model solves it
+    the way real ones continue text: by finding where the current token appeared
+    before and copying what followed it. The vocabulary is the network's own output
+    size, so the head scores every possible next token.
+    """
+    if len(in_shape) != 1:
+        raise ValueError(
+            f"the 'next token' dataset needs an Input of token ids, shape [L]; your graph's input is "
+            f"{list(in_shape)} — put an Embedding after a 1-D Input"
+        )
+    length = int(in_shape[0])
+    if length < 3:
+        raise ValueError("the 'next token' dataset needs sequences of at least 3 tokens (Input [L] with L >= 3)")
+    g = torch.Generator().manual_seed(spec.seed)
+    n = spec.samples
+    period = torch.randint(2, min(4, length - 1) + 1, (n,), generator=g)
+    pattern = torch.randint(0, num_classes, (n, 4), generator=g)
+    position = torch.arange(length + 1)
+    seq = pattern.gather(1, position[None, :] % period[:, None])
+    return seq[:, :length].float().to(device), seq[:, length].to(device)
+
+
 def _custom(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple["torch.Tensor", "torch.Tensor"]:
     """Train on the user's OWN rows (Stage 9 — paste or upload your data).
 
@@ -232,6 +258,13 @@ _DATASETS: list[DatasetDef] = [
         "The class is the distance from the origin (radius = class). A curved, "
         "non-linear boundary — needs a hidden layer, not just a Linear.",
         _shells,
+    ),
+    DatasetDef(
+        "tokens",
+        "Next token",
+        "The language-model task in miniature: sequences of token ids that repeat a short pattern; "
+        "the label is the token that comes next. Needs Input [L] and an Embedding.",
+        _tokens,
     ),
     DatasetDef(
         "custom",

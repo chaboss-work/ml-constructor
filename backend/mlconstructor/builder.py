@@ -183,18 +183,57 @@ def plan_graph(spec: GraphSpec, tolerant: bool = False) -> GraphPlan:
     return plan
 
 
-def build_model(spec: GraphSpec, seed: int | None = None) -> tuple[GraphModule, BuildResult]:
+def build_model(spec: GraphSpec, seed: int | None = None, meta: bool = False) -> tuple[GraphModule, BuildResult]:
     """Assemble the graph into a model plus its per-layer summary.
 
     ``seed`` (Stage 16) makes the starting weights reproducible — the same seed,
     the same weights, so a training run repeats exactly — without touching the
     global random state (nor CUDA's). Without it the weights come from the global
-    random state, as before."""
+    random state, as before.
+
+    ``meta`` (Stage 17) builds on PyTorch's "meta" device: every module and shape
+    is real, but no weight takes any memory — how a 671-billion-parameter model is
+    sized on a laptop. Such a model can be inspected, not run."""
+    if meta:
+        with torch.device("meta"):
+            return _build_model(spec)
     if seed is None:
         return _build_model(spec)
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(int(seed))
         return _build_model(spec)
+
+
+def _tie_heads(plan: GraphPlan, modules: dict[str, object], summaries: list[LayerSummary]) -> list[tuple[str, str]]:
+    """Stage 17 — an LM head marked "tied" takes the graph's Embedding table as its
+    weight (one shared parameter, counted once). Returns the (head, embedding) pairs."""
+    tied: list[tuple[str, str]] = []
+    heads = [nid for nid in plan.order if plan.nodes[nid].type_name == "LMHead"
+             and bool(plan.nodes[nid].p("tie_embedding", False))]
+    if not heads:
+        return tied
+    emb_id = next((nid for nid in plan.order if plan.nodes[nid].type_name == "Embedding"), None)
+    for nid in heads:
+        if emb_id is None:
+            raise ShapeError(
+                f"LM head {nid!r} is tied to the Embedding, but the graph has no Embedding",
+                node_id=nid, hint="Add an Embedding at the start of the network, or switch off \"Tie to the Embedding\".",
+            )
+        table = modules[emb_id].emb.weight
+        head = modules[nid]
+        if tuple(table.shape) != tuple(head.weight.shape):
+            raise ShapeError(
+                f"LM head {nid!r} is tied to the Embedding {emb_id!r}, but their sizes differ: the embedding is "
+                f"{table.shape[0]} x {table.shape[1]} (vocabulary x size) and the head needs "
+                f"{head.weight.shape[0]} x {head.weight.shape[1]}",
+                node_id=nid, hint="Give the head the embedding's vocabulary size, or untie it.",
+            )
+        head.weight = table  # the very same parameter: no copy, no extra values
+        tied.append((nid, emb_id))
+        for summary in summaries:
+            if summary.id == nid:
+                summary.num_params = 0  # shares the embedding's weights
+    return tied
 
 
 def _build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
@@ -225,6 +264,8 @@ def _build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
                 num_params=int(nparams),
             )
         )
+
+    tied = _tie_heads(plan, modules, summaries)
 
     edge_modules: dict[tuple[str, str], object] = {}
     edge_summaries: list[EdgeSummary] = []
@@ -259,6 +300,7 @@ def _build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
         output_id=plan.output_id,
         edge_modules=edge_modules,
     )
+    model.tied = tied  # Stage 17: (LM head, Embedding) pairs sharing one weight — the export repeats it
     total = sum(s.num_params for s in summaries) + sum(e.num_params for e in edge_summaries)
     return model, BuildResult(ok=True, order=plan.order, layers=summaries, total_params=total, edges=edge_summaries)
 

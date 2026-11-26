@@ -166,6 +166,10 @@ class BuildResult(BaseModel):
     total_params: int
     #: Stage 14 — every connection with its transform (shapes on both ends).
     edges: list[EdgeSummary] = Field(default_factory=list)
+    #: Stage 17 — small enough to train (and load weights into) on this server; a
+    #: real-scale flagship is built on the meta device to inspect, not to train.
+    trainable: bool = True
+    max_train_params: int | None = None
 
 
 class ConnectionOption(BaseModel):
@@ -347,6 +351,14 @@ class ArchitectureInfo(BaseModel):
     tags: list[str] = Field(default_factory=list)
     input_shape: list[int] = Field(default_factory=list)
     node_count: int
+    #: Stage 17 — the flagships: "mini" (trains here) or "real" (the published model,
+    #: sized on the meta device: inspect only). A mini entry points to its real size.
+    scale: str | None = None
+    real_id: str | None = None
+    real_name: str | None = None
+    #: the real model's parameter count (Hugging Face; the model card for DeepSeek-V3)
+    real_params: int | None = None
+    hf_url: str | None = None
 
 
 # --------------------------------------------------------------------------- #

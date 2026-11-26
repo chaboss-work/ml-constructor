@@ -31,13 +31,24 @@ from .projects import (
     slugify,
 )
 from .registry import LAYER_REGISTRY, catalog, get_layer_cls
-from .trainer import adopt_weights, data_preview, save_trained, start_from_run, test_run, train_iter, train_model
+from .trainer import (
+    MAX_TRAIN_PARAMS,
+    adopt_weights,
+    check_trainable,
+    count_params,
+    data_preview,
+    save_trained,
+    start_from_run,
+    test_run,
+    train_iter,
+    train_model,
+)
 from .weights import MAX_WEIGHTS_BYTES, RunNotFound, read_weights, run_path, weights_bytes
 
 __version__ = "0.1.0"
 #: The latest stage whose HTTP contract this backend serves (``GET /health`` reports
 #: it), so the editor can tell when the server runs an older backend than the page.
-API_LEVEL = 16
+API_LEVEL = 17
 
 __all__ = [
     "build_model",
@@ -55,6 +66,9 @@ __all__ = [
     "make_dataset",
     "split_indices",
     "split_parts",
+    "check_trainable",
+    "count_params",
+    "MAX_TRAIN_PARAMS",
     "save_trained",
     "start_from_run",
     "test_run",

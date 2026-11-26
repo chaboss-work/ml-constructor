@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .flagships import FLAGSHIPS, hf_url, mini_spec, real_spec
 from .schema import ArchitectureInfo, GraphSpec
 
 Spec = dict[str, Any]
@@ -186,6 +187,12 @@ class _Arch:
     category: str
     tags: tuple[str, ...]
     build: Callable[[], Spec]
+    #: Stage 17 — flagships: "mini" / "real", the real variant, its size and model card
+    scale: str | None = None
+    real_id: str | None = None
+    real_name: str | None = None
+    real_params: int | None = None
+    hf_url: str | None = None
 
 
 _ARCHITECTURES: list[_Arch] = [
@@ -199,7 +206,34 @@ _ARCHITECTURES: list[_Arch] = [
           ("transformer", "attention", "embedding", "repeat"), _gpt),
 ]
 
-_BY_ID: dict[str, _Arch] = {a.id: a for a in _ARCHITECTURES}
+
+
+def _flagship_tags(fam: dict) -> tuple[str, ...]:
+    cfg = fam["real"]
+    tags = ["llm", "decoder", "mla" if cfg["attn"]["kind"] == "mla" else "gqa", "rope"]
+    tags.append("moe" if cfg["ffn"]["kind"] == "moe" else ("geglu" if cfg["ffn"].get("activation") == "gelu" else "swiglu"))
+    if cfg["attn"].get("sliding_window"):
+        tags.append("sliding-window")
+    if cfg.get("tie"):
+        tags.append("tied-head")
+    return tuple(tags)
+
+
+# Stage 17 — flagship language models: a mini entry in the library, its real size by id.
+_REAL: list[_Arch] = []
+for _fam in FLAGSHIPS:
+    _ARCHITECTURES.append(_Arch(
+        _fam["id"], f"{_fam['name']} (mini)", _fam["description"], "language", _flagship_tags(_fam),
+        (lambda fam=_fam: mini_spec(fam)), scale="mini", real_id=f"{_fam['id']}_real",
+        real_name=_fam["real_name"], real_params=_fam["official"], hf_url=hf_url(_fam),
+    ))
+    _REAL.append(_Arch(
+        f"{_fam['id']}_real", _fam["real_name"], _fam["description"], "language", _flagship_tags(_fam),
+        (lambda fam=_fam: real_spec(fam)), scale="real", real_name=_fam["real_name"],
+        real_params=_fam["official"], hf_url=hf_url(_fam),
+    ))
+
+_BY_ID: dict[str, _Arch] = {a.id: a for a in _ARCHITECTURES + _REAL}
 
 
 def list_architectures() -> list[ArchitectureInfo]:
@@ -219,9 +253,31 @@ def list_architectures() -> list[ArchitectureInfo]:
                 tags=list(a.tags),
                 input_shape=in_shape,
                 node_count=len(spec.nodes),
+                scale=a.scale,
+                real_id=a.real_id,
+                real_name=a.real_name,
+                real_params=a.real_params,
+                hf_url=a.hf_url,
             )
         )
     return infos
+
+
+def architecture_info(arch_id: str) -> ArchitectureInfo:
+    """The catalogue entry for one id — including a real-size flagship, which the
+    library list leaves out (it is reached from its mini entry)."""
+    if arch_id not in _BY_ID:
+        raise KeyError(f"unknown architecture {arch_id!r}")
+    a = _BY_ID[arch_id]
+    spec = GraphSpec.model_validate(a.build())
+    in_node = next((n for n in spec.nodes if n.type == "Input"), None)
+    raw_shape = in_node.params.get("shape", []) if in_node else []
+    return ArchitectureInfo(
+        id=a.id, name=a.name, description=a.description, category=a.category, tags=list(a.tags),
+        input_shape=[int(d) for d in raw_shape] if isinstance(raw_shape, (list, tuple)) else [],
+        node_count=len(spec.nodes), scale=a.scale, real_id=a.real_id, real_name=a.real_name,
+        real_params=a.real_params, hf_url=a.hf_url,
+    )
 
 
 def get_architecture(arch_id: str) -> GraphSpec:

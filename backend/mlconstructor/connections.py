@@ -616,6 +616,8 @@ def resolve_single(kind: str, params: dict, in_shape: Shape, target, edge: tuple
         try:
             target.out_shape(adapted)
         except ShapeError as exc:
+            if getattr(exc, "settings", False):  # the layer's own settings clash: not the connection's fault
+                raise ShapeError(str(exc), node_id=dst, hint=exc.hint, settings=True) from None
             raise ShapeError(
                 f"the connection {src} → {dst} is set to “{t.label}”, which gives {fmt_shape(adapted)}, "
                 f"but {dst} ({target.type_name}) cannot take that: {_why(exc)}",
@@ -632,6 +634,8 @@ def resolve_single(kind: str, params: dict, in_shape: Shape, target, edge: tuple
             adapted = t.out_shape(in_shape)
             target.out_shape(adapted)
         except ShapeError as exc:
+            if getattr(exc, "settings", False):  # the layer's own settings clash: no transform can help
+                raise ShapeError(str(exc), node_id=dst, hint=exc.hint, settings=True) from None
             if first_error is None:
                 first_error = exc
             continue

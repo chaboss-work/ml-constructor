@@ -19,6 +19,7 @@ import inspect
 
 import torch.nn as nn
 
+from . import llm_modules as LLM
 from .blocks import Block
 from .builder import build_model
 from .connections import ImageToSeq, SeqPool
@@ -139,6 +140,17 @@ class ImageToSeq(nn.Module):
 }
 
 
+#: Stage 17 — the LLM blocks, written back as constructor calls; their classes are
+#: copied verbatim from mlconstructor/llm_modules.py (everything below its marker).
+_LLM_CLASSES = (LLM.GroupedQueryAttention, LLM.LatentAttention, LLM.GatedMLP, LLM.MixtureOfExperts, LLM.LMHead)
+
+
+def _llm_source() -> str:
+    src = inspect.getsource(LLM)
+    marker = "# --- export: begin ---"
+    return src[src.index(marker) + len(marker):].strip("\n")
+
+
 def _transformer_src(m: nn.TransformerEncoderLayer) -> str:
     d_model = int(m.linear1.in_features)
     dim_feedforward = int(m.linear1.out_features)
@@ -176,6 +188,10 @@ def _module_expr(m: nn.Module, needs: set[str], indent: str = "            ") ->
         return f"Recurrent(nn.{m.rnn!r}, {bool(m.return_sequence)})"
     if isinstance(m, nn.TransformerEncoderLayer):
         return _transformer_src(m)
+    if isinstance(m, _LLM_CLASSES):  # Stage 17: GQA / MLA / gated MLP / MoE / LM head
+        needs.add("LLM")
+        args = ", ".join(f"{k}={v!r}" for k, v in m.config.items())
+        return f"{type(m).__name__}({args})"
     if isinstance(m, SeqPool):  # Stage 14 connection transforms
         needs.add("SeqPool")
         return f"SeqPool({m.mode!r})"
@@ -323,7 +339,7 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     """Standalone PyTorch source for ``spec``. See the module docstring."""
     from .datasets import get_dataset  # local: avoid import at module load
 
-    model, build = build_model(spec)
+    model, build = build_model(spec, meta=True)  # the code needs the modules, not their weights (Stage 17)
     order = model.order
     preds = model.preds
     input_id = model.input_id
@@ -386,6 +402,8 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     out.append("")
     out.append("import torch")
     out.append("import torch.nn as nn")
+    if "LLM" in needs:
+        out.append("import torch.nn.functional as F")
     if "PositionalEncoding" in needs:
         out.append("import math")
     out.append("")
@@ -394,10 +412,16 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
             out.append(_HELPERS[name].strip("\n"))
             out.append("")
             out.append("")
+    if "LLM" in needs:  # Stage 17: the language-model blocks, exactly as in the app
+        out.append(_llm_source())
+        out.append("")
+        out.append("")
     out.append("class Model(nn.Module):")
     out.append("    def __init__(self):")
     out.append("        super().__init__()")
     out.extend(init_lines or ["        pass"])
+    for head, emb in getattr(model, "tied", []):  # Stage 17: a tied head shares the embedding table
+        out.append(f"        self.{_key(head)}.weight = self.{_key(emb)}.emb.weight")
     out.append("")
     out.append("    def forward(self, x):")
     out.extend(fwd_lines)

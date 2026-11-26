@@ -49,6 +49,34 @@ _OVERFIT_GAP = 0.10
 _GOOD_VAL = 0.90
 #: Stage 16 — test accuracy this far below validation reads as "tuned to the validation rows".
 _TEST_GAP = 0.05
+#: Stage 17 — the largest network trained (or loaded) here: real-scale flagships are
+#: built on the meta device to inspect; their mini versions train.
+MAX_TRAIN_PARAMS = 25_000_000
+
+
+def _human(n: int) -> str:
+    for size, word in ((10**12, "trillion"), (10**9, "billion"), (10**6, "million"), (10**3, "thousand")):
+        if n >= size:
+            v = n / size
+            return f"{v:.1f} {word}".replace(".0 ", " ")
+    return str(n)
+
+
+def count_params(spec: GraphSpec) -> int:
+    """The network's parameter count, sized on the meta device (no memory taken)."""
+    return build_model(spec, meta=True)[1].total_params
+
+
+def check_trainable(spec: GraphSpec, what: str = "train") -> int:
+    """Refuse a network too big for this server before a single weight is made."""
+    n = count_params(spec)
+    if n > MAX_TRAIN_PARAMS:
+        raise ValueError(
+            f"this network has {n:,} parameters ({_human(n)}), far too big to {what} on this server (the limit is "
+            f"{_human(MAX_TRAIN_PARAMS)}). It is here to inspect: every layer and shape of the real model. The "
+            "flagships in the library come with a mini version that trains here; or shrink the layers"
+        )
+    return n
 
 
 def _plural(n: int, word: str, many: str | None = None) -> str:
@@ -331,7 +359,7 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
     """A few real rows of the training set for the graph the user built, plus its
     format (Stage 8's data modal). Uses the *same* generator and seed as training,
     so these are exactly the first rows the model will be trained on."""
-    model, build = build_model(spec)
+    model, build = build_model(spec, meta=True)  # only the shapes are needed: no weights made (Stage 17)
     in_shape = _input_shape(build)
     num_classes = _infer_num_classes(model, in_shape)
     device = torch.device("cpu")
@@ -462,6 +490,7 @@ def test_run(spec: GraphSpec, run_id: str) -> TestResult:
     comparison, on its validation and training rows). Says whether the weights
     were trained on this very split — only then is it a fair check."""
     payload = load_run(run_id)  # a stale id is "not found", whatever the graph
+    check_trainable(spec, "test")
     model, build = build_model(spec)
     in_shape = _input_shape(build)
     mapped, _how = fit_state_dict(model, payload["state_dict"])
@@ -508,6 +537,7 @@ def test_run(spec: GraphSpec, run_id: str) -> TestResult:
 def adopt_weights(spec: GraphSpec, raw: bytes) -> WeightsInfo:
     """Load a weights file into this graph (it must fit), keep it as a run and
     say how it matched and whether it knows its training data."""
+    check_trainable(spec, "load weights into")  # a real-scale graph is refused before the file is read
     payload = read_weights(raw)
     model, build = build_model(spec)
     in_shape = _input_shape(build)

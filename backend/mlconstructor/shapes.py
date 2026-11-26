@@ -23,6 +23,10 @@ class ShapeError(ValueError):
     Stage 14 adds machine-readable context so the editor can point at the
     culprit: ``node_id`` (the layer), ``edge`` (``(source, target)`` of the
     connection) and ``hint`` (what to do about it).
+
+    Stage 17: ``settings=True`` marks a contradiction in the layer's own settings
+    (e.g. 4 query heads over 3 key/value groups) — no transform on the incoming
+    connection can fix that, so it is reported as it is.
     """
 
     def __init__(
@@ -32,11 +36,13 @@ class ShapeError(ValueError):
         node_id: str | None = None,
         edge: tuple[str, str] | None = None,
         hint: str | None = None,
+        settings: bool = False,
     ):
         super().__init__(message)
         self.node_id = node_id
         self.edge = edge
         self.hint = hint
+        self.settings = settings
 
     def to_detail(self) -> dict:
         """The structured part of a 422 response."""

@@ -1717,6 +1717,255 @@ def test_connection_http_endpoints():
     print("[connections] HTTP: /connections/options, /build edges, structured 422 (edge, node, hint)")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 15 — honest accuracy: a held-out validation part the network never trains on.
+# --------------------------------------------------------------------------- #
+from mlconstructor.datasets import split_indices  # noqa: E402
+
+SPLIT_MLP = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [12]}},
+        {"id": "fc1", "type": "Linear", "params": {"out_features": 32}},
+        {"id": "a1", "type": "ReLU", "params": {}},
+        {"id": "fc2", "type": "Linear", "params": {"out_features": 4}},
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [["in", "fc1"], ["fc1", "a1"], ["a1", "fc2"], ["fc2", "out"]],
+    "train": {"dataset": "blobs", "epochs": 5, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+}
+
+INSEPARABLE_MLP = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [2]}},
+        {"id": "fc1", "type": "Linear", "params": {"out_features": 32}},
+        {"id": "a1", "type": "ReLU", "params": {}},
+        {"id": "fc2", "type": "Linear", "params": {"out_features": 32}},
+        {"id": "a2", "type": "ReLU", "params": {}},
+        {"id": "fc3", "type": "Linear", "params": {"out_features": 2}},
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [["in", "fc1"], ["fc1", "a1"], ["a1", "fc2"], ["fc2", "a2"], ["a2", "fc3"], ["fc3", "out"]],
+    "train": {"dataset": "custom", "epochs": 40, "lr": 0.02, "batch_size": 64, "seed": 0},
+}
+
+
+def _inseparable_rows(seed: int = 7) -> list[list[float]]:
+    """2 features, 2 classes, 500 rows that NO network can fit perfectly: 100 points
+    on the diagonal x1 = x2 appear twice (rows i and i + 100), once labelled 0 and
+    once 1, plus 300 clean points labelled x1 > x2. The best possible error over
+    all 500 rows is exactly 20 % — one row of each identical pair must be wrong."""
+    g = torch.Generator().manual_seed(seed)
+    u = torch.rand(100, generator=g) * 2 - 1
+    rows = [[float(a), float(a), 0] for a in u] + [[float(a), float(a), 1] for a in u]
+    p = torch.rand(300, 2, generator=g) * 2 - 1
+    rows += [[float(a), float(b), int(a > b)] for a, b in p]
+    return rows
+
+
+def _legacy_loss_curve(model, in_shape, s) -> list[float]:
+    """The pre-Stage-15 training loop (every row, no hold-out), for the byte-for-byte check."""
+    torch.manual_seed(s.seed)
+    model.eval()
+    with torch.no_grad():
+        num_classes = int(model(torch.zeros(2, *in_shape)).shape[1])
+    model.train()
+    X, y = mlc.make_dataset(s.dataset, in_shape, num_classes, s, torch.device("cpu"))
+    n = X.shape[0]
+    bs = min(s.batch_size, n)
+    opt = torch.optim.Adam(model.parameters(), lr=s.lr)
+    loss_fn = torch.nn.CrossEntropyLoss()
+    curve: list[float] = []
+    for _ in range(s.epochs):
+        perm = torch.randperm(n)
+        for i in range(0, n, bs):
+            idx = perm[i : i + bs]
+            opt.zero_grad()
+            loss = loss_fn(model(X[idx]), y[idx])
+            loss.backward()
+            opt.step()
+            curve.append(float(loss.detach()))
+    return curve
+
+
+def test_split_is_stratified_deterministic_and_safe():
+    y = torch.tensor([0] * 600 + [1] * 300 + [2] * 100)
+    tr, va = split_indices(y, 0.2, 0)
+    assert (len(tr), len(va)) == (800, 200), (len(tr), len(va))
+    assert [int((y[va] == c).sum()) for c in range(3)] == [120, 60, 20]  # every class keeps its share
+    assert sorted(tr.tolist() + va.tolist()) == list(range(1000))  # disjoint, nothing lost
+    assert torch.equal(va, split_indices(y, 0.2, 0)[1])  # the same seed -> the same split
+    assert not torch.equal(va, split_indices(y, 0.2, 1)[1])  # another seed -> another split
+    assert len(split_indices(y, 0.0, 0)[1]) == 0  # 0 = validation off
+    # Tiny sets: every class keeps a row to train on, so nothing is held out when that is impossible.
+    for ys, n_val in (([0], 0), ([0, 1], 0), ([0, 0], 1), ([0, 0, 1], 1), ([0, 1, 2, 3, 4], 0)):
+        tr, va = split_indices(torch.tensor(ys), 0.2, 0)
+        assert len(va) == n_val and {ys[i] for i in tr.tolist()} == set(ys), (ys, tr, va)
+    # Randomised: the guarantees hold on 1000 random label sets and fractions.
+    g = torch.Generator().manual_seed(1)
+    for trial in range(1000):
+        n = int(torch.randint(1, 80, (1,), generator=g))
+        ys = torch.randint(0, int(torch.randint(1, 12, (1,), generator=g)), (n,), generator=g)
+        f = round(float(torch.rand(1, generator=g)) * 0.5, 2)
+        tr, va = split_indices(ys, f, trial)
+        assert sorted(tr.tolist() + va.tolist()) == list(range(n)), trial
+        assert set(ys[tr].tolist()) == set(ys.tolist()), trial  # no class vanishes from training
+        want = min(max(1, round(n * f)), n - 1) if n >= 2 and f > 0 else 0
+        assert len(va) <= want, (trial, len(va), want)
+        for c in set(ys.tolist()):  # stratified: close to the class's proportional share
+            nc, vc = int((ys == c).sum()), int((ys[va] == c).sum())
+            assert vc <= nc - 1 and vc >= nc * len(va) // n - 1, (trial, c, nc, vc)
+    print("[split] stratified 120/60/20, deterministic per seed, tiny sets safe, 1000 random sets hold")
+
+
+def test_blobs_generalises_to_held_out_rows():
+    res = _train(SPLIT_MLP)
+    assert (res.train_samples, res.val_samples) == (410, 102), (res.train_samples, res.val_samples)
+    assert res.final_accuracy >= 0.95 and res.final_val_accuracy is not None and res.final_val_accuracy >= 0.9, res
+    assert len(res.acc_curve) == len(res.val_acc_curve) == len(res.val_loss_curve) == 5
+    assert abs(res.val_acc_curve[-1] - res.final_val_accuracy) < 1e-6  # the last epoch == the final state
+    assert res.final_val_loss is not None and res.final_val_loss < 0.5, res.final_val_loss
+    assert res.fit == "generalises" and res.fit_note and not res.warnings, (res.fit, res.warnings)
+    print(f"[validation] blobs: train {res.final_accuracy:.3f}, held-out {res.final_val_accuracy:.3f} "
+          f"({res.val_samples} rows it never saw) -> {res.fit}")
+
+
+def test_inseparable_data_keeps_an_error():
+    rows = _inseparable_rows()
+    res = _train(INSEPARABLE_MLP, custom_rows=rows)
+    assert (res.train_samples, res.val_samples) == (400, 100), (res.train_samples, res.val_samples)
+    assert res.final_val_accuracy is not None  # measured at all
+    # The floor: identical inputs with both labels inside one part -> one of each pair must be wrong.
+    tr, va = split_indices(torch.tensor([int(r[-1]) for r in rows]), 0.2, 0)
+
+    def floor(idx: torch.Tensor) -> float:
+        part = set(idx.tolist())
+        return sum(1 for i in range(100) if i in part and i + 100 in part) / len(part)
+
+    assert 1 - res.final_accuracy >= floor(tr) - 1e-6 and floor(tr) > 0.1, (res.final_accuracy, floor(tr))
+    assert 1 - res.final_val_accuracy >= floor(va) - 1e-6, (res.final_val_accuracy, floor(va))
+    assert 0.6 < res.final_accuracy < 0.9 and 0.6 < res.final_val_accuracy < 0.9, res  # an error stays on both
+    assert res.fit != "generalises", res.fit
+    print(f"[validation] inseparable set: train {res.final_accuracy:.3f} (floor {1 - floor(tr):.3f}), "
+          f"held-out {res.final_val_accuracy:.3f} -> {res.fit}; the error never reaches 0")
+
+
+def test_overfitting_shows_on_held_out_rows():
+    # shells: the MLP aces its training rows but not new ones -- the gap the old full-set accuracy hid
+    spec = GraphSpec.model_validate({**SPLIT_MLP, "train": {**SPLIT_MLP["train"], "dataset": "shells", "epochs": 25}})
+    model, build = mlc.build_model(spec)
+    res = mlc.train_model(model, (12,), spec.train)
+    assert res.fit == "overfits" and res.final_accuracy - res.final_val_accuracy > 0.1, res
+    assert "Overfitting" in res.fit_note, res.fit_note
+    # the numbers are what the trained model really scores on exactly those rows
+    X, y = mlc.make_dataset("shells", (12,), 4, spec.train, torch.device("cpu"))
+    tr, va = split_indices(y, 0.2, 0)
+    model.eval()
+    with torch.no_grad():
+        acc_tr = float((model(X[tr]).argmax(1) == y[tr]).float().mean())
+        acc_va = float((model(X[va]).argmax(1) == y[va]).float().mean())
+    assert abs(acc_tr - res.final_accuracy) < 1e-6 and abs(acc_va - res.final_val_accuracy) < 1e-6, (
+        acc_tr, res.final_accuracy, acc_va, res.final_val_accuracy)
+    print(f"[validation] shells: train {res.final_accuracy:.3f} vs held-out {res.final_val_accuracy:.3f} "
+          f"-> {res.fit} (the old full-set number hid this)")
+
+
+def test_validation_off_is_the_original_loop():
+    import copy
+
+    spec = GraphSpec.model_validate({**SPLIT_MLP, "train": {**SPLIT_MLP["train"], "samples": 256, "seed": 3,
+                                                            "epochs": 3, "val_fraction": 0}})
+    model, build = mlc.build_model(spec)
+    a, b = copy.deepcopy(model), copy.deepcopy(model)
+    res = mlc.train_model(a, (12,), spec.train)
+    assert res.loss_curve == _legacy_loss_curve(b, (12,), spec.train)  # byte for byte
+    assert res.train_samples == 256 and res.val_samples == 0 and res.final_val_accuracy is None
+    assert res.val_acc_curve == [] and res.fit == "unknown" and "Validation is off" in res.warnings[0], res
+    print("[validation] val_fraction = 0 reproduces the pre-Stage-15 loop byte for byte, with a clear note")
+
+
+def test_tiny_custom_sets_fall_back_clearly():
+    for n, n_val in ((1, 0), (2, 0), (3, 1), (12, 2)):
+        rows = [[float(i), float(-i), i % 2] for i in range(n)]
+        res = _train(INSEPARABLE_MLP, custom_rows=rows, epochs=5)
+        assert (res.train_samples, res.val_samples) == (n - n_val, n_val), (n, res.train_samples, res.val_samples)
+        assert res.fit == "unknown" and len(res.warnings) == 1, (n, res.fit, res.warnings)
+        if n_val:
+            assert res.final_val_accuracy is not None and "Only" in res.warnings[0], res.warnings
+        else:
+            assert res.final_val_accuracy is None and "Too few rows" in res.warnings[0], res.warnings
+    # A set too small to split still trains on what it has, with no error.
+    st, out = _asgi("POST", "/train", json.dumps({**INSEPARABLE_MLP, "train": {
+        **INSEPARABLE_MLP["train"], "epochs": 2, "custom_rows": [[0.0, 1.0, 0]]}}).encode())
+    assert st == 200 and out["val_samples"] == 0 and out["warnings"], (st, out)
+    print("[validation] 1-2 rows: nothing held out (a warning says why); 3 / 12 rows: 1 / 2 held out, no verdict")
+
+
+def test_stream_and_checkpoint_use_validation():
+    import os as _os
+
+    from mlconstructor.trainer import _CKPT_DIR
+
+    # shells, so the training and held-out curves differ and the checkpoint's choice shows
+    spec = GraphSpec.model_validate({**CKPT_MLP, "train": {**CKPT_MLP["train"], "dataset": "shells", "epochs": 6,
+                                                           "checkpoint": True}})
+    model, build = mlc.build_model(spec)
+    events = list(mlc.train_iter(model, tuple(build.layers[0].out_shape), spec.train))
+    start, done = events[0], events[-1]["result"]
+    try:
+        assert start["samples"] == 256 and (start["train_samples"], start["val_samples"]) == (205, 51), start
+        epochs = [e for e in events if e["type"] == "epoch"]
+        assert len(epochs) == 6 and all(e["val_acc"] is not None and e["val_loss"] is not None for e in epochs)
+        assert [e["val_acc"] for e in epochs] == done.val_acc_curve
+        assert [e["acc"] for e in epochs] == done.acc_curve and done.acc_curve != done.val_acc_curve
+        assert max(done.acc_curve) != max(done.val_acc_curve), (done.acc_curve, done.val_acc_curve)
+        assert done.best_accuracy == max(done.val_acc_curve), (done.best_accuracy, done.val_acc_curve)
+    finally:
+        path = _os.path.join(_CKPT_DIR, f"{done.checkpoint}.pt")
+        if done.checkpoint and _os.path.exists(path):
+            _os.remove(path)
+    print(f"[validation] stream: start {start['train_samples']}+{start['val_samples']} rows, val_acc per epoch; "
+          f"checkpoint keeps the best held-out accuracy {done.best_accuracy:.3f}")
+
+
+def test_preview_and_export_share_the_split():
+    import contextlib
+    import io
+
+    spec = GraphSpec.model_validate(SPLIT_MLP)
+    prev = mlc.data_preview(spec, rows=40)
+    _, va = split_indices(mlc.make_dataset("blobs", (12,), 4, spec.train, torch.device("cpu"))[1], 0.2, 0)
+    held = set(va.tolist())
+    assert (prev.train_samples, prev.val_samples) == (410, 102), (prev.train_samples, prev.val_samples)
+    assert [r.split for r in prev.rows] == ["validation" if i in held else "train" for i in range(40)]
+    assert {r.split for r in prev.rows} == {"train", "validation"}
+    code = mlc.generate_pytorch(spec, include_training=True)
+    assert "VAL_FRACTION = 0.2" in code and "def split_indices" in code and "mlconstructor" not in code
+    ns = _exec_exported(code)
+    for ys in (torch.randint(0, 5, (97,)), torch.tensor([0, 0, 1]), torch.tensor([3])):
+        for f in (0.0, 0.2, 0.5):
+            assert all(torch.equal(p, q) for p, q in zip(ns["split_indices"](ys, f, 4), split_indices(ys, f, 4)))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ns["main"]()
+    lines = buf.getvalue().strip().splitlines()
+    assert len(lines) == 5 and all("train_acc" in ln and "val_acc" in ln for ln in lines), lines
+    print(f"[validation] preview marks held-out rows; the export splits like the app: {lines[-1].strip()}")
+
+
+def test_stage15_http():
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] == mlc.API_LEVEL >= 15, health  # the editor needs this level
+    st, res = _asgi("POST", "/train", json.dumps(SPLIT_MLP).encode())
+    assert st == 200 and res["val_samples"] == 102 and res["final_val_accuracy"] >= 0.9, res
+    assert len(res["val_acc_curve"]) == 5 and res["fit"] == "generalises", res
+    st, prev = _asgi("POST", "/data/preview", json.dumps(SPLIT_MLP).encode())
+    assert st == 200 and prev["val_samples"] == 102 and all(r["split"] in ("train", "validation") for r in prev["rows"])
+    bad = {**SPLIT_MLP, "train": {**SPLIT_MLP["train"], "val_fraction": 0.9}}
+    st, res = _asgi("POST", "/train", json.dumps(bad).encode())
+    assert st == 422, (st, res)  # at most half the rows can be held out
+    print("[validation] HTTP: /health api 15, /train held-out fields + verdict, /data/preview split, 0.9 rejected")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -1785,7 +2034,17 @@ if __name__ == "__main__":
     test_connection_options_for_the_inspector()
     test_project_format_2_keeps_connection_settings()
     test_connection_http_endpoints()
+    test_split_is_stratified_deterministic_and_safe()
+    test_blobs_generalises_to_held_out_rows()
+    test_inseparable_data_keeps_an_error()
+    test_overfitting_shows_on_held_out_rows()
+    test_validation_off_is_the_original_loop()
+    test_tiny_custom_sets_fall_back_clearly()
+    test_stream_and_checkpoint_use_validation()
+    test_preview_and_export_share_the_split()
+    test_stage15_http()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
-        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14)"
+        "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "
+        "+ Stage 15)"
     )

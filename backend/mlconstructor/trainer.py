@@ -16,11 +16,16 @@ out**: the network trains on the rest only, and the held-out rows measure how it
 does on data it never saw — on separable synthetic sets the training accuracy
 alone is always ~100 %, which says nothing. ``val_fraction = 0`` is the original
 loop, byte for byte.
+
+Since Stage 16 a further share (``test_fraction``, 10 % by default) is kept for a
+**final test**: it is neither trained on nor measured during training — only
+:func:`test_run` measures it, on the weights a run kept (:func:`save_trained`) or
+on uploaded ones (:func:`adopt_weights`). With both shares at 0 the loop is the
+original one.
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 from collections.abc import Iterator
 
@@ -28,9 +33,10 @@ import torch
 import torch.nn as nn
 
 from .builder import build_model
-from .datasets import get_dataset, make_dataset, split_indices
-from .schema import DataPreview, DataSampleRow, GraphSpec, TrainResult, TrainSpec
+from .datasets import canonical_dataset_id, get_dataset, make_dataset, split_parts
+from .schema import DataPreview, DataSampleRow, GraphSpec, TestResult, TrainResult, TrainSpec, WeightsInfo
 from .shapes import Shape, ShapeError, numel
+from .weights import arch_key, data_key, fit_state_dict, load_run, read_weights, save_run, weights_bytes
 
 _PREVIEW_MAX_VALUES = 12  # feature values shown per sample row before truncating
 # Checkpoints live under the gitignored data cache (Stage 11).
@@ -41,32 +47,40 @@ _SMALL_VAL = 20
 #: or above _GOOD_VAL (with a small gap) reads as "generalises".
 _OVERFIT_GAP = 0.10
 _GOOD_VAL = 0.90
+#: Stage 16 — test accuracy this far below validation reads as "tuned to the validation rows".
+_TEST_GAP = 0.05
 
 
 def _plural(n: int, word: str, many: str | None = None) -> str:
     return f"{n} {word if n == 1 else (many or word + 's')}"
 
 
-def _split_warnings(spec: TrainSpec, n_rows: int, n_val: int, y: torch.Tensor) -> list[str]:
-    """What to know about the train / validation split of this run (Stage 15)."""
+def _split_warnings(spec: TrainSpec, n_rows: int, n_val: int, n_test: int, y: torch.Tensor) -> list[str]:
+    """What to know about the train / validation / test split of this run (Stages 15–16)."""
+    out: list[str] = []
     if not spec.val_fraction:
-        return [
+        out.append(
             "Validation is off (0 %): accuracy is measured on the rows the network trained on, so it "
             "shows how well it memorised them, not how it does on new data."
-        ]
-    if n_val == 0:
+        )
+    elif n_val == 0:
         classes = int(torch.unique(y).numel())
-        return [
+        out.append(
             f"Too few rows to hold any out for validation ({_plural(n_rows, 'row')}, "
             f"{_plural(classes, 'class', 'classes')}; every class needs a row to train on), so accuracy is "
             "measured on the training rows themselves. Add more rows to see how it does on new data."
-        ]
-    if n_val < _SMALL_VAL:
-        return [
+        )
+    elif n_val < _SMALL_VAL:
+        out.append(
             f"Only {_plural(n_val, 'row')} held out for validation, so each one moves validation accuracy "
             f"by {100 / n_val:.0f} %: too coarse to tell whether it generalises. Add rows for a reliable verdict."
-        ]
-    return []
+        )
+    if spec.test_fraction and n_test == 0:
+        out.append(
+            "Too few rows to keep a test part aside as well, so Test has nothing to measure. Add rows, or set "
+            "Final test to Off."
+        )
+    return out
 
 
 def _fit_verdict(train_acc: float, val_acc: float | None, n_val: int) -> tuple[str, str | None]:
@@ -120,8 +134,7 @@ def _input_shape(build) -> Shape:
 def _checkpoint_key(model: nn.Module) -> str:
     """A stable key per architecture — a hash of parameter names and shapes — so a
     checkpoint only ever reloads into the same network."""
-    sig = [(name, tuple(t.shape)) for name, t in model.state_dict().items()]
-    return hashlib.sha1(repr(sig).encode("utf-8")).hexdigest()[:16]
+    return arch_key(model.state_dict())
 
 
 def _checkpoint_path(model: nn.Module) -> str:
@@ -162,15 +175,16 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
     num_classes = _infer_num_classes(model, in_shape)
     X, y = make_dataset(spec.dataset, in_shape, num_classes, spec, device)
 
-    # Stage 15 — hold rows out for validation; the network trains on the rest only.
-    tr_idx, va_idx = split_indices(y, spec.val_fraction, spec.seed)
-    n_rows, n_val = int(X.shape[0]), int(va_idx.numel())
-    warnings = _split_warnings(spec, n_rows, n_val, y)
-    if n_val:
-        Xv, yv = X[va_idx.to(X.device)], y[va_idx.to(y.device)]
-        X, y = X[tr_idx.to(X.device)], y[tr_idx.to(y.device)]
-    else:  # nothing held out: train (and measure) on every row, exactly as before Stage 15
-        Xv = yv = None
+    # Stages 15–16 — hold rows out for validation and for the final test; train on the rest only.
+    tr_idx, va_idx, te_idx = split_parts(y, spec.val_fraction, spec.test_fraction, spec.seed)
+    n_rows, n_val, n_test = int(X.shape[0]), int(va_idx.numel()), int(te_idx.numel())
+    warnings = _split_warnings(spec, n_rows, n_val, n_test, y)
+    Xv = yv = None
+    if n_val or n_test:
+        if n_val:
+            Xv, yv = X[va_idx.to(X.device)], y[va_idx.to(y.device)]
+        X, y = X[tr_idx.to(X.device)], y[tr_idx.to(y.device)]  # the test rows are not even kept here
+    # else: nothing held out — train (and measure) on every row, exactly as before Stage 15
 
     resumed = False
     if spec.resume and os.path.exists(_checkpoint_path(model)):
@@ -193,7 +207,7 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
     yield {
         "type": "start", "device": str(device), "resumed": resumed,
         "num_classes": num_classes, "samples": n_rows, "total_params": total_params,
-        "train_samples": int(n), "val_samples": n_val,
+        "train_samples": int(n), "val_samples": n_val, "test_samples": n_test,
     }
 
     def _evaluate(Xs: torch.Tensor, ys: torch.Tensor) -> tuple[float, float]:
@@ -298,6 +312,7 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
         fit=fit,
         fit_note=fit_note,
         warnings=warnings,
+        test_samples=n_test,
     )
     yield {"type": "done", "result": result}
 
@@ -328,10 +343,12 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
     # is drawn after the labels, so a smaller draw would NOT line up.
     X, y = ds.make(in_shape, num_classes, spec.train, device)
     k = min(k, X.shape[0])
-    # Stage 15 — the same split as training: mark the rows held out for validation.
-    tr_idx, va_idx = split_indices(y, spec.train.val_fraction, spec.train.seed)
+    # Stages 15–16 — the same split as training: mark the validation and test rows.
+    tr_idx, va_idx, te_idx = split_parts(y, spec.train.val_fraction, spec.train.test_fraction, spec.train.seed)
     held = torch.zeros(int(X.shape[0]), dtype=torch.bool)
     held[va_idx] = True
+    tested = torch.zeros(int(X.shape[0]), dtype=torch.bool)
+    tested[te_idx] = True
 
     flat = X[:k].reshape(k, -1)
     out_rows: list[DataSampleRow] = []
@@ -343,7 +360,7 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
                 values=[round(float(v), 3) for v in vals[:_PREVIEW_MAX_VALUES]],
                 truncated=len(vals) > _PREVIEW_MAX_VALUES,
                 total=len(vals),
-                split="validation" if bool(held[i]) else "train",
+                split="test" if bool(tested[i]) else ("validation" if bool(held[i]) else "train"),
             )
         )
 
@@ -359,4 +376,164 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
         rows=out_rows,
         train_samples=int(tr_idx.numel()),
         val_samples=int(va_idx.numel()),
+        test_samples=int(te_idx.numel()),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Stage 16 — keep the trained weights, start from saved ones, the final test
+# --------------------------------------------------------------------------- #
+def save_trained(model: nn.Module, in_shape: Shape, spec: TrainSpec, result: TrainResult) -> TrainResult:
+    """Keep the trained weights on the server as a run and put its id into the
+    result (download, Test, or the next run's start). A storage failure never
+    fails the training — the result says what could not be kept."""
+    try:
+        model = model.to("cpu")
+        num_classes = _infer_num_classes(model, tuple(int(d) for d in in_shape))
+        metrics = {
+            "dataset": canonical_dataset_id(spec.dataset),
+            "final_accuracy": result.final_accuracy,
+            "final_val_accuracy": result.final_val_accuracy,
+            "final_loss": result.final_loss,
+            "steps": result.steps,
+        }
+        raw = weights_bytes(model, data=data_key(spec, in_shape, num_classes), metrics=metrics)
+        result.run_id = save_run(raw)
+    except OSError as exc:
+        result.warnings.append(
+            f"The trained weights could not be kept on the server ({exc.strerror or exc}), so Save weights "
+            "and Test are unavailable for this run."
+        )
+    return result
+
+
+def start_from_run(model: nn.Module, spec: TrainSpec) -> TrainSpec:
+    """Load the weights of ``spec.init_run`` into the model (they must fit the
+    graph) and turn ``resume`` off, so a checkpoint cannot overwrite them."""
+    if not spec.init_run:
+        return spec
+    payload = load_run(spec.init_run)
+    mapped, _how = fit_state_dict(model, payload["state_dict"])
+    model.load_state_dict(mapped)
+    return spec.model_copy(update={"resume": False})
+
+
+def _test_reading(test_acc: float, val_acc: float | None, n_test: int, same: bool | None) -> tuple[list[str], str | None]:
+    """The final test in plain words: is it a fair check, and how does it compare."""
+    warnings: list[str] = []
+    if same is False:
+        warnings.append(
+            "These weights were trained on other data or another split, so some of the test rows may have been "
+            "among their training rows: this test is not a fair check. Train again with the current settings, "
+            "then test."
+        )
+    elif same is None:
+        warnings.append(
+            "These weights carry no record of the data they were trained on, so there is no telling whether the "
+            "test rows were among it."
+        )
+    if n_test < _SMALL_VAL:
+        warnings.append(
+            f"Only {_plural(n_test, 'row')} in the test part, so each one moves test accuracy by "
+            f"{100 / n_test:.0f} %: too coarse for a reading. Add rows for a reliable test."
+        )
+        return warnings, None
+    t = round(100 * test_acc)
+    if val_acc is None:
+        return warnings, f"{t}% on the test rows: rows used neither for training nor for judging the epochs."
+    v = round(100 * val_acc)
+    if test_acc < val_acc - _TEST_GAP:
+        return warnings, (
+            f"Lower than on validation ({t}% vs {v}%): the settings may have been tuned to the validation rows. "
+            "Trust the test number: it is the honest one."
+        )
+    if test_acc > val_acc + _TEST_GAP:
+        return warnings, (
+            f"{t}% on the test rows vs {v}% on validation: small parts vary by chance, so neither number is exact."
+        )
+    return warnings, (
+        f"Confirmed: {t}% on the test rows, in line with {v}% on validation. The numbers hold on rows used for "
+        "nothing else."
+    )
+
+
+def test_run(spec: GraphSpec, run_id: str) -> TestResult:
+    """The final test: a run's weights on this graph's test rows (and, for
+    comparison, on its validation and training rows). Says whether the weights
+    were trained on this very split — only then is it a fair check."""
+    payload = load_run(run_id)  # a stale id is "not found", whatever the graph
+    model, build = build_model(spec)
+    in_shape = _input_shape(build)
+    mapped, _how = fit_state_dict(model, payload["state_dict"])
+    model.load_state_dict(mapped)
+    model.eval()
+    num_classes = _infer_num_classes(model, in_shape)
+    t = spec.train
+    X, y = make_dataset(t.dataset, in_shape, num_classes, t, torch.device("cpu"))
+    tr, va, te = split_parts(y, t.val_fraction, t.test_fraction, t.seed)
+    if not te.numel():
+        raise ValueError(
+            "there is no test part to measure: set Final test to 10 % or more and train again (the test rows "
+            "have to be kept out of training), then press Test"
+            if not t.test_fraction else
+            "too few rows to keep a test part aside: add rows (every class needs a row to train on first)"
+        )
+    loss_fn = nn.CrossEntropyLoss()
+
+    def evaluate(idx: torch.Tensor) -> tuple[float, float]:
+        with torch.no_grad():
+            logits = model(X[idx])
+            return float(loss_fn(logits, y[idx])), float((logits.argmax(1) == y[idx]).float().mean())
+
+    test_loss, test_acc = evaluate(te)
+    val_acc = evaluate(va)[1] if va.numel() else None
+    train_acc = evaluate(tr)[1] if tr.numel() else None
+    same = None if payload["data"] is None else payload["data"] == data_key(t, in_shape, num_classes)
+    warnings, note = _test_reading(test_acc, val_acc, int(te.numel()), same)
+    return TestResult(
+        run_id=run_id,
+        accuracy=test_acc,
+        loss=test_loss,
+        samples=int(te.numel()),
+        val_accuracy=val_acc,
+        train_accuracy=train_acc,
+        val_samples=int(va.numel()),
+        train_samples=int(tr.numel()),
+        same_split=same,
+        note=note,
+        warnings=warnings,
+    )
+
+
+def adopt_weights(spec: GraphSpec, raw: bytes) -> WeightsInfo:
+    """Load a weights file into this graph (it must fit), keep it as a run and
+    say how it matched and whether it knows its training data."""
+    payload = read_weights(raw)
+    model, build = build_model(spec)
+    in_shape = _input_shape(build)
+    mapped, how = fit_state_dict(model, payload["state_dict"])
+    model.load_state_dict(mapped)
+    num_classes = _infer_num_classes(model, in_shape)
+    data = payload["data"]
+    same = None if data is None else data == data_key(spec.train, in_shape, num_classes)
+    run_id = save_run(weights_bytes(mapped, data=data, metrics=payload["metrics"]))
+    note = (
+        f"Weights loaded: all {len(mapped)} tensors match this graph by name."
+        if how == "names" else
+        f"Weights loaded by position: the names differ (as in a file saved by the exported script), "
+        f"but all {len(mapped)} shapes match."
+    )
+    if same is False:
+        note += " They were trained on other data or another split, so Test will not be a fair check."
+    elif same is None:
+        note += " The file does not say which data it was trained on."
+    return WeightsInfo(
+        run_id=run_id,
+        tensors=len(mapped),
+        params=int(sum(p.numel() for p in model.parameters())),
+        matched=how,
+        data_known=data is not None,
+        same_split=same,
+        metrics=payload["metrics"],
+        note=note,
     )

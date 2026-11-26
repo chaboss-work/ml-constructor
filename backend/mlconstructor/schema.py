@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # --------------------------------------------------------------------------- #
@@ -56,6 +56,22 @@ class TrainSpec(BaseModel):
     #: trains on them, so their accuracy shows how it does on new data. 0 = off
     #: (train and measure on every row, the pre-Stage-15 behaviour).
     val_fraction: float = Field(default=0.2, ge=0.0, le=0.5)
+    #: Stage 16 — the share of rows kept for a final test: used neither for training
+    #: nor for judging epochs, measured only by ``POST /test``. 0 = no test part.
+    test_fraction: float = Field(default=0.1, ge=0.0, le=0.5)
+    #: Stage 16 — start from the weights of an earlier run (a finished training or
+    #: an uploaded weights file, see ``run_id``) instead of fresh ones.
+    init_run: str | None = None
+
+    @model_validator(mode="after")
+    def _leave_rows_to_train(self) -> "TrainSpec":
+        held = self.val_fraction + self.test_fraction
+        if held > 0.7 + 1e-9:
+            raise ValueError(
+                f"validation ({self.val_fraction:.0%}) + test ({self.test_fraction:.0%}) would hold out "
+                f"{held:.0%} of the rows; leave at least 30 % for training"
+            )
+        return self
 
 
 class EdgeSetting(BaseModel):
@@ -230,6 +246,69 @@ class TrainResult(BaseModel):
     fit_note: str | None = None
     #: Things worth knowing about this run (validation off, too few rows, …).
     warnings: list[str] = Field(default_factory=list)
+    #: Stage 16 — rows kept for the final test (not trained on, not measured here:
+    #: ``POST /test`` measures them), and the id the trained weights are kept under
+    #: on the server (download: ``GET /runs/{run_id}/weights``; None if not kept).
+    test_samples: int = 0
+    run_id: str | None = None
+
+
+# --------------------------------------------------------------------------- #
+# Final test & trained weights (POST /test, /weights/upload) — Stage 16
+# --------------------------------------------------------------------------- #
+class TestRequest(BaseModel):
+    """Measure the weights of a run on the test rows of this graph's data."""
+
+    spec: GraphSpec
+    run_id: str
+
+
+class TestResult(BaseModel):
+    """The final test: the run's weights on the rows kept out of training and out
+    of the epoch-by-epoch validation — the number to trust once tuning is done."""
+
+    ok: bool = True
+    run_id: str
+    accuracy: float
+    loss: float
+    samples: int
+    #: The same weights on the validation and training rows, for comparison.
+    val_accuracy: float | None = None
+    train_accuracy: float | None = None
+    val_samples: int = 0
+    train_samples: int = 0
+    #: True: the weights were trained on this very split; False: on other data or
+    #: another split (some test rows may have been trained on); None: unknown
+    #: (uploaded weights that carry no record of their training data).
+    same_split: bool | None = None
+    note: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class WeightsUpload(BaseModel):
+    """A weights file (``.pt``, base64) to load into this graph."""
+
+    spec: GraphSpec
+    data: str
+    name: str | None = None
+
+
+class WeightsInfo(BaseModel):
+    """Weights loaded and kept on the server as a run, ready to test or train from."""
+
+    ok: bool = True
+    run_id: str
+    tensors: int
+    params: int
+    #: "names" — every tensor matched by name; "order" — by position, every shape
+    #: lining up (e.g. weights saved by the exported script, whose layer names differ).
+    matched: str
+    #: Whether the file says which data and split it was trained on, and if that is
+    #: this graph's current one.
+    data_known: bool = False
+    same_split: bool | None = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    note: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -293,7 +372,8 @@ class DataSampleRow(BaseModel):
     values: list[float]
     truncated: bool = False
     total: int
-    #: Stage 15 — which part the row belongs to: "train" or "validation" (held out).
+    #: Stage 15 — which part the row belongs to: "train", "validation" (held out)
+    #: or, since Stage 16, "test" (kept for the final test).
     split: str = "train"
 
 
@@ -310,9 +390,11 @@ class DataPreview(BaseModel):
     num_samples: int
     feature_count: int
     rows: list[DataSampleRow] = Field(default_factory=list)
-    #: Stage 15 — how the rows split: trained on vs held out for validation.
+    #: Stage 15 — how the rows split: trained on vs held out for validation
+    #: (and, since Stage 16, kept for the final test).
     train_samples: int | None = None
     val_samples: int = 0
+    test_samples: int = 0
 
 
 # --------------------------------------------------------------------------- #

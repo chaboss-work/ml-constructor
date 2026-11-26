@@ -20,6 +20,8 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 
+import torch
+
 from .blocks import GraphModule
 from .connections import AUTO, Resolved, resolve_merge, resolve_single
 from .layers.base import LayerNode
@@ -181,7 +183,21 @@ def plan_graph(spec: GraphSpec, tolerant: bool = False) -> GraphPlan:
     return plan
 
 
-def build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
+def build_model(spec: GraphSpec, seed: int | None = None) -> tuple[GraphModule, BuildResult]:
+    """Assemble the graph into a model plus its per-layer summary.
+
+    ``seed`` (Stage 16) makes the starting weights reproducible — the same seed,
+    the same weights, so a training run repeats exactly — without touching the
+    global random state (nor CUDA's). Without it the weights come from the global
+    random state, as before."""
+    if seed is None:
+        return _build_model(spec)
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(int(seed))
+        return _build_model(spec)
+
+
+def _build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
     plan = plan_graph(spec)
 
     modules: dict[str, object] = {}

@@ -22,7 +22,7 @@ import torch.nn as nn
 from .blocks import Block
 from .builder import build_model
 from .connections import ImageToSeq, SeqPool
-from .datasets import split_indices
+from .datasets import split_parts
 from .layers.attention import _PositionalEncoding, _SelfAttention
 from .layers.sequence import _EmbeddingModule, _RecurrentModule
 from .schema import GraphSpec
@@ -234,6 +234,23 @@ def make_data(n, in_shape, num_classes, seed=0):
     return X, y
 '''
 
+_LOAD_WEIGHTS = '''
+def load_weights(model, path="weights.pt"):
+    """Load weights into the model: a file from ML Constructor's "Save weights" or
+    the model.pt that export_model() writes. Tensors are matched by name, or by
+    position when the names differ (the app names its layers a little differently).
+    Usage:  model = load_weights(Model(), "my-net-weights.pt")"""
+    obj = torch.load(path, map_location="cpu", weights_only=True)  # tensors only, never code
+    state = obj["state_dict"] if isinstance(obj, dict) and "state_dict" in obj else obj
+    own = model.state_dict()
+    if set(state) != set(own):
+        if len(state) != len(own) or any(a.shape != b.shape for a, b in zip(state.values(), own.values())):
+            raise ValueError("these weights belong to a different network")
+        state = dict(zip(own.keys(), state.values()))
+    model.load_state_dict(state)
+    return model
+'''
+
 _TRAIN_BODY = '''
 def _num_classes(model):
     with torch.no_grad():
@@ -245,9 +262,10 @@ def main():
     model = Model()
     num_classes = _num_classes(model)
     X, y = make_data(SAMPLES, IN_SHAPE, num_classes, seed=SEED)
-    # Hold rows out for validation, exactly as the app does: train on the rest only.
-    train_idx, val_idx = split_indices(y, VAL_FRACTION, SEED)
-    Xv, yv = X[val_idx], y[val_idx]
+    # Split the rows exactly as the app does: train on one part, watch the validation
+    # part after every epoch, keep the test part for one final check at the end.
+    train_idx, val_idx, test_idx = split_parts(y, VAL_FRACTION, TEST_FRACTION, SEED)
+    Xv, yv, Xt, yt = X[val_idx], y[val_idx], X[test_idx], y[test_idx]
     X, y = X[train_idx], y[train_idx]
     opt = OPTIMIZER(model.parameters(), lr=LR)
     loss_fn = nn.CrossEntropyLoss()
@@ -268,6 +286,11 @@ def main():
             val = f"  val_acc {(model(Xv).argmax(1) == yv).float().mean().item():.3f}" if len(yv) else ""
         model.train()
         print(f"epoch {epoch + 1}/{EPOCHS}  loss {loss.item():.3f}  train_acc {acc:.3f}{val}")
+    if len(yt):
+        model.eval()
+        with torch.no_grad():
+            test_acc = (model(Xt).argmax(1) == yt).float().mean().item()
+        print(f"final test on {len(yt)} rows used for nothing else: test_acc {test_acc:.3f}")
     return model
 
 
@@ -378,6 +401,9 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     out.append("")
     out.append("    def forward(self, x):")
     out.extend(fwd_lines)
+    out.append("")
+    out.append("")
+    out.append(_LOAD_WEIGHTS.strip("\n"))  # Stage 16: run weights trained in the app
 
     if include_training:
         ds = get_dataset(spec.train.dataset)
@@ -404,12 +430,13 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
             f"BATCH_SIZE = {int(spec.train.batch_size)}",
             f"OPTIMIZER = {opt}",
             f"VAL_FRACTION = {float(spec.train.val_fraction)}  # share of rows held out for validation",
+            f"TEST_FRACTION = {float(spec.train.test_fraction)}  # share of rows kept for the final test",
         ]
         out.extend(consts)
         out.append(data_block)
         out.append("")
         out.append("")
-        out.append(inspect.getsource(split_indices).strip("\n"))  # the app's own split, verbatim
+        out.append(inspect.getsource(split_parts).strip("\n"))  # the app's own split, verbatim
         out.append("")
         out.append("")
         out.append(_TRAIN_BODY.strip("\n"))

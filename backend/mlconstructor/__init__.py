@@ -7,6 +7,8 @@ Public surface:
   :class:`~mlconstructor.blocks.NeuralNetwork` plus a per-layer summary.
 * :func:`train_model` — run the tiny v1 training loop and return the loss curve
   (since Stage 15 with a held-out validation part, see :func:`split_indices`).
+* :func:`test_run` / :func:`adopt_weights` — the final test on kept or uploaded
+  weights (Stage 16).
 * :func:`normalize_project` & co. — open / save versioned project files (Stage 13).
 """
 
@@ -16,7 +18,7 @@ from . import layers  # noqa: F401  (import-time side effect: registers all laye
 from .adapters import apply_adapter, suggest_for_graph
 from .architectures import get_architecture, list_architectures
 from .builder import build_model, connection_options
-from .datasets import list_datasets, make_dataset, split_indices
+from .datasets import list_datasets, make_dataset, split_indices, split_parts
 from .export import generate_pytorch
 from .projects import (
     create_project,
@@ -29,12 +31,13 @@ from .projects import (
     slugify,
 )
 from .registry import LAYER_REGISTRY, catalog, get_layer_cls
-from .trainer import data_preview, train_iter, train_model
+from .trainer import adopt_weights, data_preview, save_trained, start_from_run, test_run, train_iter, train_model
+from .weights import MAX_WEIGHTS_BYTES, RunNotFound, read_weights, run_path, weights_bytes
 
 __version__ = "0.1.0"
 #: The latest stage whose HTTP contract this backend serves (``GET /health`` reports
 #: it), so the editor can tell when the server runs an older backend than the page.
-API_LEVEL = 15
+API_LEVEL = 16
 
 __all__ = [
     "build_model",
@@ -51,6 +54,16 @@ __all__ = [
     "list_datasets",
     "make_dataset",
     "split_indices",
+    "split_parts",
+    "save_trained",
+    "start_from_run",
+    "test_run",
+    "adopt_weights",
+    "read_weights",
+    "weights_bytes",
+    "run_path",
+    "RunNotFound",
+    "MAX_WEIGHTS_BYTES",
     "generate_pytorch",
     "normalize_project",
     "create_project",

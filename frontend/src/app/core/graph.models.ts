@@ -64,6 +64,39 @@ export interface EdgeSummary {
   in_shape: number[];
   out_shape: number[];
   num_params: number;
+  /** Stage 19 — the input of a several-input layer this connection feeds (e.g. "timestep"). */
+  port?: string | null;
+}
+
+/** Stage 19 — one Input node of the model (a model can take several). */
+export interface InputSummary {
+  id: string;
+  name: string;
+  shape: number[];
+}
+
+/** Stage 19 — one input of a forward pass on random data. */
+export interface RunInputInfo {
+  id: string;
+  name: string;
+  shape: number[];
+  /** "tokens" (random token ids), "timestep" (random diffusion steps) or "noise" (random numbers) */
+  kind: string;
+}
+
+/** Stage 19 — one forward pass on random inputs (POST /run). */
+export interface RunResult {
+  ok: boolean;
+  inputs: RunInputInfo[];
+  output_shape: number[];
+  mean: number;
+  std: number;
+  min: number;
+  max: number;
+  sample: number[];
+  finite: boolean;
+  ms: number;
+  total_params: number;
 }
 
 /** Stage 14 — one choice in a connection's transform selector. */
@@ -189,6 +222,12 @@ export interface BuildResult {
   /** Stage 17 — small enough to train here (a real-scale flagship is built to inspect only). */
   trainable?: boolean;
   max_train_params?: number | null;
+  /** Stage 19 — every Input node, in the order the model takes them. */
+  inputs?: InputSummary[];
+  /** Stage 19 — small enough to build here and run once on random inputs. */
+  runnable?: boolean;
+  /** Stage 19 — why it cannot be trained here yet (several inputs, a picture as output…). */
+  train_note?: string | null;
 }
 
 export interface TrainResult {

@@ -12,6 +12,7 @@ import {
   GenerateResult,
   GraphSpec,
   HealthInfo,
+  RunResult,
   LayerInfo,
   ProjectFile,
   ProjectLoadResult,
@@ -111,6 +112,11 @@ export class ApiService {
       temperature,
       seed,
     });
+  }
+
+  /** Stage 19 — one forward pass on random inputs: does the network run, what comes out. */
+  run(spec: GraphSpec): Observable<RunResult> {
+    return this.http.post<RunResult>(`${API_BASE}/run`, spec);
   }
 
   /** Stage 18 — the example text for Your text. */

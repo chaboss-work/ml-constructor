@@ -79,6 +79,7 @@ const SNAP: EditorSnapshot = {
     checkpoint: true,
     device: 'auto',
     val_fraction: 0.3,
+    test_fraction: 0.2,
   },
   trainExtra: { optimizer: 'sgd', seed: 42, steps: null },
   customText: '1.5, 0, 0\n0, 2.25, 1\n# комментарий',
@@ -136,6 +137,8 @@ describe('project file <-> editor state', () => {
     expect(s.train.custom_rows).toEqual(SNAP.train.custom_rows);
     expect(s.train.val_fraction).toBe(0.3); // Stage 15 — the hold-out share is an editor setting
     expect(toProjectFile(SNAP).train.val_fraction).toBe(0.3); // and travels in the file
+    expect(s.train.test_fraction).toBe(0.2); // Stage 16 — so does the final-test share
+    expect(toProjectFile(SNAP).train.test_fraction).toBe(0.2);
   });
 
   it('saves only the connections that do not use auto', () => {

@@ -35,6 +35,7 @@ export const UI_TRAIN_KEYS: readonly string[] = [
   'resume',
   'device',
   'val_fraction',
+  'test_fraction',
 ];
 
 export interface EditorView {

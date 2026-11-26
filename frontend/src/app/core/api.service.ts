@@ -17,8 +17,10 @@ import {
   ProjectSaveResult,
   ProjectSummary,
   SuggestResult,
+  TestResult,
   TrainEvent,
   TrainResult,
+  WeightsInfo,
 } from './graph.models';
 
 /**
@@ -85,6 +87,22 @@ export class ApiService {
    * "auto" picks, and every transform that applies (with presets and reasons). */
   connectionOptions(spec: GraphSpec, source: string, target: string): Observable<ConnectionOptions> {
     return this.http.post<ConnectionOptions>(`${API_BASE}/connections/options`, { spec, source, target });
+  }
+
+  // ---- final test & trained weights (Stage 16) ----
+  /** The final test: a run's weights on the graph's test rows. */
+  test(spec: GraphSpec, runId: string): Observable<TestResult> {
+    return this.http.post<TestResult>(`${API_BASE}/test`, { spec, run_id: runId });
+  }
+
+  /** Load a weights file (.pt, base64) into the graph; the server keeps it as a run. */
+  uploadWeights(spec: GraphSpec, data: string, name?: string): Observable<WeightsInfo> {
+    return this.http.post<WeightsInfo>(`${API_BASE}/weights/upload`, { spec, data, name });
+  }
+
+  /** Where a run's weights download from (a .pt file). */
+  weightsUrl(runId: string, name: string): string {
+    return `${API_BASE}/runs/${encodeURIComponent(runId)}/weights?name=${encodeURIComponent(name)}`;
   }
 
   // ---- projects (Stage 13) ----

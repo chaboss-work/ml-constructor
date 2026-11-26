@@ -119,6 +119,10 @@ export interface TrainCfg {
   device?: 'cpu' | 'cuda' | 'auto';
   /** Stage 15 — share of rows held out for validation (0 = off; the backend defaults to 0.2). */
   val_fraction?: number;
+  /** Stage 16 — share of rows kept for the final test (0 = none; the backend defaults to 0.1). */
+  test_fraction?: number;
+  /** Stage 16 — start from the weights of an earlier run (a finished training or loaded file). */
+  init_run?: string | null;
 }
 
 /** Stage 11 — one streamed progress event from POST /train/stream. */
@@ -138,6 +142,8 @@ export interface TrainEvent {
   /** Stage 15 — how the rows split: trained on vs held out. */
   train_samples?: number;
   val_samples?: number;
+  /** Stage 16 — rows kept for the final test. */
+  test_samples?: number;
   num_classes?: number;
   result?: TrainResult;
   detail?: string;
@@ -196,6 +202,39 @@ export interface TrainResult {
   fit?: string | null;
   fit_note?: string | null;
   warnings?: string[];
+  /** Stage 16 — rows kept for the final test, and the id the trained weights are kept under. */
+  test_samples?: number;
+  run_id?: string | null;
+}
+
+/** Stage 16 — the final test: a run's weights on the rows used for nothing else. */
+export interface TestResult {
+  ok: boolean;
+  run_id: string;
+  accuracy: number;
+  loss: number;
+  samples: number;
+  val_accuracy?: number | null;
+  train_accuracy?: number | null;
+  val_samples?: number;
+  train_samples?: number;
+  /** true: trained on this very split; false: on other data / another split; null: unknown. */
+  same_split?: boolean | null;
+  note?: string | null;
+  warnings?: string[];
+}
+
+/** Stage 16 — a weights file loaded into the graph (kept on the server as a run). */
+export interface WeightsInfo {
+  ok: boolean;
+  run_id: string;
+  tensors: number;
+  params: number;
+  matched: 'names' | 'order' | string;
+  data_known?: boolean;
+  same_split?: boolean | null;
+  metrics?: Record<string, unknown>;
+  note?: string | null;
 }
 
 /** Smart adapters (Stage 5): a node to insert so a connection's shapes line up. */
@@ -242,7 +281,7 @@ export interface DataSampleRow {
   values: number[];
   truncated: boolean;
   total: number;
-  /** Stage 15 — "train" or "validation" (held out). */
+  /** Stage 15 — "train", "validation" (held out) or "test" (kept for the final test, Stage 16). */
   split?: string;
 }
 
@@ -256,9 +295,10 @@ export interface DataPreview {
   num_samples: number;
   feature_count: number;
   rows: DataSampleRow[];
-  /** Stage 15 — rows trained on vs held out for validation. */
+  /** Stage 15 — rows trained on vs held out for validation (+ the final test, Stage 16). */
   train_samples?: number | null;
   val_samples?: number;
+  test_samples?: number;
 }
 
 /** Export (Stage 8): standalone PyTorch source for the current graph. */

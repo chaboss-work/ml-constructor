@@ -2417,7 +2417,7 @@ def test_stage17_http():
     assert st == 200 and health["api"] == mlc.API_LEVEL >= 17, health
     st, lib = _asgi("GET", "/architectures")
     flags = {a["id"]: a for a in lib if a.get("scale") == "mini"}
-    assert set(flags) == {f["id"] for f in FLAGSHIPS}, sorted(flags)
+    assert set(flags) == {f["id"] for f in FLAGSHIPS} | {f["id"] for f in VISION_FLAGSHIPS}, sorted(flags)
     ds = flags["deepseek_v3"]
     assert ds["real_id"] == "deepseek_v3_real" and ds["real_params"] == 671_000_000_000
     assert ds["hf_url"] == "https://huggingface.co/deepseek-ai/DeepSeek-V3" and "moe" in ds["tags"], ds
@@ -2696,6 +2696,302 @@ def test_hidden_gpus_stay_unused_and_never_crash():
           "(on Windows the variable is removed before the driver starts — no crash, no CUDA context)")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 19 — flagships for images, 3D, sound and vision: several inputs, layers
+# with named inputs, real sizes to the parameter, minis that run once.
+# --------------------------------------------------------------------------- #
+from mlconstructor.vision_flagships import VISION_FLAGSHIPS, flux_spec  # noqa: E402
+from mlconstructor.vision_flagships import mini_spec as vision_mini  # noqa: E402
+from mlconstructor.vision_flagships import real_spec as vision_real  # noqa: E402
+
+_VISION_OUT = {"vit": [10], "clip": [1], "stable_diffusion": [3, 32, 32], "dit": [8, 8, 8], "flux": [16, 16],
+               "triposr": [256, 4], "whisper": [16, 64]}
+
+
+def _vfam(fid: str) -> dict:
+    return next(f for f in VISION_FLAGSHIPS if f["id"] == fid)
+
+
+def test_vision_real_sizes_match_published():
+    for fam in VISION_FLAGSHIPS:
+        _m, res = mlc.build_model(GraphSpec.model_validate(vision_real(fam)), meta=True)
+        assert res.total_params == fam["official"], (fam["id"], res.total_params, fam["official"])
+    _m, sd = mlc.build_model(GraphSpec.model_validate(vision_real(_vfam("stable_diffusion"))), meta=True)
+    parts = {s.id: s.num_params for s in sd.layers}
+    want = _vfam("stable_diffusion")["parts"]
+    assert parts["unet"] == want["unet"] == 859_520_964, parts["unet"]
+    assert parts["vae_encoder"] + parts["vae_decoder"] == want["vae"], parts
+    assert sum(parts[k] for k in ("tokens", "positions", "text_layers", "text_norm")) == want["text"], parts
+    # FLUX.1 [dev] = [schnell] + the guidance embedder: both match the Hub to the parameter
+    _m, dev = mlc.build_model(GraphSpec.model_validate(flux_spec({**_vfam("flux")["real"], "guidance": True})),
+                              meta=True)
+    assert dev.total_params == 11_901_408_320, dev.total_params
+    # TripoSR has no published count: its checkpoint (1,677,246,742 bytes of 32-bit numbers) holds the graph's
+    # weights plus DINO's unused pooler (590,592) and a little file structure
+    stored = (_vfam("triposr")["official"] + 590_592) * 4
+    assert 0 < 1_677_246_742 - stored < 200_000, 1_677_246_742 - stored
+    print("[stage19] real sizes: ViT, CLIP, Stable Diffusion (U-Net, text, VAE), DiT, FLUX (schnell + dev), "
+          "TripoSR, Whisper — to the parameter")
+
+
+def test_vision_minis_run_once():
+    for fam in VISION_FLAGSHIPS:
+        spec = GraphSpec.model_validate(vision_mini(fam))
+        r = mlc.run_once(spec)
+        assert r.output_shape == _VISION_OUT[fam["id"]] and r.finite, (fam["id"], r)
+        assert r.total_params < 2_000_000 and r.ms >= 0, r
+        again = mlc.run_once(spec)
+        assert again.sample == r.sample, "the same seed must give the same numbers"
+    kinds = {i.name: i.kind for i in mlc.run_once(GraphSpec.model_validate(vision_mini(_vfam("stable_diffusion")))).inputs}
+    assert kinds == {"image": "noise", "noise": "noise", "timestep": "timestep", "text": "tokens"}, kinds
+    kinds = {i.name: i.kind for i in mlc.run_once(GraphSpec.model_validate(vision_mini(_vfam("dit")))).inputs}
+    assert kinds["class"] == "tokens" and kinds["timestep"] == "timestep", kinds
+    model, build = mlc.build_model(GraphSpec.model_validate(vision_mini(_vfam("clip"))), seed=0)
+    assert [i.name for i in build.inputs] == ["image", "text"], build.inputs
+    try:
+        model(torch.randn(2, 3, 32, 32))
+        raise AssertionError("one input for a two-input model must be refused")
+    except TypeError as exc:
+        assert "2 input" in str(exc), exc
+    print("[stage19] every mini runs a forward pass on random inputs (token ids, timesteps, noise), repeatably")
+
+
+def test_vision_minis_export_exactly():
+    for fam in VISION_FLAGSHIPS:
+        spec = GraphSpec.model_validate(vision_mini(fam))
+        code = mlc.generate_pytorch(spec)
+        assert "mlconstructor" not in code, fam["id"]
+        ns: dict = {"__name__": "exported"}
+        exec(compile(code, f"<{fam['id']}>", "exec"), ns)
+        exported = ns["Model"]().eval()
+        model, build = mlc.build_model(spec, seed=0)
+        model.eval()
+        sd, esd = model.state_dict(), exported.state_dict()
+        assert [tuple(v.shape) for v in sd.values()] == [tuple(v.shape) for v in esd.values()], fam["id"]
+        exported.load_state_dict(dict(zip(esd.keys(), sd.values())))
+        g = torch.Generator().manual_seed(3)
+        xs = [torch.randn(2, *i.shape, generator=g) for i in build.inputs]
+        with torch.no_grad():
+            assert torch.allclose(model(*xs), exported(*xs), atol=1e-5), fam["id"]
+        if fam["id"] == "vit":
+            assert "def main():" in code and "OPTIMIZER" in code  # one input, class scores: it trains
+        else:
+            assert "def random_inputs" in code and "INPUTS = [" in code, fam["id"]
+            assert tuple(ns["main"]()(*ns["random_inputs"]()).shape[1:]) == tuple(_VISION_OUT[fam["id"]])
+    code = mlc.generate_pytorch(GraphSpec.model_validate(vision_mini(_vfam("stable_diffusion"))))
+    assert "def forward(self, image, noise, timestep, text):" in code, code[:200]
+    print("[stage19] every mini exports to plain PyTorch that computes exactly what the app computes")
+
+
+def test_ported_layers_wire_and_explain():
+    base = vision_mini(_vfam("stable_diffusion"))
+    # the U-Net with its text input unplugged: a plain-words error naming every input
+    spec = json.loads(json.dumps(base))
+    spec["edges"] = [e for e in spec["edges"] if e != ["text_norm", "unet"]]
+    spec["nodes"] = [n for n in spec["nodes"] if n["id"] not in ("text", "tokens", "positions", "text_layers",
+                                                                   "text_norm")]
+    spec["edges"] = [e for e in spec["edges"] if all(x in {n["id"] for n in spec["nodes"]} for x in e)]
+    try:
+        mlc.build_model(GraphSpec.model_validate(spec), meta=True)
+        raise AssertionError("a U-Net with two of its three inputs must be refused")
+    except ShapeError as exc:
+        msg = str(exc)
+        assert "takes 3 inputs" in msg and "“text”" in msg and exc.node_id == "unet", msg
+        assert exc.hint and "latent → timestep → text" in exc.hint, exc.hint
+    # the order of the connections decides the inputs: the text first is explained, not crashed
+    spec = json.loads(json.dumps(base))
+    i, j = spec["edges"].index(["add_noise", "unet"]), spec["edges"].index(["text_norm", "unet"])
+    spec["edges"][i], spec["edges"][j] = spec["edges"][j], spec["edges"][i]
+    plan = mlc.builder.plan_graph(GraphSpec.model_validate(spec), tolerant=True)
+    assert plan.errors and any("latent" in str(e) for e in plan.errors), [str(e) for e in plan.errors]
+    # a latent the U-Net cannot halve
+    spec = json.loads(json.dumps(base))
+    for n in spec["nodes"]:
+        if n["id"] == "image":
+            n["params"]["shape"] = [3, 30, 30]  # the VAE halves it to 15×15 …
+        if n["id"] == "noise":
+            n["params"]["shape"] = [4, 15, 15]
+    try:
+        mlc.build_model(GraphSpec.model_validate(spec), meta=True)
+        raise AssertionError("… which the U-Net cannot halve again")
+    except ShapeError as exc:
+        assert "must divide by 2" in str(exc), exc
+    # every connection into a several-input layer says which input it feeds
+    _m, res = mlc.build_model(GraphSpec.model_validate(base), meta=True)
+    ports = {(e.source, e.target): e.port for e in res.edges}
+    assert ports[("timestep", "unet")] == "timestep" and ports[("add_noise", "predict_clean")] == "noisy latent"
+    assert ports[("unet", "predict_clean")] == "predicted noise" and ports[("image", "vae_encoder")] is None
+    label = next(e.label for e in res.edges if (e.source, e.target) == ("text_norm", "unet"))
+    assert label == "text", label
+    # a block whose inner layers read a condition takes it as its own second input
+    dit = vision_mini(_vfam("dit"))
+    blocks = mlc.get_layer_cls("Repeat")("blocks", next(n for n in dit["nodes"] if n["id"] == "blocks")["params"])
+    assert blocks.input_ports() == ("tokens", "condition"), blocks.input_ports()
+    spec = json.loads(json.dumps(dit))
+    spec["edges"].remove(["condition", "blocks"])
+    try:
+        mlc.build_model(GraphSpec.model_validate(spec), meta=True)
+        raise AssertionError("a DiT block without its condition must be refused")
+    except ShapeError as exc:
+        assert "takes 2 inputs" in str(exc) and exc.node_id == "blocks", exc
+    # the connection inspector knows which input an edge feeds
+    opts = mlc.connection_options(GraphSpec.model_validate(base), "timestep", "unet")
+    assert opts.problem is None and opts.auto_transform == "none", opts
+    assert any(o.transform == "none" and o.fits for o in opts.options), opts.options
+    # CLIP's two embeddings must agree in size
+    clip = vision_mini(_vfam("clip"))
+    for n in clip["nodes"]:
+        if n["id"] == "text_proj":
+            n["params"]["out_features"] = 24
+    try:
+        mlc.build_model(GraphSpec.model_validate(clip), meta=True)
+        raise AssertionError("embeddings of different sizes must be refused")
+    except ShapeError as exc:
+        assert "same size" in str(exc), exc
+    print("[stage19] several-input layers: inputs in connection order, named on the wires, clear errors")
+
+
+def test_new_generic_layers():
+    def build(nodes, edges, meta=False):
+        return mlc.build_model(GraphSpec.model_validate({"nodes": nodes, "edges": edges}), meta=meta)
+
+    def shapes(res):
+        return {s.id: (s.out_shape, s.num_params) for s in res.layers}
+
+    _m, r = build([{"id": "in", "type": "Input", "params": {"shape": [16, 64]}},
+                   {"id": "c1", "type": "Conv1d", "params": {"out_channels": 32, "kernel_size": 3, "stride": 2,
+                                                             "padding": 1}},
+                   {"id": "tr", "type": "Transpose", "params": {}},
+                   {"id": "sl", "type": "SliceTokens", "params": {"start": 4, "length": 8}},
+                   {"id": "lin", "type": "Linear", "params": {"out_features": 10, "per_token": True}},
+                   {"id": "ln", "type": "LayerNorm", "params": {"last_axis": True}},
+                   {"id": "out", "type": "Output", "params": {"any_shape": True}}],
+                  [["in", "c1"], ["c1", "tr"], ["tr", "sl"], ["sl", "lin"], ["lin", "ln"], ["ln", "out"]])
+    s = shapes(r)
+    assert s["c1"] == ([32, 32], 16 * 32 * 3 + 32) and s["tr"][0] == [32, 32] and s["sl"][0] == [8, 32], s
+    assert s["lin"] == ([8, 10], 32 * 10 + 10) and s["ln"] == ([8, 10], 20) and s["out"][0] == [8, 10], s
+    _m, r = build([{"id": "in", "type": "Input", "params": {"shape": [2, 4, 8, 8]}},
+                   {"id": "c3", "type": "Conv3d", "params": {"out_channels": 3, "kernel_size": 3, "padding": 1}},
+                   {"id": "out", "type": "Output", "params": {"any_shape": True}}], [["in", "c3"], ["c3", "out"]])
+    assert shapes(r)["c3"] == ([3, 4, 8, 8], 2 * 3 * 27 + 3), shapes(r)
+    _m, r = build([{"id": "in", "type": "Input", "params": {"shape": [3, 8, 8]}},
+                   {"id": "up", "type": "Upsample", "params": {"scale": 2}},
+                   {"id": "act", "type": "SiLU", "params": {}},
+                   {"id": "out", "type": "Output", "params": {"any_shape": True}}],
+                  [["in", "up"], ["up", "act"], ["act", "out"]])
+    assert shapes(r)["up"] == ([3, 16, 16], 0), shapes(r)
+    # what was there before keeps its meaning: a plain Linear still takes a flat vector (auto-flattened),
+    # a plain LayerNorm still normalizes the whole example
+    _m, r = build([{"id": "in", "type": "Input", "params": {"shape": [4, 8]}},
+                   {"id": "ln", "type": "LayerNorm", "params": {}},
+                   {"id": "lin", "type": "Linear", "params": {"out_features": 5}},
+                   {"id": "out", "type": "Output", "params": {}}], [["in", "ln"], ["ln", "lin"], ["lin", "out"]])
+    s = shapes(r)
+    assert s["ln"] == ([4, 8], 64) and s["lin"] == ([5], 32 * 5 + 5), s
+    # fixed tables are frozen and filled; learned ones learn
+    pe = mlc.gen_modules.PositionEmbedding(10, 8, "sinusoidal")
+    assert not pe.weight.requires_grad and float(pe.weight.abs().sum()) > 0
+    assert mlc.gen_modules.PositionEmbedding(10, 8, "learned").weight.requires_grad
+    patches = mlc.gen_modules.PatchEmbed(4, 16, 2, 4, position="sincos")
+    assert not patches.pos.requires_grad and float(patches.pos.abs().sum()) > 0
+    try:
+        build([{"id": "t", "type": "Input", "params": {"shape": [2]}},
+               {"id": "emb", "type": "TimestepEmbedding", "params": {"dim": 8}},
+               {"id": "out", "type": "Output", "params": {}}], [["t", "emb"], ["emb", "out"]])
+        raise AssertionError("a timestep is one number")
+    except ShapeError as exc:
+        assert "one number" in str(exc), exc
+    print("[stage19] new layers: Conv1d, Conv3d, Upsample, SiLU, Transpose, Slice tokens, per-token Linear, "
+          "per-token LayerNorm, any-shape Output; the old meanings unchanged")
+
+
+def test_vit_mini_trains():
+    spec = GraphSpec.model_validate(vision_mini(_vfam("vit")))
+    assert spec.train.dataset == "mnist"  # the library entry learns real digits
+    spec.train.dataset, spec.train.samples, spec.train.epochs = "blobs", 600, 3  # offline here
+    model, _b = mlc.build_model(spec, seed=0)
+    res = mlc.train_model(model, (1, 28, 28), spec.train)
+    assert res.final_val_accuracy is not None and res.final_val_accuracy >= 0.9, res.final_val_accuracy
+    print(f"[stage19] ViT (mini) trains: {res.final_accuracy:.2f} on training rows, "
+          f"{res.final_val_accuracy:.2f} on new data")
+
+
+def test_generative_blocks_behave():
+    G = mlc.gen_modules
+    torch.manual_seed(0)
+    # adding noise and predicting the clean latent undo each other
+    x0, eps = torch.randn(3, 4, 6, 6), torch.randn(3, 4, 6, 6)
+    t = torch.tensor([[0.0], [500.0], [999.0]])
+    noisy = G.AddNoise()(x0, eps, t)
+    assert not torch.allclose(noisy, x0) and torch.allclose(G.PredictClean()(noisy, eps, t), x0, atol=1e-4)
+    assert float((G.AddNoise()(x0, eps, torch.zeros(3, 1)) - x0).abs().mean()) < 0.05  # step 0 is almost clean
+    # unpatchify is the inverse of cutting an image into patches (DiT's order)
+    img = torch.randn(2, 3, 8, 8)
+    p, g = 2, 4
+    tokens = img.reshape(2, 3, g, p, g, p).permute(0, 2, 4, 3, 5, 1).reshape(2, g * g, p * p * 3)
+    assert torch.equal(G.Unpatchify(p, 3)(tokens), img)
+    # the triplane is read on the xy, xz and yz planes, in that order: on each plane the first coordinate runs
+    # along the width, the second along the height. Every plane holds width + 10 * height (cell centres), so any
+    # swapped plane or axis shows.
+    centres = -0.875 + 0.25 * torch.arange(8.0)
+    planes = (centres[None, :] + 10 * centres[:, None]).expand(1, 3, 1, 8, 8).clone()
+    pts = torch.tensor([[[0.5, -0.3, 0.7], [-0.5, 0.2, -0.6]]])
+    f = G.TriplaneSample(radius=1.0)(planes, pts)
+    x, y, z = pts[0, :, 0], pts[0, :, 1], pts[0, :, 2]
+    assert f.shape == (1, 2, 3), f.shape
+    assert torch.allclose(f[0], torch.stack([x + 10 * y, x + 10 * z, y + 10 * z], dim=1), atol=1e-4), f
+    # causal attention: an early token does not see later ones
+    att = G.AttentionBlock(16, 4, causal=True).eval()
+    a = torch.randn(1, 6, 16)
+    b = a.clone()
+    b[:, 4:] += torch.randn(1, 2, 16)  # (a constant shift would vanish in the LayerNorm)
+    with torch.no_grad():
+        assert torch.allclose(att(a)[:, :4], att(b)[:, :4], atol=1e-6) and not torch.allclose(att(a), att(b))
+    # cross-attention reads its context
+    cross = G.CrossAttentionBlock(16, 8, 4).eval()
+    with torch.no_grad():
+        assert not torch.allclose(cross(a, torch.randn(1, 5, 8)), cross(a, torch.randn(1, 5, 8)))
+    # a fresh DiT block starts as the identity (adaLN-Zero), and the condition steers it once trained
+    blk = G.DiTBlock(16, 8, 4)
+    toks, cond = torch.randn(2, 5, 16), torch.randn(2, 8)
+    with torch.no_grad():
+        assert torch.equal(blk(toks, cond), toks)
+        blk.adaLN.weight.normal_()
+        assert not torch.allclose(blk(toks, cond), blk(toks, cond + 1.0))
+    print("[stage19] blocks behave: noise round trip, unpatchify inverts patches, triplane axes, causal and "
+          "cross-attention, DiT starts as the identity")
+
+
+def test_stage19_http():
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] == mlc.API_LEVEL >= 19, health
+    st, lib = _asgi("GET", "/architectures")
+    minis = {a["id"]: a for a in lib if a.get("scale") == "mini"}
+    assert {f["id"] for f in VISION_FLAGSHIPS} <= set(minis), sorted(minis)
+    sd = minis["stable_diffusion"]
+    assert sd["real_id"] == "stable_diffusion_real" and sd["real_params"] == 1_066_235_307, sd
+    assert sd["hf_url"] == "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5", sd
+    st, real = _asgi("GET", "/architectures/whisper_real")
+    assert st == 200 and sum(1 for n in real["nodes"] if n["type"] == "Input") == 2, real
+    st, b = _post("/build", vision_mini(_vfam("stable_diffusion")))
+    assert st == 200 and b["runnable"] and not b["trainable"] and "4 inputs" in b["train_note"], b
+    assert [i["name"] for i in b["inputs"]] == ["image", "noise", "timestep", "text"], b["inputs"]
+    st, b = _post("/build", vision_real(_vfam("stable_diffusion")))
+    assert st == 200 and not b["runnable"] and not b["trainable"] and b["train_note"] is None, b
+    st, b = _post("/build", vision_mini(_vfam("vit")))
+    assert st == 200 and b["trainable"] and b["runnable"] and b["train_note"] is None, b
+    st, r = _post("/run", vision_mini(_vfam("dit")))
+    assert st == 200 and r["output_shape"] == [8, 8, 8] and len(r["inputs"]) == 3, r
+    st, r = _post("/run", vision_real(_vfam("flux")))
+    assert st == 422 and "too big" in r["detail"], r
+    st, r = _post("/train", vision_mini(_vfam("clip")))
+    assert st == 422 and "2 inputs" in r["detail"], r
+    st, r = _post("/data/preview", vision_mini(_vfam("whisper")))
+    assert st == 422 and "2 inputs" in r["detail"], r
+    print("[stage19] HTTP: /health api 19; library with real sizes; /build says runnable / trainable and why; "
+          "/run runs once; training a several-input network is explained")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -2797,8 +3093,16 @@ if __name__ == "__main__":
     test_stage18_http()
     test_meta_builds_take_turns()
     test_hidden_gpus_stay_unused_and_never_crash()
+    test_vision_real_sizes_match_published()
+    test_vision_minis_run_once()
+    test_vision_minis_export_exactly()
+    test_ported_layers_wire_and_explain()
+    test_new_generic_layers()
+    test_generative_blocks_behave()
+    test_vit_mini_trains()
+    test_stage19_http()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "
-        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18)"
+        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18 + Stage 19)"
     )

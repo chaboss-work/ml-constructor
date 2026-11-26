@@ -76,3 +76,74 @@
     }
   }
 }
+
+// Stage 16 — the final test, saved / loaded weights, test rows.
+.weights-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+  .lw-label {
+    flex: 1 1 100%;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+}
+
+.weights-loaded {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 12px;
+  border-left: 3px solid var(--ion-color-tertiary, #5260ff);
+  background: rgba(82, 96, 255, 0.08);
+  border-radius: 6px;
+  margin: 0 12px 8px;
+  b {
+    word-break: break-all;
+  }
+  .lw-x {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    font-size: 13px;
+    opacity: 0.7;
+    &:hover {
+      opacity: 1;
+    }
+  }
+}
+
+.final-test {
+  margin: 10px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--ion-color-step-150, #e2e4e8);
+  border-radius: 8px;
+  .ft-h {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.65;
+    margin-bottom: 4px;
+  }
+}
+
+.dp-table tr.dp-test {
+  background: rgba(82, 96, 255, 0.08);
+  .dp-split {
+    color: var(--ion-color-tertiary, #5260ff);
+    opacity: 1;
+    font-weight: 600;
+  }
+}
+
+// The weights button joins Data / Export: let the row wrap instead of breaking a label.
+.s8-actions {
+  flex-wrap: wrap;
+  ion-button {
+    flex: 1 1 auto; // sized by the label, so a third button moves to the next row
+    white-space: nowrap;
+  }
+}

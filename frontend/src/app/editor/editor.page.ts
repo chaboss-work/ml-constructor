@@ -38,7 +38,9 @@ import {
   ProjectSummary,
   TrainCfg,
   TrainEvent,
+  TestResult,
   TrainResult,
+  WeightsInfo,
 } from '../core/graph.models';
 import {
   AUTO,
@@ -63,9 +65,28 @@ const NODE_H = 78;
 const AUTOSAVE_DELAY_MS = 700;
 const ANALYSIS_DELAY_MS = 450;
 /** The backend API this page needs: Stage 14 (smart connections, structured errors). */
-const REQUIRED_API = 15;
+const REQUIRED_API = 16;
 const OUTDATED_MSG =
-  'The server still runs an older backend: connection settings, automatic adaptation, hints and validation accuracy need a restart of the backend.';
+  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test and saved weights need a restart of the backend.';
+/** Stage 16 — the share of rows kept for the final test unless the project says otherwise. */
+const DEFAULT_TEST_FRACTION = 0.1;
+/** The choices of the "Final test" picker. */
+const TEST_CHOICES: { value: number; label: string }[] = [
+  { value: 0, label: 'Off — no final test' },
+  { value: 0.1, label: '10 % of rows (default)' },
+  { value: 0.2, label: '20 % of rows' },
+  { value: 0.3, label: '30 % of rows' },
+];
+/** The largest weights file the backend accepts (64 MB). */
+const MAX_WEIGHTS_BYTES = 64 * 1024 * 1024;
+
+/** A file's bytes as base64, in chunks (no call-stack limit on big files). */
+function toBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
 /** Stage 15 — the share of rows held out for validation unless the project says otherwise. */
 const DEFAULT_VAL_FRACTION = 0.2;
 /** The choices of the "Check on new data" picker. */
@@ -220,6 +241,16 @@ export class EditorPage {
   /** Stage 15 — share of rows held out for validation (the network never trains on them). */
   valFraction = signal(DEFAULT_VAL_FRACTION);
   readonly valChoices = VAL_CHOICES;
+  /** Stage 16 — share of rows kept for the final test (never trained on, not judged per epoch). */
+  testFraction = signal(DEFAULT_TEST_FRACTION);
+  readonly testChoices = TEST_CHOICES;
+  /** The last final test (shown only while it belongs to the current weights). */
+  testResult = signal<TestResult | null>(null);
+  testBusy = signal(false);
+  testError = signal<string | null>(null);
+  /** Weights loaded from a file: Test checks them, the next Train starts from them. */
+  loadedWeights = signal<{ run_id: string; name: string; info: WeightsInfo } | null>(null);
+  weightsBusy = signal(false);
 
   // ---- interaction internals ----
   private mode: 'idle' | 'drag' | 'pan' = 'idle';
@@ -440,6 +471,14 @@ export class EditorPage {
   valAccPoints = computed(() => this.pointsOf(this.curveValAcc(), true));
   /** Stage 15 — the picker's label for a share that is not one of its choices (from a project). */
   valChoiceMissing = computed(() => !VAL_CHOICES.some((c) => c.value === this.valFraction()));
+  testChoiceMissing = computed(() => !TEST_CHOICES.some((c) => c.value === this.testFraction()));
+  /** Stage 16 — the weights Test and Save weights act on: the last training, else the loaded file. */
+  currentRunId = computed(() => this.trainResult()?.run_id ?? this.loadedWeights()?.run_id ?? null);
+  /** The final test, while it still belongs to the current weights. */
+  shownTest = computed(() => {
+    const t = this.testResult();
+    return t && t.run_id === this.currentRunId() ? t : null;
+  });
 
   // Everything a project file holds, as one value (autosave tracks it).
   private snapshot = computed<EditorSnapshot>(() => {
@@ -849,7 +888,12 @@ export class EditorPage {
       batch_size: this.batchSize(),
       samples: this.samples(),
       val_fraction: this.valFraction(),
+      test_fraction: this.testFraction(),
     };
+    // Start from loaded weights only while they are loaded (a stale id in a project is dropped).
+    delete train.init_run;
+    const loaded = this.loadedWeights();
+    if (loaded) train.init_run = loaded.run_id;
     if (this.dataset() === 'custom') train.custom_rows = this.customRows();
     if (this.saveCheckpoint()) train.checkpoint = true;
     if (this.resumeCheckpoint()) train.resume = true;
@@ -879,7 +923,86 @@ export class EditorPage {
     if (this.resumeCheckpoint()) t.resume = true;
     if (this.device() !== 'cpu') t.device = this.device();
     if (this.valFraction() !== DEFAULT_VAL_FRACTION) t.val_fraction = this.valFraction();
+    if (this.testFraction() !== DEFAULT_TEST_FRACTION) t.test_fraction = this.testFraction();
     return t;
+  }
+
+  /** Stage 16 — the "Final test" picker. */
+  setTestFraction(v: string | number): void {
+    const f = Number(v);
+    if (!Number.isFinite(f) || f < 0 || f > 0.5) return;
+    this.testFraction.set(f);
+    this.trainResult.set(null);
+  }
+
+  /** Stage 16 — the final test on the current weights (the last training, or the loaded file). */
+  onTest(): void {
+    const runId = this.currentRunId();
+    if (!runId) return;
+    this.testBusy.set(true);
+    this.testError.set(null);
+    this.api.test(this.toSpec(), runId).subscribe({
+      next: (r) => {
+        this.testResult.set(r);
+        this.testBusy.set(false);
+        // bring the result into view: it sits under the training numbers
+        setTimeout(() => document.querySelector('.final-test')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 60);
+      },
+      error: (err) => {
+        this.testError.set(this.errMsg(err));
+        this.testBusy.set(false);
+      },
+    });
+  }
+
+  /** Stage 16 — download the current weights as a .pt file. */
+  onSaveWeights(): void {
+    const runId = this.currentRunId();
+    if (!runId) return;
+    const a = document.createElement('a');
+    a.href = this.api.weightsUrl(runId, projectFileName(this.projectName()).replace(/\.mlc\.json$/, ''));
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  /** Stage 16 — load a weights file (.pt) into this graph. */
+  onWeightsFile(ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    if (file.size > MAX_WEIGHTS_BYTES) {
+      this.showNotice('error', `«${file.name}» is over 64 MB — too big to load here.`);
+      return;
+    }
+    this.weightsBusy.set(true);
+    file
+      .arrayBuffer()
+      .then((buf) => {
+        this.api.uploadWeights(this.toSpec(), toBase64(buf), file.name).subscribe({
+          next: (info) => {
+            this.loadedWeights.set({ run_id: info.run_id, name: file.name, info });
+            this.trainResult.set(null);
+            this.weightsBusy.set(false);
+            this.showNotice('info', `${info.note ?? 'Weights loaded.'} Test checks them; Train continues from them.`);
+          },
+          error: (err) => {
+            this.weightsBusy.set(false);
+            this.showNotice('error', `Could not load «${file.name}»: ${this.errMsg(err)}`);
+          },
+        });
+      })
+      .catch(() => {
+        this.weightsBusy.set(false);
+        this.showNotice('error', `Could not read «${file.name}».`);
+      });
+  }
+
+  /** Stop starting from the loaded weights (the next Train starts fresh). */
+  clearLoadedWeights(): void {
+    this.loadedWeights.set(null);
   }
 
   /** Stage 15 — the "Check on new data" picker. */
@@ -949,6 +1072,7 @@ export class EditorPage {
           if (e.val_acc != null) this.liveValAcc.update((a) => [...a, e.val_acc as number]);
         } else if (e.type === 'done' && e.result) {
           this.trainResult.set(e.result);
+          if (e.result.run_id) this.loadedWeights.set(null); // the loaded weights went into this run
           this.busy.set(false);
         } else if (e.type === 'error') {
           this.runError.set(e.detail ?? 'Training failed');
@@ -1468,6 +1592,11 @@ export class EditorPage {
     this.customRows.set(Array.isArray(t.custom_rows) ? t.custom_rows : []);
     const vf = num(t.val_fraction, DEFAULT_VAL_FRACTION);
     this.valFraction.set(vf >= 0 && vf <= 0.5 ? vf : DEFAULT_VAL_FRACTION);
+    const tf = num(t.test_fraction, DEFAULT_TEST_FRACTION);
+    this.testFraction.set(tf >= 0 && tf <= 0.5 ? tf : DEFAULT_TEST_FRACTION);
+    this.loadedWeights.set(null);
+    this.testResult.set(null);
+    this.testError.set(null);
     this.saveCheckpoint.set(t.checkpoint === true);
     this.resumeCheckpoint.set(t.resume === true);
     this.device.set(t.device === 'cuda' || t.device === 'auto' ? t.device : 'cpu');

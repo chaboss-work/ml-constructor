@@ -17,10 +17,13 @@ modules — layers first, in topological order, then the connections' own module
 
 from __future__ import annotations
 
+import threading
 from collections import deque
 from dataclasses import dataclass, field
 
 import torch
+from torch.overrides import TorchFunctionMode
+from torch.utils._device import _device_constructors
 
 from .blocks import GraphModule
 from .connections import AUTO, Resolved, resolve_merge, resolve_single
@@ -183,6 +186,35 @@ def plan_graph(spec: GraphSpec, tolerant: bool = False) -> GraphPlan:
     return plan
 
 
+#: Meta-device builds run one at a time (a second guard, see _MetaBuild).
+META_LOCK = threading.RLock()
+
+
+class _MetaBuild(TorchFunctionMode):
+    """Build on the meta device without running a single meta kernel.
+
+    Factories (torch.empty & co.) make meta tensors, as ``with torch.device("meta")``
+    does; but weight initialization — torch.nn.init and any in-place op on a meta
+    tensor — is skipped: without values it does nothing, and with a CPU-only torch
+    (or CUDA hidden) it runs through torch's Python-implemented meta kernels, which
+    crashed the server (a native access violation) when another request was using
+    torch at the same moment. The mode is thread-local: other requests are untouched."""
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        if getattr(func, "__module__", "") == "torch.nn.init":  # kaiming_uniform_, normal_, xavier_… : skip
+            return args[0] if args else kwargs.get("tensor")
+        name = getattr(func, "__name__", "")
+        on_meta = bool(args) and isinstance(args[0], torch.Tensor) and args[0].is_meta
+        if on_meta and name.endswith("_") and not name.endswith("__"):  # uniform_, fill_, zero_, copy_, … : skip
+            return args[0]
+        if on_meta and name == "__setitem__":  # filling a buffer slice (positional tables): nothing to fill
+            return None
+        if func in _device_constructors() and kwargs.get("device") is None:
+            kwargs["device"] = torch.device("meta")
+        return func(*args, **kwargs)
+
+
 def build_model(spec: GraphSpec, seed: int | None = None, meta: bool = False) -> tuple[GraphModule, BuildResult]:
     """Assemble the graph into a model plus its per-layer summary.
 
@@ -195,7 +227,7 @@ def build_model(spec: GraphSpec, seed: int | None = None, meta: bool = False) ->
     is real, but no weight takes any memory — how a 671-billion-parameter model is
     sized on a laptop. Such a model can be inspected, not run."""
     if meta:
-        with torch.device("meta"):
+        with META_LOCK, _MetaBuild():
             return _build_model(spec)
     if seed is None:
         return _build_model(spec)

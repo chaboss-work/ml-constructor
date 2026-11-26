@@ -24,6 +24,8 @@ import json
 import os
 import re
 import secrets
+import threading
+import time
 from datetime import datetime, timezone
 
 import torch
@@ -40,6 +42,10 @@ MAX_WEIGHTS_BYTES = 64 * 2**20
 #: Runs kept on the server; older ones are removed as new ones arrive.
 MAX_RUNS = 30
 _RUN_ID = re.compile(r"^[0-9a-f]{16}$")
+# Runs are pruned oldest first by their file time; two saved within one clock tick would
+# tie, so every new run is stamped strictly later than the one before (within a process).
+_LAST_STAMP_NS = 0
+_STAMP_LOCK = threading.Lock()
 _DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 
 
@@ -201,6 +207,11 @@ def save_run(raw: bytes) -> str:
     with open(tmp, "wb") as f:
         f.write(raw)
     os.replace(tmp, path)
+    global _LAST_STAMP_NS
+    with _STAMP_LOCK:
+        stamp = max(time.time_ns(), _LAST_STAMP_NS + 1000)
+        _LAST_STAMP_NS = stamp
+    os.utime(path, ns=(stamp, stamp))
     _prune(d, keep=run_id)
     return run_id
 
@@ -213,7 +224,7 @@ def load_run(run_id: str) -> dict:
 
 def _prune(d: str, keep: str) -> None:
     files = [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".pt") and _RUN_ID.match(f[:-3])]
-    files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+    files.sort(key=lambda p: os.stat(p).st_mtime_ns, reverse=True)
     for old in files[MAX_RUNS:]:
         if os.path.basename(old)[:-3] != keep:
             try:

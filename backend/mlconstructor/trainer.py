@@ -400,7 +400,9 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
     so these are exactly the first rows the model will be trained on."""
     model, build = build_model(spec, meta=True)  # only the shapes are needed: no weights made (Stage 17)
     in_shape = _input_shape(build)
-    num_classes = _infer_num_classes(model, in_shape)
+    # the class count is the Output's last dimension — no forward pass on meta tensors needed
+    out = next((s for s in reversed(build.layers) if s.type == "Output" and s.out_shape), None)
+    num_classes = int(out.out_shape[-1]) if out else _infer_num_classes(build_model(spec)[0], in_shape)
     device = torch.device("cpu")
 
     ds = get_dataset(spec.train.dataset)

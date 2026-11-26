@@ -33,9 +33,19 @@ import torch
 import torch.nn as nn
 
 from .builder import build_model
-from .datasets import canonical_dataset_id, get_dataset, make_dataset, split_parts
-from .schema import DataPreview, DataSampleRow, GraphSpec, TestResult, TrainResult, TrainSpec, WeightsInfo
+from .datasets import canonical_dataset_id, get_dataset, make_rows, split_rows, text_stats
+from .schema import (
+    DataPreview,
+    DataSampleRow,
+    GenerateResult,
+    GraphSpec,
+    TestResult,
+    TrainResult,
+    TrainSpec,
+    WeightsInfo,
+)
 from .shapes import Shape, ShapeError, numel
+from .text import UNKNOWN, generate_text, text_vocab
 from .weights import arch_key, data_key, fit_state_dict, load_run, read_weights, save_run, weights_bytes
 
 _PREVIEW_MAX_VALUES = 12  # feature values shown per sample row before truncating
@@ -111,6 +121,20 @@ def _split_warnings(spec: TrainSpec, n_rows: int, n_val: int, n_test: int, y: to
     return out
 
 
+def _text_warnings(spec: TrainSpec, num_classes: int) -> list[str]:
+    """Stage 18 — "Your text" with more characters than the network scores."""
+    if canonical_dataset_id(spec.dataset) != "text" or not spec.text:
+        return []
+    distinct = len(set(spec.text))
+    if distinct <= num_classes:
+        return []
+    return [
+        f"Your text uses {distinct} different characters, but the network scores {num_classes}: the "
+        f"{distinct - num_classes + 1} rarest read as one \"unknown\" character. Press \"Fit vocabulary\" in Data to "
+        "give every character a token of its own."
+    ]
+
+
 def _fit_verdict(train_acc: float, val_acc: float | None, n_val: int) -> tuple[str, str | None]:
     """Training vs validation accuracy in plain words (Stage 15)."""
     if val_acc is None or n_val < _SMALL_VAL:  # nothing (or too little) held out — the warnings say why
@@ -141,13 +165,27 @@ def _infer_num_classes(model: nn.Module, in_shape: Shape) -> int:
         probe = model(torch.zeros(2, *in_shape, device=dev))  # batch=2 keeps BatchNorm happy
     if was_training:
         model.train()
-    if probe.dim() != 2:
+    if probe.dim() not in (2, 3):
         raise ShapeError(
             f"network output must be 2-D (batch, classes) for the v1 classification "
             f"task; got {tuple(probe.shape)} — add a Flatten + Linear so the last "
             f"layer outputs class logits"
         )
-    return int(probe.shape[1])
+    return int(probe.shape[-1])  # Stage 18: (batch, L, vocab) scores every position
+
+
+def _fit_labels(out: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Stage 18 — match the scores to the labels: a language model scoring every
+    position learns from every next token; one scoring only the last position (or a
+    classifier) from the last label."""
+    if out.dim() == 3:
+        if y.dim() != 2:
+            raise ValueError(
+                "the network scores every position, but this dataset gives one label per row: switch the "
+                "Output's \"Every position\" off, or train on Your text"
+            )
+        return out.reshape(-1, out.shape[-1]), y.reshape(-1)
+    return out, (y[:, -1] if y.dim() == 2 else y)
 
 
 def _input_shape(build) -> Shape:
@@ -201,12 +239,13 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
 
     in_shape = tuple(int(d) for d in in_shape)
     num_classes = _infer_num_classes(model, in_shape)
-    X, y = make_dataset(spec.dataset, in_shape, num_classes, spec, device)
+    X, y, groups = make_rows(spec.dataset, in_shape, num_classes, spec, device)
 
-    # Stages 15–16 — hold rows out for validation and for the final test; train on the rest only.
-    tr_idx, va_idx, te_idx = split_parts(y, spec.val_fraction, spec.test_fraction, spec.seed)
+    # Stages 15–16 — hold rows out for validation and for the final test; train on the rest only
+    # (Stage 18: rows that overlap, like the windows of a text, are split block by block).
+    tr_idx, va_idx, te_idx = split_rows(y, groups, spec.val_fraction, spec.test_fraction, spec.seed)
     n_rows, n_val, n_test = int(X.shape[0]), int(va_idx.numel()), int(te_idx.numel())
-    warnings = _split_warnings(spec, n_rows, n_val, n_test, y)
+    warnings = _split_warnings(spec, n_rows, n_val, n_test, y) + _text_warnings(spec, num_classes)
     Xv = yv = None
     if n_val or n_test:
         if n_val:
@@ -244,9 +283,9 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
         was_training = model.training
         model.eval()
         with torch.no_grad():
-            logits = model(Xs)
-            loss_v = float(loss_fn(logits, ys))
-            acc_v = float((logits.argmax(1) == ys).float().mean())
+            logits, target = _fit_labels(model(Xs), ys)
+            loss_v = float(loss_fn(logits, target))
+            acc_v = float((logits.argmax(-1) == target).float().mean())
         if was_training:
             model.train()
         return loss_v, acc_v
@@ -270,7 +309,7 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
         for i in range(0, n, bs):
             idx = perm[i : i + bs]
             opt.zero_grad()
-            loss = loss_fn(model(X[idx]), y[idx])
+            loss = loss_fn(*_fit_labels(model(X[idx]), y[idx]))
             loss.backward()
             opt.step()
             lv = float(loss.detach())
@@ -369,10 +408,12 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
     # Draw from the SAME generator, seed and sample count as training (the same
     # spec), so these are exactly the first rows of the training data — the noise
     # is drawn after the labels, so a smaller draw would NOT line up.
-    X, y = ds.make(in_shape, num_classes, spec.train, device)
+    X, y, groups = make_rows(spec.train.dataset, in_shape, num_classes, spec.train, device)
     k = min(k, X.shape[0])
     # Stages 15–16 — the same split as training: mark the validation and test rows.
-    tr_idx, va_idx, te_idx = split_parts(y, spec.train.val_fraction, spec.train.test_fraction, spec.train.seed)
+    tr_idx, va_idx, te_idx = split_rows(y, groups, spec.train.val_fraction, spec.train.test_fraction, spec.train.seed)
+    is_text = ds.id == "text"
+    vocab = text_vocab(spec.train.text or "", num_classes) if is_text else None
     held = torch.zeros(int(X.shape[0]), dtype=torch.bool)
     held[va_idx] = True
     tested = torch.zeros(int(X.shape[0]), dtype=torch.bool)
@@ -384,11 +425,13 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
         vals = flat[i].tolist()
         out_rows.append(
             DataSampleRow(
-                label=int(y[i]),
+                label=int(y[i]) if y.dim() == 1 else int(y[i, -1]),
                 values=[round(float(v), 3) for v in vals[:_PREVIEW_MAX_VALUES]],
                 truncated=len(vals) > _PREVIEW_MAX_VALUES,
                 total=len(vals),
                 split="test" if bool(tested[i]) else ("validation" if bool(held[i]) else "train"),
+                text="".join(vocab[int(v)] for v in X[i].tolist()) if vocab else None,
+                label_text=vocab[int(y[i] if y.dim() == 1 else y[i, -1])] if vocab else None,
             )
         )
 
@@ -405,6 +448,7 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
         train_samples=int(tr_idx.numel()),
         val_samples=int(va_idx.numel()),
         test_samples=int(te_idx.numel()),
+        **(text_stats(spec.train, num_classes) if is_text else {}),
     )
 
 
@@ -498,8 +542,8 @@ def test_run(spec: GraphSpec, run_id: str) -> TestResult:
     model.eval()
     num_classes = _infer_num_classes(model, in_shape)
     t = spec.train
-    X, y = make_dataset(t.dataset, in_shape, num_classes, t, torch.device("cpu"))
-    tr, va, te = split_parts(y, t.val_fraction, t.test_fraction, t.seed)
+    X, y, groups = make_rows(t.dataset, in_shape, num_classes, t, torch.device("cpu"))
+    tr, va, te = split_rows(y, groups, t.val_fraction, t.test_fraction, t.seed)
     if not te.numel():
         raise ValueError(
             "there is no test part to measure: set Final test to 10 % or more and train again (the test rows "
@@ -511,8 +555,8 @@ def test_run(spec: GraphSpec, run_id: str) -> TestResult:
 
     def evaluate(idx: torch.Tensor) -> tuple[float, float]:
         with torch.no_grad():
-            logits = model(X[idx])
-            return float(loss_fn(logits, y[idx])), float((logits.argmax(1) == y[idx]).float().mean())
+            logits, target = _fit_labels(model(X[idx]), y[idx])
+            return float(loss_fn(logits, target)), float((logits.argmax(-1) == target).float().mean())
 
     test_loss, test_acc = evaluate(te)
     val_acc = evaluate(va)[1] if va.numel() else None
@@ -567,3 +611,35 @@ def adopt_weights(spec: GraphSpec, raw: bytes) -> WeightsInfo:
         metrics=payload["metrics"],
         note=note,
     )
+
+
+def generate(spec: GraphSpec, run_id: str, prompt: str = "", length: int = 200, temperature: float = 0.8,
+             seed: int = 0) -> GenerateResult:
+    """Stage 18 — continue a prompt with the weights of a run trained on "Your text":
+    the model reads the last L characters, scores every character of the text's
+    vocabulary, and one is drawn; repeat. An empty prompt starts from the text's
+    first characters."""
+    payload = load_run(run_id)  # a stale id is "not found", whatever the graph
+    t = spec.train
+    if canonical_dataset_id(t.dataset) != "text" or not (t.text or "").strip():
+        raise ValueError(
+            "Generate continues text: choose \"Your text\" as the dataset, add a text in Data, train, then generate"
+        )
+    check_trainable(spec, "run")
+    model, build = build_model(spec)
+    in_shape = _input_shape(build)
+    if len(in_shape) != 1:
+        raise ValueError("Generate needs a language model: Input [L] -> Embedding -> ... -> LM head")
+    mapped, _how = fit_state_dict(model, payload["state_dict"])
+    model.load_state_dict(mapped)
+    model.eval()
+    num_classes = _infer_num_classes(model, in_shape)
+    vocab = text_vocab(t.text, num_classes)
+    context = int(in_shape[0])
+    if not prompt:
+        prompt = t.text[:context]
+    known = set(vocab)
+    unknown = sum(1 for c in prompt if c not in known)
+    text = generate_text(model, vocab, context, prompt, int(length), float(temperature), int(seed))
+    return GenerateResult(run_id=run_id, prompt=prompt, text=text.replace(UNKNOWN, "\ufffd"), unknown=unknown,
+                          vocab_size=len(vocab), context=context)

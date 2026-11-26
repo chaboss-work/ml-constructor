@@ -18,7 +18,8 @@ from . import layers  # noqa: F401  (import-time side effect: registers all laye
 from .adapters import apply_adapter, suggest_for_graph
 from .architectures import get_architecture, list_architectures
 from .builder import build_model, connection_options
-from .datasets import list_datasets, make_dataset, split_indices, split_parts
+from .datasets import list_datasets, make_dataset, make_rows, split_indices, split_parts, split_rows
+from .example_text import EXAMPLE_TEXT
 from .export import generate_pytorch
 from .projects import (
     create_project,
@@ -37,6 +38,7 @@ from .trainer import (
     check_trainable,
     count_params,
     data_preview,
+    generate,
     save_trained,
     start_from_run,
     test_run,
@@ -48,7 +50,7 @@ from .weights import MAX_WEIGHTS_BYTES, RunNotFound, read_weights, run_path, wei
 __version__ = "0.1.0"
 #: The latest stage whose HTTP contract this backend serves (``GET /health`` reports
 #: it), so the editor can tell when the server runs an older backend than the page.
-API_LEVEL = 17
+API_LEVEL = 18
 
 __all__ = [
     "build_model",
@@ -66,6 +68,10 @@ __all__ = [
     "make_dataset",
     "split_indices",
     "split_parts",
+    "split_rows",
+    "make_rows",
+    "generate",
+    "EXAMPLE_TEXT",
     "check_trainable",
     "count_params",
     "MAX_TRAIN_PARAMS",

@@ -62,6 +62,9 @@ class TrainSpec(BaseModel):
     #: Stage 16 — start from the weights of an earlier run (a finished training or
     #: an uploaded weights file, see ``run_id``) instead of fresh ones.
     init_run: str | None = None
+    #: Stage 18 — the text for the "text" dataset ("Your text"): a language model
+    #: learns to continue it, one character at a time.
+    text: str | None = Field(default=None, max_length=1_000_000)
 
     @model_validator(mode="after")
     def _leave_rows_to_train(self) -> "TrainSpec":
@@ -289,6 +292,30 @@ class TestResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class GenerateRequest(BaseModel):
+    """Stage 18 — continue a prompt with a run's weights, trained on "Your text"."""
+
+    spec: GraphSpec
+    run_id: str
+    prompt: str = Field(default="", max_length=4000)
+    length: int = Field(default=200, ge=1, le=2000)
+    temperature: float = Field(default=0.8, ge=0.0, le=5.0)
+    seed: int = 0
+
+
+class GenerateResult(BaseModel):
+    """The continuation of a prompt, written one character at a time."""
+
+    ok: bool = True
+    run_id: str
+    prompt: str
+    text: str
+    #: prompt characters the vocabulary does not know (read as "unknown")
+    unknown: int = 0
+    vocab_size: int
+    context: int
+
+
 class WeightsUpload(BaseModel):
     """A weights file (``.pt``, base64) to load into this graph."""
 
@@ -387,6 +414,9 @@ class DataSampleRow(BaseModel):
     #: Stage 15 — which part the row belongs to: "train", "validation" (held out)
     #: or, since Stage 16, "test" (kept for the final test).
     split: str = "train"
+    #: Stage 18 — for "Your text": the window as text, and the character that follows.
+    text: str | None = None
+    label_text: str | None = None
 
 
 class DataPreview(BaseModel):
@@ -407,6 +437,11 @@ class DataPreview(BaseModel):
     train_samples: int | None = None
     val_samples: int = 0
     test_samples: int = 0
+    #: Stage 18 — for "Your text": its length, its different characters, and how many
+    #: tokens the network scores (rarer characters share an "unknown" one beyond that).
+    text_chars: int | None = None
+    distinct_chars: int | None = None
+    vocab_size: int | None = None
 
 
 # --------------------------------------------------------------------------- #

@@ -31,6 +31,7 @@ import torch
 
 from .schema import DatasetInfo, TrainSpec
 from .shapes import Shape, numel
+from .text import text_vocab, text_windows
 
 _MAX_CUSTOM_ROWS = 10000  # bound the payload / memory for pasted-or-uploaded data
 
@@ -115,6 +116,34 @@ def _tokens(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple
     position = torch.arange(length + 1)
     seq = pattern.gather(1, position[None, :] % period[:, None])
     return seq[:, :length].float().to(device), seq[:, length].to(device)
+
+
+def _text(in_shape: Shape, num_classes: int, spec: TrainSpec, device):
+    """Your text (Stage 18): a language model learns to continue it.
+
+    Rows are windows of ``L`` characters (token ids), labelled with the character
+    that follows; the vocabulary is the text's own characters (as many as the
+    network's output scores). Rows carry the text block they come from, so the
+    train / validation / test split keeps every block whole — no held-out row has a
+    near-copy among the training rows.
+    """
+    text = spec.text or ""
+    if len(in_shape) != 1:
+        raise ValueError(
+            f"'Your text' needs an Input of token ids, shape [L]; your graph's input is {list(in_shape)}. "
+            "Take a language model from the library (e.g. Your GPT, or a flagship's mini version)"
+        )
+    length = int(in_shape[0])
+    if not text.strip():
+        raise ValueError("'Your text' has no text yet: open Data, paste or upload a text (or use the example), Apply")
+    need = 8 * (length + 1)
+    if len(text) < need:
+        raise ValueError(
+            f"the text is too short: {len(text):,} characters, and windows of {length} need at least {need:,}. "
+            "Paste more text, or make the Input shorter"
+        )
+    X, y, groups = text_windows(text, length, num_classes, int(spec.samples), int(spec.seed))
+    return X.to(device), y.to(device), groups
 
 
 def _custom(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple["torch.Tensor", "torch.Tensor"]:
@@ -267,6 +296,14 @@ _DATASETS: list[DatasetDef] = [
         _tokens,
     ),
     DatasetDef(
+        "text",
+        "Your text",
+        "Teach a language model your own text: it learns to continue it, one character at a time, "
+        "then writes from your prompt. Needs Input [L], an Embedding and an LM head.",
+        _text,
+        kind="custom",
+    ),
+    DatasetDef(
         "custom",
         "Your data",
         "Train on rows you paste or upload: each row is its features, then a "
@@ -324,7 +361,23 @@ def make_dataset(
 ) -> tuple["torch.Tensor", "torch.Tensor"]:
     """Generate ``(X, y)`` for the named dataset — the single entry point the
     trainer and the preview both call, so they can never drift apart."""
-    return get_dataset(name).make(in_shape, num_classes, spec, device)
+    return make_rows(name, in_shape, num_classes, spec, device)[:2]
+
+
+def make_rows(name: str, in_shape: Shape, num_classes: int, spec: TrainSpec, device):
+    """``(X, y, groups)``: the rows, and — for a dataset whose rows overlap, like the
+    windows of a text (Stage 18) — the group each row belongs to (else None)."""
+    out = get_dataset(name).make(in_shape, num_classes, spec, device)
+    return (out[0], out[1], out[2] if len(out) > 2 else None)
+
+
+def text_stats(spec: TrainSpec, num_classes: int) -> dict:
+    """Stage 18 — what the "Your text" dataset makes of the text: its length, its
+    different characters and how many of them get a token of their own."""
+    text = spec.text or ""
+    distinct = len(set(text))
+    return {"text_chars": len(text), "distinct_chars": distinct,
+            "vocab_size": len(text_vocab(text, num_classes)) if text else 0}
 
 
 def split_parts(
@@ -389,6 +442,22 @@ def split_parts(
     train = rest.clone()
     train[val] = False
     return every[train], val, test
+
+
+def split_rows(y, groups, val_fraction, test_fraction, seed):
+    """Split rows into train / validation / test (Stage 18): row by row as
+    :func:`split_parts` does, or — when the rows come in groups (overlapping windows
+    of one block of a text) — whole groups at a time, so no part holds a neighbour of
+    another part's rows. Self-contained like split_parts (the export embeds it)."""
+    if groups is None:
+        return split_parts(y, val_fraction, test_fraction, seed)
+    groups = groups.detach().to("cpu").long().reshape(-1)
+    ids, member = torch.unique(groups, return_inverse=True)
+    g_train, g_val, g_test = split_parts(torch.zeros(len(ids), dtype=torch.long), val_fraction, test_fraction, seed)
+    part = torch.zeros(len(ids), dtype=torch.long)
+    part[g_val], part[g_test] = 1, 2
+    rows = torch.arange(len(groups))
+    return rows[part[member] == 0], rows[part[member] == 1], rows[part[member] == 2]
 
 
 def split_indices(y: torch.Tensor, val_fraction: float, seed: int) -> tuple[torch.Tensor, torch.Tensor]:

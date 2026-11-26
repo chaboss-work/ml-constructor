@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .example_text import EXAMPLE_TEXT
 from .flagships import FLAGSHIPS, hf_url, mini_spec, real_spec
 from .schema import ArchitectureInfo, GraphSpec
 
@@ -177,6 +178,29 @@ def _gpt() -> Spec:
 
 
 # --------------------------------------------------------------------------- #
+# Your GPT (Stage 18) — a small Llama-style model you teach your own text
+# --------------------------------------------------------------------------- #
+def _your_gpt() -> Spec:
+    return {
+        "nodes": [
+            {"id": "in", "type": "Input", "params": {"shape": [64]}},
+            {"id": "emb", "type": "Embedding", "params": {"num_embeddings": 96, "embedding_dim": 96}},
+            {"id": "layers", "type": "Repeat", "params": {"repeat": 3, "layers": [
+                {"type": "GQAttention", "params": {"heads": 4, "kv_heads": 2, "head_dim": 24, "rope_theta": 10000.0}},
+                {"type": "GatedMLP", "params": {"hidden": 256}},
+            ]}},
+            {"id": "norm", "type": "RMSNorm", "params": {}},
+            {"id": "head", "type": "LMHead", "params": {"vocab": 96}},
+            # every position: the next character is guessed at all 64 places at once, as a GPT trains
+            {"id": "out", "type": "Output", "params": {"per_token": True}},
+        ],
+        "edges": [["in", "emb"], ["emb", "layers"], ["layers", "norm"], ["norm", "head"], ["head", "out"]],
+        "train": {"dataset": "text", "text": EXAMPLE_TEXT, "epochs": 6, "lr": 0.003, "batch_size": 64,
+                  "samples": 12000, "seed": 0},
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Registry
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -204,6 +228,9 @@ _ARCHITECTURES: list[_Arch] = [
           ("conv", "residual", "skip", "image"), _resnet),
     _Arch("gpt", "GPT (tiny)", "Transformer: embedding + positional encoding + N encoder blocks (Repeat).", "sequence",
           ("transformer", "attention", "embedding", "repeat"), _gpt),
+    _Arch("your_gpt", "Your GPT (your text)", "A small GPT you teach your own text: put it in Data (Your text), "
+          "train, then let it write. One character = one token; it comes with an example text.", "language",
+          ("llm", "gpt", "text", "generate", "gqa", "rope", "swiglu"), _your_gpt),
 ]
 
 

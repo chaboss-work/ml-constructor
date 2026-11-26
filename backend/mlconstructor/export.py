@@ -23,7 +23,8 @@ from . import llm_modules as LLM
 from .blocks import Block
 from .builder import build_model
 from .connections import ImageToSeq, SeqPool
-from .datasets import split_parts
+from . import text as TEXTMOD
+from .datasets import split_parts, split_rows
 from .layers.attention import _PositionalEncoding, _SelfAttention
 from .layers.sequence import _EmbeddingModule, _RecurrentModule
 from .schema import GraphSpec
@@ -270,17 +271,26 @@ def load_weights(model, path="weights.pt"):
 _TRAIN_BODY = '''
 def _num_classes(model):
     with torch.no_grad():
-        return int(model(torch.zeros(2, *IN_SHAPE)).shape[1])
+        return int(model(torch.zeros(2, *IN_SHAPE)).shape[-1])
+
+
+def _fit(out, target):
+    \"\"\"Scores at every position learn from every next token; others from the last label.\"\"\"
+    if out.dim() == 3:
+        return out.reshape(-1, out.shape[-1]), target.reshape(-1)
+    return out, (target[:, -1] if target.dim() == 2 else target)
 
 
 def main():
     torch.manual_seed(SEED)
     model = Model()
     num_classes = _num_classes(model)
-    X, y = make_data(SAMPLES, IN_SHAPE, num_classes, seed=SEED)
+    data = make_data(SAMPLES, IN_SHAPE, num_classes, seed=SEED)
+    X, y, groups = data[0], data[1], (data[2] if len(data) > 2 else None)
     # Split the rows exactly as the app does: train on one part, watch the validation
-    # part after every epoch, keep the test part for one final check at the end.
-    train_idx, val_idx, test_idx = split_parts(y, VAL_FRACTION, TEST_FRACTION, SEED)
+    # part after every epoch, keep the test part for one final check at the end
+    # (the windows of a text are split block by block).
+    train_idx, val_idx, test_idx = split_rows(y, groups, VAL_FRACTION, TEST_FRACTION, SEED)
     Xv, yv, Xt, yt = X[val_idx], y[val_idx], X[test_idx], y[test_idx]
     X, y = X[train_idx], y[train_idx]
     opt = OPTIMIZER(model.parameters(), lr=LR)
@@ -293,19 +303,25 @@ def main():
         for i in range(0, n, bs):
             idx = perm[i : i + bs]
             opt.zero_grad()
-            loss = loss_fn(model(X[idx]), y[idx])
+            loss = loss_fn(*_fit(model(X[idx]), y[idx]))
             loss.backward()
             opt.step()
         model.eval()
         with torch.no_grad():
-            acc = (model(X).argmax(1) == y).float().mean().item()
-            val = f"  val_acc {(model(Xv).argmax(1) == yv).float().mean().item():.3f}" if len(yv) else ""
+            o, t = _fit(model(X), y)
+            acc = (o.argmax(-1) == t).float().mean().item()
+            if len(yv):
+                o, t = _fit(model(Xv), yv)
+                val = f"  val_acc {(o.argmax(-1) == t).float().mean().item():.3f}"
+            else:
+                val = ""
         model.train()
         print(f"epoch {epoch + 1}/{EPOCHS}  loss {loss.item():.3f}  train_acc {acc:.3f}{val}")
     if len(yt):
         model.eval()
         with torch.no_grad():
-            test_acc = (model(Xt).argmax(1) == yt).float().mean().item()
+            o, t = _fit(model(Xt), yt)
+            test_acc = (o.argmax(-1) == t).float().mean().item()
         print(f"final test on {len(yt)} rows used for nothing else: test_acc {test_acc:.3f}")
     return model
 
@@ -328,11 +344,41 @@ def export_model(model, onnx=True):
             print("exported -> model.onnx")
         except Exception as exc:
             print(f"ONNX export skipped: {exc}")
+'''
 
-
+_MAIN = '''
 if __name__ == "__main__":
     export_model(main())
 '''
+
+# Stage 18 — your text: the rows come from the text; after training the model writes.
+_TEXT_DATA_SRC = '''
+def make_data(n, in_shape, num_classes, seed=0):
+    return text_windows(TEXT, in_shape[0], num_classes, n, seed)
+'''
+
+_TEXT_MAIN = '''
+def write(model, prompt="", steps=200, temperature=0.8):
+    \"\"\"Continue a prompt with the trained model, one character at a time.\"\"\"
+    vocab = text_vocab(TEXT, _num_classes(model))
+    return generate_text(model, vocab, IN_SHAPE[0], prompt or TEXT[: IN_SHAPE[0]], steps, temperature)
+
+
+if __name__ == "__main__":
+    model = main()
+    export_model(model)
+    print(write(model))
+'''
+#: Longer texts are read from a file next to model.py instead of being embedded.
+_MAX_EMBEDDED_TEXT = 100_000
+
+
+def _text_src() -> str:
+    parts = ['UNKNOWN = "\\ufffd"']
+    for fn in (TEXTMOD.text_vocab, TEXTMOD.encode_text, TEXTMOD.decode_text, TEXTMOD.text_block,
+               TEXTMOD.text_windows, TEXTMOD.generate_text):
+        parts.append(inspect.getsource(fn).strip("\n"))
+    return "\n\n\n".join(parts)
 
 
 def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
@@ -404,6 +450,8 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     out.append("import torch.nn as nn")
     if "LLM" in needs:
         out.append("import torch.nn.functional as F")
+    if include_training and spec.train.dataset == "text" and (spec.train.text or "").strip():
+        out.insert(out.index("import torch"), "from collections import Counter\n")
     if "PositionalEncoding" in needs:
         out.append("import math")
     out.append("")
@@ -433,7 +481,16 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
         ds = get_dataset(spec.train.dataset)
         opt = "torch.optim.Adam" if spec.train.optimizer == "adam" else "torch.optim.SGD"
         rows = spec.train.custom_rows or []
-        if ds.id == "custom" and rows:
+        text = spec.train.text or ""
+        if ds.id == "text" and text.strip():  # Stage 18
+            comment = "# ---- training on your text: one character = one token ----"
+            source = (
+                "TEXT = " + repr(text)
+                if len(text) <= _MAX_EMBEDDED_TEXT else
+                'TEXT = open("text.txt", encoding="utf-8").read()  # save your text as text.txt next to this file'
+            )
+            data_block = source + "\n\n\n" + _text_src() + "\n\n\n" + _TEXT_DATA_SRC.strip("\n")
+        elif ds.id == "custom" and rows:
             comment = "# ---- training on your custom data ----"
             data_block = "CUSTOM_ROWS = " + repr(rows) + "\n\n\n" + _CUSTOM_DATA_SRC.strip("\n")
         elif ds.id == "custom":
@@ -463,6 +520,12 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
         out.append(inspect.getsource(split_parts).strip("\n"))  # the app's own split, verbatim
         out.append("")
         out.append("")
+        out.append(inspect.getsource(split_rows).strip("\n"))
+        out.append("")
+        out.append("")
         out.append(_TRAIN_BODY.strip("\n"))
+        out.append("")
+        out.append("")
+        out.append((_TEXT_MAIN if ds.id == "text" and text.strip() else _MAIN).strip("\n"))
 
     return "\n".join(out) + "\n"

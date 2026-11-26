@@ -79,6 +79,8 @@ def data_key(spec: TrainSpec, in_shape: Shape, num_classes: int) -> str:
             if dataset == "custom" else None
         ),
     }
+    if dataset == "text":  # Stage 18 — "Your text": the very same text (other datasets keep their old keys)
+        payload["text"] = hashlib.sha1((spec.text or "").encode("utf-8")).hexdigest()
     return hashlib.sha1(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
 
 

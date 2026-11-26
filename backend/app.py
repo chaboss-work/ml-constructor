@@ -85,13 +85,11 @@ def _unprocessable(exc: Exception) -> JSONResponse:
 
 @app.get("/health")
 def health() -> dict:
-    import torch  # is_available() queries the driver; it does not open a CUDA context
-
     return {
         "status": "ok",
         "version": mlc.__version__,
         "layers": len(mlc.LAYER_REGISTRY),
-        "cuda_available": bool(torch.cuda.is_available()),
+        "cuda_available": mlc.cuda_available(),  # no when the GPUs were hidden at start (see mlconstructor.gpu)
         "server_projects": mlc.server_projects_enabled(),
         "api": mlc.API_LEVEL,
     }

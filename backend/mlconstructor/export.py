@@ -15,11 +15,14 @@ same parameters and the same output shape as the one trained in the app.
 
 from __future__ import annotations
 
+import inspect
+
 import torch.nn as nn
 
 from .blocks import Block
 from .builder import build_model
 from .connections import ImageToSeq, SeqPool
+from .datasets import split_indices
 from .layers.attention import _PositionalEncoding, _SelfAttention
 from .layers.sequence import _EmbeddingModule, _RecurrentModule
 from .schema import GraphSpec
@@ -242,6 +245,10 @@ def main():
     model = Model()
     num_classes = _num_classes(model)
     X, y = make_data(SAMPLES, IN_SHAPE, num_classes, seed=SEED)
+    # Hold rows out for validation, exactly as the app does: train on the rest only.
+    train_idx, val_idx = split_indices(y, VAL_FRACTION, SEED)
+    Xv, yv = X[val_idx], y[val_idx]
+    X, y = X[train_idx], y[train_idx]
     opt = OPTIMIZER(model.parameters(), lr=LR)
     loss_fn = nn.CrossEntropyLoss()
     n = X.shape[0]
@@ -258,8 +265,9 @@ def main():
         model.eval()
         with torch.no_grad():
             acc = (model(X).argmax(1) == y).float().mean().item()
+            val = f"  val_acc {(model(Xv).argmax(1) == yv).float().mean().item():.3f}" if len(yv) else ""
         model.train()
-        print(f"epoch {epoch + 1}/{EPOCHS}  loss {loss.item():.3f}  acc {acc:.3f}")
+        print(f"epoch {epoch + 1}/{EPOCHS}  loss {loss.item():.3f}  train_acc {acc:.3f}{val}")
     return model
 
 
@@ -395,9 +403,15 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
             f"LR = {float(spec.train.lr)}",
             f"BATCH_SIZE = {int(spec.train.batch_size)}",
             f"OPTIMIZER = {opt}",
+            f"VAL_FRACTION = {float(spec.train.val_fraction)}  # share of rows held out for validation",
         ]
         out.extend(consts)
         out.append(data_block)
+        out.append("")
+        out.append("")
+        out.append(inspect.getsource(split_indices).strip("\n"))  # the app's own split, verbatim
+        out.append("")
+        out.append("")
         out.append(_TRAIN_BODY.strip("\n"))
 
     return "\n".join(out) + "\n"

@@ -294,6 +294,49 @@ def make_dataset(
     return get_dataset(name).make(in_shape, num_classes, spec, device)
 
 
+def split_indices(y: torch.Tensor, val_fraction: float, seed: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Split row indices into a training part and a held-out validation part (Stage 15).
+
+    The network trains only on the first part; the second measures how it does on
+    rows it never saw. The split is deterministic for a seed, stratified (each class
+    keeps its share in both parts, by largest remainders) and safe on tiny sets: every
+    class keeps at least one row to train on, so the validation part is empty when
+    nothing can be held out that way (one row, or one row per class). Returns two
+    sorted CPU index tensors. Self-contained on purpose: the PyTorch export embeds
+    this very function, so an exported file splits exactly like the app.
+    """
+    n = int(y.shape[0])
+    every = torch.arange(n)
+    if n < 2 or not val_fraction or val_fraction <= 0:
+        return every, every[:0]
+    want = min(max(1, round(n * float(val_fraction))), n - 1)
+    g = torch.Generator().manual_seed(int(seed) + 101)  # its own stream: the data generator uses `seed`
+    labels = y.detach().to("cpu").long().reshape(-1)
+    order = torch.randperm(n, generator=g)  # a random order of the rows ...
+    order = order[torch.argsort(labels[order], stable=True)]  # ... grouped by class
+    counts = torch.unique_consecutive(labels[order], return_counts=True)[1].tolist()
+    # Each class's share of `want`, at most count - 1 so it keeps a row for training.
+    take = [min(c * want // n, c - 1) for c in counts]
+    left = want - sum(take)
+    tie = torch.randperm(len(counts), generator=g).tolist()
+    ranked = sorted(range(len(counts)), key=lambda i: (-((counts[i] * want) % n), tie[i]))
+    while left > 0:
+        progressed = False
+        for i in ranked:
+            if left > 0 and take[i] < counts[i] - 1:
+                take[i] += 1
+                left -= 1
+                progressed = True
+        if not progressed:  # every class is down to its last training row
+            break
+    is_val = torch.zeros(n, dtype=torch.bool)
+    start = 0
+    for c, k in zip(counts, take):
+        is_val[order[start : start + k]] = True
+        start += c
+    return every[~is_val], every[is_val]
+
+
 def list_datasets() -> list[DatasetInfo]:
     """The dataset catalogue for the editor's picker (``GET /datasets``)."""
     return [

@@ -10,6 +10,12 @@ the ``/data/preview`` modal always agree on what the network sees.
 The number of classes is read from the model's own output width (a dry probe
 forward), so it always matches the network the user built. Alongside the per-step
 loss curve the loop reports a per-epoch **accuracy curve** (Stage 8).
+
+Since Stage 15 a share of the rows (``val_fraction``, 20 % by default) is **held
+out**: the network trains on the rest only, and the held-out rows measure how it
+does on data it never saw — on separable synthetic sets the training accuracy
+alone is always ~100 %, which says nothing. ``val_fraction = 0`` is the original
+loop, byte for byte.
 """
 
 from __future__ import annotations
@@ -22,13 +28,67 @@ import torch
 import torch.nn as nn
 
 from .builder import build_model
-from .datasets import get_dataset, make_dataset
+from .datasets import get_dataset, make_dataset, split_indices
 from .schema import DataPreview, DataSampleRow, GraphSpec, TrainResult, TrainSpec
 from .shapes import Shape, ShapeError, numel
 
 _PREVIEW_MAX_VALUES = 12  # feature values shown per sample row before truncating
 # Checkpoints live under the gitignored data cache (Stage 11).
 _CKPT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "checkpoints")
+#: Stage 15 — below this many held-out rows each one moves validation accuracy a lot.
+_SMALL_VAL = 20
+#: Training minus validation accuracy above this reads as overfitting; validation at
+#: or above _GOOD_VAL (with a small gap) reads as "generalises".
+_OVERFIT_GAP = 0.10
+_GOOD_VAL = 0.90
+
+
+def _plural(n: int, word: str, many: str | None = None) -> str:
+    return f"{n} {word if n == 1 else (many or word + 's')}"
+
+
+def _split_warnings(spec: TrainSpec, n_rows: int, n_val: int, y: torch.Tensor) -> list[str]:
+    """What to know about the train / validation split of this run (Stage 15)."""
+    if not spec.val_fraction:
+        return [
+            "Validation is off (0 %): accuracy is measured on the rows the network trained on, so it "
+            "shows how well it memorised them, not how it does on new data."
+        ]
+    if n_val == 0:
+        classes = int(torch.unique(y).numel())
+        return [
+            f"Too few rows to hold any out for validation ({_plural(n_rows, 'row')}, "
+            f"{_plural(classes, 'class', 'classes')}; every class needs a row to train on), so accuracy is "
+            "measured on the training rows themselves. Add more rows to see how it does on new data."
+        ]
+    if n_val < _SMALL_VAL:
+        return [
+            f"Only {_plural(n_val, 'row')} held out for validation, so each one moves validation accuracy "
+            f"by {100 / n_val:.0f} %: too coarse to tell whether it generalises. Add rows for a reliable verdict."
+        ]
+    return []
+
+
+def _fit_verdict(train_acc: float, val_acc: float | None, n_val: int) -> tuple[str, str | None]:
+    """Training vs validation accuracy in plain words (Stage 15)."""
+    if val_acc is None or n_val < _SMALL_VAL:  # nothing (or too little) held out — the warnings say why
+        return "unknown", None
+    t, v = round(100 * train_acc), round(100 * val_acc)
+    if train_acc - val_acc > _OVERFIT_GAP:
+        return "overfits", (
+            f"Overfitting: {t}% on the rows it trained on, but {v}% on rows it never saw. It memorises "
+            "its training rows instead of learning the rule: try fewer epochs, a Dropout layer or more samples."
+        )
+    if val_acc >= _GOOD_VAL:
+        return "generalises", (
+            f"Generalises: {v}% on rows it never saw, close to the {t}% on its training rows. "
+            "It learned the rule, not just the rows."
+        )
+    return "underfits", (
+        f"Not learned yet: {t}% on its training rows, {v}% on new ones. More epochs, a higher learning "
+        "rate or a bigger network may help, unless the data itself mixes the classes (identical inputs "
+        "with different labels), which no network can fully separate."
+    )
 
 
 def _infer_num_classes(model: nn.Module, in_shape: Shape) -> int:
@@ -88,11 +148,12 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
     """Train, yielding progress as it happens (Stage 11 live streaming).
 
     Events: ``{"type":"start", …}`` once; ``{"type":"step", step, loss}`` per
-    optimizer step; ``{"type":"epoch", epoch, acc, loss}`` per finished epoch; and
-    finally ``{"type":"done", "result": TrainResult}``. :func:`train_model` just
-    drains this, so the streaming and plain ``/train`` paths share one loop (hence
-    one trajectory — with ``checkpoint``/``resume`` off it is the original loop,
-    byte for byte)."""
+    optimizer step; ``{"type":"epoch", epoch, acc, loss, val_acc, val_loss}`` per
+    finished epoch (``acc`` on the training rows, ``val_*`` on the held-out rows or
+    None); and finally ``{"type":"done", "result": TrainResult}``. :func:`train_model`
+    just drains this, so the streaming and plain ``/train`` paths share one loop
+    (hence one trajectory — with ``checkpoint``/``resume`` off and ``val_fraction = 0``
+    it is the original loop, byte for byte)."""
     torch.manual_seed(spec.seed)
     device = _device(spec.device)
     model = model.to(device)
@@ -100,6 +161,16 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
     in_shape = tuple(int(d) for d in in_shape)
     num_classes = _infer_num_classes(model, in_shape)
     X, y = make_dataset(spec.dataset, in_shape, num_classes, spec, device)
+
+    # Stage 15 — hold rows out for validation; the network trains on the rest only.
+    tr_idx, va_idx = split_indices(y, spec.val_fraction, spec.seed)
+    n_rows, n_val = int(X.shape[0]), int(va_idx.numel())
+    warnings = _split_warnings(spec, n_rows, n_val, y)
+    if n_val:
+        Xv, yv = X[va_idx.to(X.device)], y[va_idx.to(y.device)]
+        X, y = X[tr_idx.to(X.device)], y[tr_idx.to(y.device)]
+    else:  # nothing held out: train (and measure) on every row, exactly as before Stage 15
+        Xv = yv = None
 
     resumed = False
     if spec.resume and os.path.exists(_checkpoint_path(model)):
@@ -121,19 +192,22 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
 
     yield {
         "type": "start", "device": str(device), "resumed": resumed,
-        "num_classes": num_classes, "samples": int(n), "total_params": total_params,
+        "num_classes": num_classes, "samples": n_rows, "total_params": total_params,
+        "train_samples": int(n), "val_samples": n_val,
     }
 
-    def _full_set_accuracy() -> float:
-        """Accuracy over the whole set in eval mode (no RNG, no grads), so inserting
-        it between epochs leaves the training trajectory exactly as it was."""
+    def _evaluate(Xs: torch.Tensor, ys: torch.Tensor) -> tuple[float, float]:
+        """Loss and accuracy on a set in eval mode (no RNG, no grads), so measuring
+        between epochs leaves the training trajectory exactly as it was."""
         was_training = model.training
         model.eval()
         with torch.no_grad():
-            acc = float((model(X).argmax(1) == y).float().mean())
+            logits = model(Xs)
+            loss_v = float(loss_fn(logits, ys))
+            acc_v = float((logits.argmax(1) == ys).float().mean())
         if was_training:
             model.train()
-        return acc
+        return loss_v, acc_v
 
     def _save() -> str:
         os.makedirs(_CKPT_DIR, exist_ok=True)
@@ -142,6 +216,8 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
 
     loss_curve: list[float] = []
     acc_curve: list[float] = []
+    val_acc_curve: list[float] = []
+    val_loss_curve: list[float] = []
     step = 0
     stop = False
     best_acc = -1.0
@@ -163,29 +239,44 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
                 stop = True
                 break
         if not stop:  # a full epoch finished — record its accuracy (and maybe checkpoint)
-            acc = _full_set_accuracy()
+            acc = _evaluate(X, y)[1]
             acc_curve.append(acc)
-            yield {"type": "epoch", "epoch": epoch + 1, "acc": acc, "loss": loss_curve[-1] if loss_curve else None}
-            if spec.checkpoint and acc > best_acc:
-                best_acc = acc
+            val_loss = val_acc = None
+            if Xv is not None:
+                val_loss, val_acc = _evaluate(Xv, yv)
+                val_acc_curve.append(val_acc)
+                val_loss_curve.append(val_loss)
+            yield {
+                "type": "epoch", "epoch": epoch + 1, "acc": acc,
+                "loss": loss_curve[-1] if loss_curve else None,
+                "val_acc": val_acc, "val_loss": val_loss,
+            }
+            score = acc if val_acc is None else val_acc  # keep the weights that do best on new data
+            if spec.checkpoint and score > best_acc:
+                best_acc = score
                 ckpt_key = _save()
         if stop:
             break
 
     model.eval()
-    with torch.no_grad():
-        logits = model(X)
-        final_loss = float(loss_fn(logits, y))
-        accuracy = float((logits.argmax(1) == y).float().mean())
+    final_loss, accuracy = _evaluate(X, y)
+    final_val_loss = final_val_accuracy = None
+    if Xv is not None:
+        final_val_loss, final_val_accuracy = _evaluate(Xv, yv)
     if not acc_curve:  # step cap stopped us before any epoch completed
         acc_curve.append(accuracy)
+        if final_val_accuracy is not None:
+            val_acc_curve.append(final_val_accuracy)
+            val_loss_curve.append(final_val_loss)
     if spec.checkpoint and ckpt_key is None:  # stopped before any epoch finished — save final
         ckpt_key = _save()
     if device.type == "cuda":  # hand the shared card back: weights, data and cached blocks
         model.to("cpu")
-        del X, y, logits
+        del X, y, Xv, yv
         torch.cuda.empty_cache()
 
+    final_score = accuracy if final_val_accuracy is None else final_val_accuracy
+    fit, fit_note = _fit_verdict(accuracy, final_val_accuracy, n_val)
     result = TrainResult(
         ok=True,
         loss_curve=loss_curve,
@@ -196,8 +287,17 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
         device=str(device),
         total_params=total_params,
         checkpoint=ckpt_key,
-        best_accuracy=(best_acc if best_acc >= 0 else accuracy),
+        best_accuracy=(best_acc if best_acc >= 0 else final_score),
         resumed=resumed,
+        val_acc_curve=val_acc_curve,
+        val_loss_curve=val_loss_curve,
+        final_val_accuracy=final_val_accuracy,
+        final_val_loss=final_val_loss,
+        train_samples=int(n),
+        val_samples=n_val,
+        fit=fit,
+        fit_note=fit_note,
+        warnings=warnings,
     )
     yield {"type": "done", "result": result}
 
@@ -224,10 +324,14 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
     ds = get_dataset(spec.train.dataset)
     k = max(1, min(int(rows), 50))
     # Draw from the SAME generator, seed and sample count as training (the same
-    # spec), so these are exactly the first rows the model will be trained on — the
-    # noise is drawn after the labels, so a smaller draw would NOT line up.
+    # spec), so these are exactly the first rows of the training data — the noise
+    # is drawn after the labels, so a smaller draw would NOT line up.
     X, y = ds.make(in_shape, num_classes, spec.train, device)
     k = min(k, X.shape[0])
+    # Stage 15 — the same split as training: mark the rows held out for validation.
+    tr_idx, va_idx = split_indices(y, spec.train.val_fraction, spec.train.seed)
+    held = torch.zeros(int(X.shape[0]), dtype=torch.bool)
+    held[va_idx] = True
 
     flat = X[:k].reshape(k, -1)
     out_rows: list[DataSampleRow] = []
@@ -239,6 +343,7 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
                 values=[round(float(v), 3) for v in vals[:_PREVIEW_MAX_VALUES]],
                 truncated=len(vals) > _PREVIEW_MAX_VALUES,
                 total=len(vals),
+                split="validation" if bool(held[i]) else "train",
             )
         )
 
@@ -252,4 +357,6 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
         num_samples=int(X.shape[0]),  # actual rows (synthetic = samples; custom = your row count)
         feature_count=numel(in_shape),
         rows=out_rows,
+        train_samples=int(tr_idx.numel()),
+        val_samples=int(va_idx.numel()),
     )

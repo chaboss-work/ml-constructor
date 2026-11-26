@@ -52,6 +52,10 @@ class TrainSpec(BaseModel):
     #: Stage 12 — where to train: "cpu" (default — never touches the shared GPU),
     #: "cuda" (the GPU; a clear error if none is available) or "auto" (GPU if any).
     device: Literal["cpu", "cuda", "auto"] = "cpu"
+    #: Stage 15 — the share of rows held out for validation: the network never
+    #: trains on them, so their accuracy shows how it does on new data. 0 = off
+    #: (train and measure on every row, the pre-Stage-15 behaviour).
+    val_fraction: float = Field(default=0.2, ge=0.0, le=0.5)
 
 
 class EdgeSetting(BaseModel):
@@ -193,19 +197,39 @@ class ConnectionOptions(BaseModel):
 class TrainResult(BaseModel):
     ok: bool
     loss_curve: list[float]
-    #: Full-set accuracy after each completed epoch (Stage 8 — the accuracy curve
-    #: next to the per-step loss curve). Empty if training stopped before an epoch.
+    #: Accuracy on the training rows after each completed epoch (Stage 8 — the
+    #: accuracy curve next to the per-step loss curve; since Stage 15 the training
+    #: part only, every row when validation is off). Empty if training stopped
+    #: before an epoch.
     acc_curve: list[float] = Field(default_factory=list)
+    #: Loss and accuracy on the training rows at the end.
     final_loss: float
     final_accuracy: float
     steps: int
     device: str
     total_params: int
-    #: Stage 11 — the saved checkpoint's key (None if none saved), the best full-set
-    #: accuracy seen during training, and whether training resumed from a checkpoint.
+    #: Stage 11 — the saved checkpoint's key (None if none saved), the best accuracy
+    #: seen during training (since Stage 15: on the validation rows when there are
+    #: some — the checkpoint keeps those weights — else on the training rows), and
+    #: whether training resumed from a checkpoint.
     checkpoint: str | None = None
     best_accuracy: float | None = None
     resumed: bool = False
+    #: Stage 15 — the held-out validation part: rows the network never trains on.
+    #: Its accuracy is the honest "does it work on new data" number; the fields are
+    #: empty / None when validation is off or the set is too small to hold rows out.
+    val_acc_curve: list[float] = Field(default_factory=list)
+    val_loss_curve: list[float] = Field(default_factory=list)
+    final_val_accuracy: float | None = None
+    final_val_loss: float | None = None
+    train_samples: int | None = None
+    val_samples: int = 0
+    #: A plain-words verdict on train vs validation accuracy: "generalises",
+    #: "overfits", "underfits" or "unknown" (no validation part), and why.
+    fit: str | None = None
+    fit_note: str | None = None
+    #: Things worth knowing about this run (validation off, too few rows, …).
+    warnings: list[str] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -269,6 +293,8 @@ class DataSampleRow(BaseModel):
     values: list[float]
     truncated: bool = False
     total: int
+    #: Stage 15 — which part the row belongs to: "train" or "validation" (held out).
+    split: str = "train"
 
 
 class DataPreview(BaseModel):
@@ -284,6 +310,9 @@ class DataPreview(BaseModel):
     num_samples: int
     feature_count: int
     rows: list[DataSampleRow] = Field(default_factory=list)
+    #: Stage 15 — how the rows split: trained on vs held out for validation.
+    train_samples: int | None = None
+    val_samples: int = 0
 
 
 # --------------------------------------------------------------------------- #

@@ -40,9 +40,11 @@ from .trainer import (
     count_params,
     data_preview,
     generate,
+    run_once,
     save_trained,
     start_from_run,
     test_run,
+    train_block_reason,
     train_iter,
     train_model,
 )
@@ -51,7 +53,7 @@ from .weights import MAX_WEIGHTS_BYTES, RunNotFound, read_weights, run_path, wei
 __version__ = "0.1.0"
 #: The latest stage whose HTTP contract this backend serves (``GET /health`` reports
 #: it), so the editor can tell when the server runs an older backend than the page.
-API_LEVEL = 18
+API_LEVEL = 19
 
 __all__ = [
     "build_model",
@@ -74,6 +76,8 @@ __all__ = [
     "generate",
     "EXAMPLE_TEXT",
     "check_trainable",
+    "run_once",
+    "train_block_reason",
     "count_params",
     "MAX_TRAIN_PARAMS",
     "save_trained",

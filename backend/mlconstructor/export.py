@@ -16,9 +16,12 @@ same parameters and the same output shape as the one trained in the app.
 from __future__ import annotations
 
 import inspect
+import keyword
+import re
 
 import torch.nn as nn
 
+from . import gen_modules as GEN
 from . import llm_modules as LLM
 from .blocks import Block
 from .builder import build_model
@@ -152,6 +155,36 @@ def _llm_source() -> str:
     return src[src.index(marker) + len(marker):].strip("\n")
 
 
+#: Stage 19 — the image / 3-D / speech / vision blocks, copied verbatim from
+#: mlconstructor/gen_modules.py (everything below its marker).
+_GEN_CLASSES = (
+    GEN.TimestepEmbedding, GEN.PatchEmbed, GEN.Unpatchify, GEN.PositionEmbedding, GEN.AttentionBlock,
+    GEN.CrossAttentionBlock, GEN.MLPBlock, GEN.AdaLayerNorm, GEN.DiTBlock, GEN.DoubleStreamBlock,
+    GEN.SingleStreamBlock, GEN.UNet2DCondition, GEN.VAEEncoder, GEN.VAEDecoder, GEN.AddNoise, GEN.Similarity,
+    GEN.TriplaneTokens, GEN.TriplaneTransformer, GEN.TriplaneUpsample, GEN.TriplaneSample, GEN.Transpose,
+    GEN.SliceTokens,
+)
+
+
+def _gen_source() -> str:
+    src = inspect.getsource(GEN)
+    marker = "# --- export: begin ---"
+    return src[src.index(marker) + len(marker):].strip("\n")
+
+
+def _arg_names(names: list[str]) -> list[str]:
+    """Stage 19 — Python argument names for the model's inputs, from the Input nodes' names."""
+    out: list[str] = []
+    for i, name in enumerate(names):
+        arg = re.sub(r"[^0-9a-zA-Z]+", "_", name).strip("_").lower() or ("x" if len(names) == 1 else f"x{i + 1}")
+        if arg[0].isdigit():
+            arg = "x" + arg
+        while keyword.iskeyword(arg) or arg in out or arg in ("self", "h"):
+            arg += "_"
+        out.append(arg)
+    return out
+
+
 def _transformer_src(m: nn.TransformerEncoderLayer) -> str:
     d_model = int(m.linear1.in_features)
     dim_feedforward = int(m.linear1.out_features)
@@ -193,6 +226,16 @@ def _module_expr(m: nn.Module, needs: set[str], indent: str = "            ") ->
         needs.add("LLM")
         args = ", ".join(f"{k}={v!r}" for k, v in m.config.items())
         return f"{type(m).__name__}({args})"
+    if isinstance(m, _GEN_CLASSES):  # Stage 19: image / 3-D / speech / vision blocks
+        needs.add("GEN")
+        args = ", ".join(f"{k}={v!r}" for k, v in m.config.items())
+        return f"{type(m).__name__}({args})"
+    if isinstance(m, Block) and any(m.port_maps):  # Stage 19: a block whose layers read extra inputs
+        needs.add("GEN")
+        inner = [_module_expr(sub, needs, indent + "        ") for sub in m.layers]
+        joined = (",\n" + indent + "        ").join(inner)
+        ports = [list(p) for p in m.port_maps]
+        return "Chain([\n" + indent + "        " + joined + ",\n" + indent + f"    ], {ports!r})"
     if isinstance(m, SeqPool):  # Stage 14 connection transforms
         needs.add("SeqPool")
         return f"SeqPool({m.mode!r})"
@@ -373,6 +416,38 @@ if __name__ == "__main__":
 _MAX_EMBEDDED_TEXT = 100_000
 
 
+_RUN_MAIN = '''
+def random_inputs(batch=2, seed=0):
+    """Random values that suit each input: token ids, diffusion steps or plain noise."""
+    g = torch.Generator().manual_seed(seed)
+    xs = []
+    for _name, shape, kind, top in INPUTS:
+        size = (batch, *shape)
+        if kind == "tokens":
+            xs.append(torch.randint(0, int(top), size, generator=g).float())
+        elif kind == "timestep" and top <= 1:
+            xs.append(torch.rand(size, generator=g))
+        elif kind == "timestep":
+            xs.append(torch.randint(0, int(top), size, generator=g).float())
+        else:
+            xs.append(torch.randn(size, generator=g))
+    return xs
+
+
+def main():
+    model = Model().eval()
+    with torch.no_grad():
+        y = model(*random_inputs())
+    print("inputs:", [(name, shape) for name, shape, _kind, _top in INPUTS])
+    print("output:", tuple(y.shape), "parameters:", sum(p.numel() for p in model.parameters()))
+    return model
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 def _text_src() -> str:
     parts = ['UNKNOWN = "\\ufffd"']
     for fn in (TEXTMOD.text_vocab, TEXTMOD.encode_text, TEXTMOD.decode_text, TEXTMOD.text_block,
@@ -385,11 +460,16 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     """Standalone PyTorch source for ``spec``. See the module docstring."""
     from .datasets import get_dataset  # local: avoid import at module load
 
+    from .trainer import _input_kinds, train_block_reason  # local: the trainer imports this module's neighbours
+
     model, build = build_model(spec, meta=True)  # the code needs the modules, not their weights (Stage 17)
     order = model.order
     preds = model.preds
-    input_id = model.input_id
     output_id = model.output_id
+    # Stage 19: one argument per Input node, named after it
+    input_args = dict(zip(model.input_ids, _arg_names([i.name for i in build.inputs])))
+    port_ids = model.port_ids
+    can_train = train_block_reason(spec, build) is None
     merge_ids = model.merge_ids
     mods = model._mods
     node_by_id = {n.id: n for n in spec.nodes}
@@ -420,8 +500,12 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     fwd_lines: list[str] = ["        h = {}"]
     for nid in order:
         ref = repr(nid)
-        if nid == input_id:
-            rhs = "x"
+        if nid in port_ids:  # Stage 19: a layer with several inputs gets them in connection order
+            args = ", ".join(along(p, nid) for p in preds[nid])
+            fwd_lines.append(f"        h[{ref}] = self.{_key(nid)}({args})")
+            continue
+        if nid in input_args:
+            rhs = input_args[nid]
         elif nid in merge_ids:
             node = node_by_id[nid]
             parts = [along(p, nid) for p in preds[nid]]
@@ -448,11 +532,11 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     out.append("")
     out.append("import torch")
     out.append("import torch.nn as nn")
-    if "LLM" in needs:
+    if "LLM" in needs or "GEN" in needs:
         out.append("import torch.nn.functional as F")
     if include_training and spec.train.dataset == "text" and (spec.train.text or "").strip():
         out.insert(out.index("import torch"), "from collections import Counter\n")
-    if "PositionalEncoding" in needs:
+    if "PositionalEncoding" in needs or "GEN" in needs:
         out.append("import math")
     out.append("")
     for name in ("TokenEmbedding", "Recurrent", "SelfAttention", "PositionalEncoding", "SeqPool", "ImageToSeq"):
@@ -464,6 +548,10 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
         out.append(_llm_source())
         out.append("")
         out.append("")
+    if "GEN" in needs:  # Stage 19: the image / 3-D / speech / vision blocks, exactly as in the app
+        out.append(_gen_source())
+        out.append("")
+        out.append("")
     out.append("class Model(nn.Module):")
     out.append("    def __init__(self):")
     out.append("        super().__init__()")
@@ -471,13 +559,25 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     for head, emb in getattr(model, "tied", []):  # Stage 17: a tied head shares the embedding table
         out.append(f"        self.{_key(head)}.weight = self.{_key(emb)}.emb.weight")
     out.append("")
-    out.append("    def forward(self, x):")
+    out.append(f"    def forward(self, {', '.join(input_args.values())}):")
     out.extend(fwd_lines)
     out.append("")
     out.append("")
     out.append(_LOAD_WEIGHTS.strip("\n"))  # Stage 16: run weights trained in the app
 
-    if include_training:
+    if include_training and not can_train:  # Stage 19: several inputs / a picture out — run it once instead
+        kinds = _input_kinds(spec, build)
+        rows = [(i.name or i.id, tuple(i.shape), *kinds[i.id]) for i in build.inputs]
+        out.append("")
+        out.append("")
+        out.append("# ---- one forward pass on random inputs (what Run once does in the app) ----")
+        out.append("INPUTS = [  # name, shape of one example, what to feed")
+        out.extend(f"    {r!r}," for r in rows)
+        out.append("]")
+        out.append("")
+        out.append("")
+        out.append(_RUN_MAIN.strip("\n"))
+    elif include_training:
         ds = get_dataset(spec.train.dataset)
         opt = "torch.optim.Adam" if spec.train.optimizer == "adam" else "torch.optim.SGD"
         rows = spec.train.custom_rows or []

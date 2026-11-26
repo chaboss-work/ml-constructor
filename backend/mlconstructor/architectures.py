@@ -29,6 +29,10 @@ from typing import Any, Callable
 
 from .example_text import EXAMPLE_TEXT
 from .flagships import FLAGSHIPS, hf_url, mini_spec, real_spec
+from .vision_flagships import VISION_FLAGSHIPS
+from .vision_flagships import hf_url as vision_hf_url
+from .vision_flagships import mini_spec as vision_mini_spec
+from .vision_flagships import real_spec as vision_real_spec
 from .schema import ArchitectureInfo, GraphSpec
 
 Spec = dict[str, Any]
@@ -258,6 +262,19 @@ for _fam in FLAGSHIPS:
         f"{_fam['id']}_real", _fam["real_name"], _fam["description"], "language", _flagship_tags(_fam),
         (lambda fam=_fam: real_spec(fam)), scale="real", real_name=_fam["real_name"],
         real_params=_fam["official"], hf_url=hf_url(_fam),
+    ))
+
+# Stage 19 — flagships for images, 3D, sound and vision, the same way.
+for _fam in VISION_FLAGSHIPS:
+    _ARCHITECTURES.append(_Arch(
+        _fam["id"], f"{_fam['name']} (mini)", _fam["description"], _fam["category"], tuple(_fam["tags"]),
+        (lambda fam=_fam: vision_mini_spec(fam)), scale="mini", real_id=f"{_fam['id']}_real",
+        real_name=_fam["real_name"], real_params=_fam["official"], hf_url=vision_hf_url(_fam),
+    ))
+    _REAL.append(_Arch(
+        f"{_fam['id']}_real", _fam["real_name"], _fam["description"], _fam["category"], tuple(_fam["tags"]),
+        (lambda fam=_fam: vision_real_spec(fam)), scale="real", real_name=_fam["real_name"],
+        real_params=_fam["official"], hf_url=vision_hf_url(_fam),
     ))
 
 _BY_ID: dict[str, _Arch] = {a.id: a for a in _ARCHITECTURES + _REAL}

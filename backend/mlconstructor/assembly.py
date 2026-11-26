@@ -23,23 +23,51 @@ class ChainResult:
     modules: list[nn.Module] = field(default_factory=list)   # non-null, in order
     summaries: list[LayerSummary] = field(default_factory=list)
     out_shape: Shape | None = None
+    #: Stage 19 — for each module: which of the chain's extra inputs it also takes
+    port_maps: list[tuple[int, ...]] = field(default_factory=list)
 
 
-def build_chain(nodes: list[LayerNode], in_shape: Shape | None) -> ChainResult:
+def build_chain(
+    nodes: list[LayerNode],
+    in_shape: Shape | None,
+    extra_shapes: list[Shape] | None = None,
+    extra_names: tuple[str, ...] = (),
+) -> ChainResult:
     """Propagate shapes through ``nodes`` and build their modules.
 
     Raises :class:`~mlconstructor.shapes.ShapeError` (with the offending node id)
     if a connection is invalid — the backend never lets a bad graph reach torch.
+
+    Stage 19: a layer with several inputs (e.g. a DiT block reads a condition)
+    takes the chain's value as its first input and the others by name from
+    ``extra_names`` / ``extra_shapes`` — the same for every layer of the chain.
     """
     res = ChainResult(out_shape=in_shape)
+    extra = dict(zip(extra_names, extra_shapes or []))
     shape = in_shape
     for node in nodes:
         node_in: Shape | None = None if not node.needs_input else shape
-        out = node.out_shape(shape)      # may raise ShapeError
-        module = node.build(shape)       # may raise ShapeError
+        ports = node.input_ports()
+        idx: tuple[int, ...] = ()
+        if ports:
+            missing = [n for n in ports[1:] if n not in extra]
+            if missing:
+                from .shapes import ShapeError
+                raise ShapeError(
+                    f"{node.id} ({node.type_name}) needs the input(s) {', '.join(missing)}, which this chain does not get",
+                    node_id=node.id,
+                )
+            shapes = [node.check_port(0, shape)] + [node.check_port(i + 1, extra[n]) for i, n in enumerate(ports[1:])]
+            out = node.out_shape_ports(shapes)
+            module = node.build_ports(shapes)
+            idx = tuple(extra_names.index(n) for n in ports[1:])
+        else:
+            out = node.out_shape(shape)      # may raise ShapeError
+            module = node.build(shape)       # may raise ShapeError
         nparams = sum(p.numel() for p in module.parameters()) if module is not None else 0
         if module is not None:
             res.modules.append(module)
+            res.port_maps.append(idx)
         res.summaries.append(
             LayerSummary(
                 id=node.id,

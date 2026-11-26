@@ -38,25 +38,36 @@ class Block(nn.Module):
     are propagated across repeats; the output shape is exposed as :attr:`out_shape`.
     """
 
-    def __init__(self, make_nodes: Callable[[], list[LayerNode]], in_shape: Shape, repeat: int = 1):
+    def __init__(
+        self,
+        make_nodes: Callable[[], list[LayerNode]],
+        in_shape: Shape,
+        repeat: int = 1,
+        extra_shapes: Sequence[Shape] = (),
+        extra_names: Sequence[str] = (),
+    ):
         super().__init__()
         if repeat < 1:
             raise ValueError(f"repeat must be >= 1, got {repeat}")
         from .assembly import build_chain  # local import avoids an import cycle
 
         modules: list[nn.Module] = []
+        port_maps: list[tuple[int, ...]] = []
         shape: Shape | None = in_shape
         for _ in range(repeat):
-            chain = build_chain(make_nodes(), shape)
+            chain = build_chain(make_nodes(), shape, list(extra_shapes), tuple(extra_names))
             modules.extend(chain.modules)
+            port_maps.extend(chain.port_maps)
             shape = chain.out_shape
         self.layers = nn.ModuleList(modules)
         self.repeat = repeat
         self.out_shape = shape
+        #: Stage 19 — which extra inputs (a condition, the audio) each layer also reads
+        self.port_maps = port_maps
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for layer in self.layers:
-            x = layer(x)
+    def forward(self, x: torch.Tensor, *extra: torch.Tensor) -> torch.Tensor:
+        for layer, idx in zip(self.layers, self.port_maps):
+            x = layer(x, *[extra[i] for i in idx]) if idx else layer(x)
         return x
 
 
@@ -78,11 +89,17 @@ class GraphModule(nn.Module):
         input_id: str,
         output_id: str,
         edge_modules: dict[tuple[str, str], nn.Module] | None = None,
+        input_ids: Sequence[str] | None = None,
+        port_ids: Sequence[str] = (),
     ):
         super().__init__()
         self.order = list(order)
         self.preds = {k: list(v) for k, v in preds.items()}
         self.input_id = input_id
+        #: Stage 19 — every Input node, in the order the model takes them
+        self.input_ids = list(input_ids) if input_ids else [input_id]
+        #: Stage 19 — layers with several inputs: they get every predecessor's value
+        self.port_ids = set(port_ids)
         self.output_id = output_id
         self.merge_ids = set(merges.keys())
         self._merges = dict(merges)  # id -> callable(list[Tensor]) -> Tensor (plain functions)
@@ -107,17 +124,23 @@ class GraphModule(nn.Module):
         key = self._edge_keys.get((src, dst))
         return self._edge_mods[key](outs[src]) if key is not None else outs[src]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, *xs: torch.Tensor) -> torch.Tensor:
+        if len(xs) != len(self.input_ids):
+            raise TypeError(f"this model takes {len(self.input_ids)} input(s) ({', '.join(self.input_ids)}), got {len(xs)}")
+        feed = dict(zip(self.input_ids, xs))
         outs: dict[str, torch.Tensor] = {}
         for nid in self.order:
             ps = self.preds[nid]
-            if nid == self.input_id:
-                v = x
+            key = self._key(nid)
+            if nid in feed:
+                v = feed[nid]
+            elif nid in self.port_ids:  # Stage 19: one value per input, in connection order
+                outs[nid] = self._mods[key](*[self._along(outs, p, nid) for p in ps])
+                continue
             elif nid in self.merge_ids:
                 v = self._merges[nid]([self._along(outs, p, nid) for p in ps])
             else:
                 v = self._along(outs, ps[0], nid)
-            key = self._key(nid)
             if key in self._mods:
                 v = self._mods[key](v)
             outs[nid] = v

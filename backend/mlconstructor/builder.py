@@ -29,7 +29,7 @@ from .blocks import GraphModule
 from .connections import AUTO, Resolved, resolve_merge, resolve_single
 from .layers.base import LayerNode
 from .registry import get_layer_cls
-from .schema import BuildResult, EdgeSummary, GraphSpec, LayerSummary, NodeSpec
+from .schema import BuildResult, EdgeSummary, GraphSpec, InputSummary, LayerSummary, NodeSpec
 from .shapes import Shape, ShapeError, as_list
 
 
@@ -85,6 +85,10 @@ class GraphPlan:
     succ: dict[str, list[str]]
     input_id: str | None = None
     output_id: str | None = None
+    #: Stage 19 — every Input node (a model can take several: an image, a text, a timestep)
+    input_ids: list[str] = field(default_factory=list)
+    #: Stage 19 — what each input of a several-input layer receives, in port order
+    port_in: dict[str, list[Shape]] = field(default_factory=dict)
     #: what a single-input layer receives (after its connection's transform)
     node_in: dict[str, Shape | None] = field(default_factory=dict)
     out_shapes: dict[str, Shape] = field(default_factory=dict)
@@ -97,6 +101,22 @@ def _at(exc: ShapeError, nid: str) -> ShapeError:
     if exc.node_id is None:
         exc.node_id = nid
     return exc
+
+
+class PortTarget:
+    """One input of a several-input layer, as its connection sees it (Stage 19): the
+    connection's transform is chosen exactly as for a single-input layer."""
+
+    def __init__(self, node: LayerNode, index: int):
+        self.node, self.index = node, index
+        self.type_name = f"{node.type_name}, input “{node.input_ports()[index]}”"
+
+    def out_shape(self, shape: Shape) -> Shape:
+        return self.node.check_port(self.index, shape)
+
+
+def _ports_text(ports: tuple[str, ...]) -> str:
+    return ", ".join(f"“{p}”" for p in ports)
 
 
 def plan_graph(spec: GraphSpec, tolerant: bool = False) -> GraphPlan:
@@ -116,12 +136,13 @@ def plan_graph(spec: GraphSpec, tolerant: bool = False) -> GraphPlan:
         plan.errors.append(exc)
 
     source_ids = [i for i in nodes if not nodes[i].needs_input]
-    if len(source_ids) == 1:
+    plan.input_ids = source_ids  # Stage 19: a model may take several inputs (image, text, timestep…)
+    if source_ids:
         plan.input_id = source_ids[0]
     else:
         fail(ShapeError(
-            f"graph must have exactly one Input node, found {len(source_ids)}",
-            hint="Keep a single Input node — it declares the shape of one example.",
+            "graph has no Input node",
+            hint="Add an Input node — it declares the shape of one example.",
         ))
     sinks = [i for i in nodes if len(succ[i]) == 0]
     outputs = [i for i in sinks if nodes[i].type_name == "Output"] or sinks
@@ -142,6 +163,27 @@ def plan_graph(spec: GraphSpec, tolerant: bool = False) -> GraphPlan:
                     raise ShapeError(f"source node {nid!r} ({node.type_name}) must have no inputs, has {len(ps)}")
                 plan.out_shapes[nid] = node.out_shape(None)
                 plan.node_in[nid] = None
+            elif node.input_ports():  # Stage 19: several named inputs, in connection order
+                ports = node.input_ports()
+                if len(ps) != len(ports):
+                    raise ShapeError(
+                        f"{nid} ({node.type_name}) takes {len(ports)} inputs — {_ports_text(ports)} — but "
+                        f"{len(ps)} {'is' if len(ps) == 1 else 'are'} connected",
+                        hint=f"Connect them in this order: {' → '.join(ports)} (the first connection feeds “{ports[0]}”).",
+                    )
+                if any(p not in plan.out_shapes for p in ps):
+                    continue  # an input is broken upstream (tolerant mode)
+                resolved = []
+                for i, p in enumerate(ps):
+                    kind, params = settings.get((p, nid), (AUTO, {}))
+                    resolved.append(resolve_single(kind, params, plan.out_shapes[p], PortTarget(node, i), (p, nid)))
+                shapes_in = [r.out_shape for r in resolved]
+                out = node.out_shape_ports(shapes_in)
+                for p, r in zip(ps, resolved):
+                    plan.edges[(p, nid)] = r
+                plan.port_in[nid] = shapes_in
+                plan.node_in[nid] = shapes_in[0]
+                plan.out_shapes[nid] = out
             elif node.is_merge:  # Add / Concat
                 if len(ps) < 2:
                     raise ShapeError(
@@ -281,7 +323,10 @@ def _build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
             mod = None
         else:
             try:
-                mod = node.build(plan.node_in[nid])
+                if nid in plan.port_in:  # Stage 19: a layer with several inputs
+                    mod = node.build_ports(plan.port_in[nid])
+                else:
+                    mod = node.build(plan.node_in[nid])
             except ShapeError as exc:
                 raise _at(exc, nid)
         if mod is not None:
@@ -309,13 +354,16 @@ def _build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
         if mod is not None:
             edge_modules[(src, dst)] = mod
         nparams = sum(p.numel() for p in mod.parameters()) if mod is not None else 0
+        port = plan.nodes[dst].input_ports()[plan.preds[dst].index(src)] if dst in plan.port_in else None
+        badge = r.transform.badge(r.in_shape)
         edge_summaries.append(
             EdgeSummary(
                 source=src,
                 target=dst,
                 transform=r.transform.kind,
                 auto=r.auto,
-                label=r.transform.badge(r.in_shape),
+                label=(f"{badge} · {port}" if badge else port) if port else badge,
+                port=port,
                 params=r.transform.resolved_params(r.in_shape),
                 in_shape=list(r.in_shape),
                 out_shape=list(r.out_shape),
@@ -331,10 +379,17 @@ def _build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
         input_id=plan.input_id,
         output_id=plan.output_id,
         edge_modules=edge_modules,
+        input_ids=plan.input_ids,
+        port_ids=list(plan.port_in),
     )
     model.tied = tied  # Stage 17: (LM head, Embedding) pairs sharing one weight — the export repeats it
     total = sum(s.num_params for s in summaries) + sum(e.num_params for e in edge_summaries)
-    return model, BuildResult(ok=True, order=plan.order, layers=summaries, total_params=total, edges=edge_summaries)
+    inputs = [
+        InputSummary(id=i, name=str(plan.nodes[i].p("name", "") or ""), shape=list(plan.out_shapes[i]))
+        for i in plan.input_ids
+    ]
+    return model, BuildResult(ok=True, order=plan.order, layers=summaries, total_params=total, edges=edge_summaries,
+                              inputs=inputs)
 
 
 # --------------------------------------------------------------------------- #
@@ -363,6 +418,8 @@ def connection_options(spec: GraphSpec, source: str, target: str):
     res.in_shape = list(in_shape)
     node = plan.nodes[target]
     preds = plan.preds[target]
+    ported = bool(node.input_ports()) and len(preds) == len(node.input_ports())
+    single = PortTarget(node, preds.index(source)) if ported else node  # Stage 19
 
     def other_inputs() -> list | None:
         shapes: list = []
@@ -385,7 +442,7 @@ def connection_options(spec: GraphSpec, source: str, target: str):
                     return True, None  # the other inputs are not known yet
                 node.out_shape_merge([adapted if s is None else s for s in shapes])
             else:
-                node.out_shape(adapted)
+                single.out_shape(adapted)
             return True, None
         except ShapeError as exc:
             return False, str(exc)
@@ -405,7 +462,7 @@ def connection_options(spec: GraphSpec, source: str, target: str):
                 others = [r.out_shape for p, r in zip(preds, resolved) if p != source]
                 ref = others[0] if others else None
         else:
-            mine = resolve_single(AUTO, {}, in_shape, node, (source, target))
+            mine = resolve_single(AUTO, {}, in_shape, single, (source, target))
             res.auto_transform = mine.transform.kind
             res.auto_params = mine.transform.resolved_params(in_shape)
             res.auto_out_shape = list(mine.out_shape)

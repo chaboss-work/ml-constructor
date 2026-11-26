@@ -27,6 +27,7 @@ original one.
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Iterator
 
 import torch
@@ -40,6 +41,8 @@ from .schema import (
     DataSampleRow,
     GenerateResult,
     GraphSpec,
+    RunInputInfo,
+    RunResult,
     TestResult,
     TrainResult,
     TrainSpec,
@@ -78,15 +81,41 @@ def count_params(spec: GraphSpec) -> int:
     return build_model(spec, meta=True)[1].total_params
 
 
+def train_block_reason(spec: GraphSpec, build) -> str | None:
+    """Stage 19 — why this network cannot be trained (or tested) here yet, in plain
+    words; None when it can. Training here teaches one score per class (or the next
+    token) from one input: a network with several inputs, or one whose output is a
+    picture, a latent or points, builds, runs once and exports instead."""
+    inputs = list(getattr(build, "inputs", None) or [])
+    if len(inputs) > 1:
+        names = ", ".join(i.name or i.id for i in inputs)
+        return (f"This network takes {len(inputs)} inputs ({names}). Training a network with several inputs is not "
+                "here yet — it comes with teaching networks to generate. It builds, runs once on random inputs "
+                "(Run once) and exports.")
+    out = next((n for n in spec.nodes if n.type == "Output" and bool(n.params.get("any_shape", False))), None)
+    if out is not None:
+        shape = next((s.out_shape for s in build.layers if s.id == out.id), None)
+        what = "×".join(str(d) for d in shape) if shape else "any shape"
+        return (f"This network's output is {what} — a picture, a latent or points, not one score per class. Training "
+                "it to generate is not here yet. It builds, runs once on random inputs (Run once) and exports.")
+    return None
+
+
 def check_trainable(spec: GraphSpec, what: str = "train") -> int:
-    """Refuse a network too big for this server before a single weight is made."""
-    n = count_params(spec)
+    """Refuse a network too big for this server before a single weight is made —
+    and (Stage 19) one that cannot be trained here, to train or test it."""
+    build = build_model(spec, meta=True)[1]
+    n = build.total_params
     if n > MAX_TRAIN_PARAMS:
         raise ValueError(
             f"this network has {n:,} parameters ({_human(n)}), far too big to {what} on this server (the limit is "
             f"{_human(MAX_TRAIN_PARAMS)}). It is here to inspect: every layer and shape of the real model. The "
             "flagships in the library come with a mini version that trains here; or shrink the layers"
         )
+    if what in ("train", "test"):
+        reason = train_block_reason(spec, build)
+        if reason:
+            raise ValueError(reason)
     return n
 
 
@@ -192,6 +221,13 @@ def _fit_labels(out: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch
 def _input_shape(build) -> Shape:
     """The graph's per-sample input shape. The sole source (Input) has in-degree
     0, so the topological order lists it first."""
+    inputs = list(getattr(build, "inputs", None) or [])
+    if len(inputs) > 1:  # Stage 19
+        names = ", ".join(i.name or i.id for i in inputs)
+        raise ValueError(
+            f"this network takes {len(inputs)} inputs ({names}); the data, training and the test work with one input "
+            "so far. Run once feeds it random inputs"
+        )
     first = build.layers[0]
     if not build.layers or first.out_shape is None:
         raise ShapeError("graph has no Input node to take a shape from")
@@ -616,6 +652,77 @@ def adopt_weights(spec: GraphSpec, raw: bytes) -> WeightsInfo:
         same_split=same,
         metrics=payload["metrics"],
         note=note,
+    )
+
+
+def _input_kinds(spec: GraphSpec, build) -> dict[str, tuple[str, float]]:
+    """Stage 19 — what random values suit each Input, by what it feeds: token ids for
+    an Embedding (below its vocabulary size), diffusion steps for a timestep (0…999,
+    or 0…1 for a flow model such as FLUX), plain random numbers otherwise."""
+    from .registry import get_layer_cls
+
+    nodes = {n.id: n for n in spec.nodes}
+    kinds: dict[str, tuple[str, float]] = {}
+    for inp in build.inputs:
+        kind: tuple[str, float] = ("noise", 0.0)
+        for src, dst in spec.edges:
+            if src != inp.id or dst not in nodes:
+                continue
+            node = nodes[dst]
+            if node.type == "Embedding":
+                kind = ("tokens", float(int(node.params.get("num_embeddings", 2))))
+                break
+            if node.type == "TimestepEmbedding":
+                kind = ("timestep", 1.0 if float(node.params.get("time_factor", 1.0)) >= 100 else 1000.0)
+                break
+            layer = get_layer_cls(node.type)(node.id, node.params)
+            ports = layer.input_ports()
+            preds = [s for s, d in spec.edges if d == dst]
+            if ports and len(preds) == len(ports) and ports[preds.index(src)] == "timestep":
+                kind = ("timestep", float(int(node.params.get("steps", 1000))))
+                break
+        kinds[inp.id] = kind
+    return kinds
+
+
+def run_once(spec: GraphSpec) -> RunResult:
+    """Stage 19 — one forward pass on random inputs (a batch of two, from the run's
+    seed), with the weights the network starts from: the proof that it really runs,
+    what comes out and how long it takes. Works for a network with several inputs;
+    a real-scale flagship is refused (too big to run here)."""
+    check_trainable(spec, "run")
+    model, build = build_model(spec, seed=spec.train.seed)
+    model.eval()
+    g = torch.Generator().manual_seed(int(spec.train.seed))
+    kinds = _input_kinds(spec, build)
+    feeds: list[torch.Tensor] = []
+    infos: list[RunInputInfo] = []
+    for inp in build.inputs:
+        kind, top = kinds[inp.id]
+        shape = (2, *inp.shape)
+        if kind == "tokens":
+            x = torch.randint(0, max(int(top), 1), shape, generator=g).float()
+        elif kind == "timestep" and top <= 1.0:
+            x = torch.rand(shape, generator=g)
+        elif kind == "timestep":
+            x = torch.randint(0, max(int(top), 1), shape, generator=g).float()
+        else:
+            x = torch.randn(shape, generator=g)
+        feeds.append(x)
+        infos.append(RunInputInfo(id=inp.id, name=inp.name, shape=list(inp.shape), kind=kind))
+    start = time.perf_counter()
+    with torch.no_grad():
+        y = model(*feeds)
+    ms = (time.perf_counter() - start) * 1000.0
+    first = y[0].float().flatten()
+    finite = bool(torch.isfinite(first).all())
+    vals = first[torch.isfinite(first)]
+    stat = (lambda f: float(f(vals))) if vals.numel() else (lambda f: 0.0)
+    return RunResult(
+        inputs=infos, output_shape=list(y.shape[1:]), mean=stat(torch.mean),
+        std=float(vals.std()) if vals.numel() > 1 else 0.0, min=stat(torch.min), max=stat(torch.max),
+        sample=[round(float(v), 5) for v in first[:8]], finite=finite, ms=round(ms, 2),
+        total_params=build.total_params,
     )
 
 

@@ -74,7 +74,7 @@ def suggest_for_graph(spec: GraphSpec) -> list[AdapterProposal]:
             continue
         src, dst = exc.edge
         node = plan.nodes.get(dst)
-        if node is None or node.is_merge or src not in plan.out_shapes:
+        if node is None or node.is_merge or node.input_ports() or src not in plan.out_shapes:
             continue
         in_sh = plan.out_shapes[src]
         fix = _first_fixing_adapter(in_sh, node)

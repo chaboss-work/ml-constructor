@@ -160,6 +160,16 @@ class EdgeSummary(BaseModel):
     in_shape: list[int]
     out_shape: list[int]
     num_params: int = 0
+    #: Stage 19 — the input of a several-input layer this connection feeds (e.g. "timestep")
+    port: str | None = None
+
+
+class InputSummary(BaseModel):
+    """Stage 19 — one Input node of the model (a model can take several)."""
+
+    id: str
+    name: str = ""
+    shape: list[int]
 
 
 class BuildResult(BaseModel):
@@ -173,6 +183,12 @@ class BuildResult(BaseModel):
     #: real-scale flagship is built on the meta device to inspect, not to train.
     trainable: bool = True
     max_train_params: int | None = None
+    #: Stage 19 — every Input node (image, text, timestep…), in the order the model takes them
+    inputs: list[InputSummary] = Field(default_factory=list)
+    #: Stage 19 — small enough to build here and run once on random inputs
+    runnable: bool = True
+    #: Stage 19 — why this network cannot be trained here yet (several inputs, a picture as output…)
+    train_note: str | None = None
 
 
 class ConnectionOption(BaseModel):
@@ -301,6 +317,34 @@ class GenerateRequest(BaseModel):
     length: int = Field(default=200, ge=1, le=2000)
     temperature: float = Field(default=0.8, ge=0.0, le=5.0)
     seed: int = 0
+
+
+class RunInputInfo(BaseModel):
+    """Stage 19 — one input of a forward pass on random data."""
+
+    id: str
+    name: str = ""
+    shape: list[int]
+    #: what was fed: "tokens" (random token ids), "timestep" (random diffusion steps) or "noise" (random numbers)
+    kind: str
+
+
+class RunResult(BaseModel):
+    """Stage 19 — one forward pass of the network on random inputs, with the weights it
+    starts from: it really runs, and this is what comes out."""
+
+    ok: bool = True
+    inputs: list[RunInputInfo]
+    output_shape: list[int]
+    #: the output's numbers at a glance (the first example)
+    mean: float
+    std: float
+    min: float
+    max: float
+    sample: list[float] = Field(default_factory=list)
+    finite: bool = True
+    ms: float
+    total_params: int
 
 
 class GenerateResult(BaseModel):

@@ -14,6 +14,7 @@ Public surface:
 
 from __future__ import annotations
 
+from .gpu import CUDA_HIDDEN, cuda_available  # first: settles hidden GPUs before torch starts the driver
 from . import layers  # noqa: F401  (import-time side effect: registers all layers)
 from .adapters import apply_adapter, suggest_for_graph
 from .architectures import get_architecture, list_architectures
@@ -93,6 +94,8 @@ __all__ = [
     "delete_project",
     "server_projects_enabled",
     "slugify",
+    "cuda_available",
+    "CUDA_HIDDEN",
     "LAYER_REGISTRY",
     "__version__",
     "API_LEVEL",

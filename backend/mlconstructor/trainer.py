@@ -34,6 +34,7 @@ import torch.nn as nn
 
 from .builder import build_model
 from .datasets import canonical_dataset_id, get_dataset, make_rows, split_rows, text_stats
+from .gpu import CUDA_HIDDEN, cuda_available, hidden_message
 from .schema import (
     DataPreview,
     DataSampleRow,
@@ -211,15 +212,18 @@ def _device(want: str = "cpu") -> "torch.device":
     """Where to train (Stage 12). ``"cpu"`` (the default) never touches the GPU — the
     card is shared on this host, so GPU use is an explicit opt-in. ``"cuda"`` asks
     for the GPU and fails clearly if there is none; ``"auto"`` takes the GPU when
-    available, else the CPU."""
+    available, else the CPU. A backend started with every GPU hidden never uses one
+    (:mod:`~mlconstructor.gpu`)."""
     if want == "cuda":
-        if not torch.cuda.is_available():
+        if CUDA_HIDDEN:
+            raise ValueError(hidden_message())
+        if not cuda_available():
             raise ValueError(
                 "GPU (CUDA) training was requested, but no CUDA device is available on this backend"
             )
         return torch.device("cuda")
     if want == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return torch.device("cuda" if cuda_available() else "cpu")
     return torch.device("cpu")
 
 

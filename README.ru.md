@@ -134,7 +134,11 @@ npx http-server dist/mlconstructor/browser -p 4200
 ```
 
 * `POST /build` → формы и число параметров по слоям (или `422` с причиной).
-* `POST /train` → `{ loss_curve, final_loss, final_accuracy, steps, ... }`.
+* `POST /train` → `{ loss_curve, final_loss, final_accuracy, final_val_accuracy, fit, steps, ... }`.
+* `train.val_fraction` (по умолчанию `0.2`) → доля строк, отложенных для проверки: на них
+  сеть не учится, поэтому `final_val_accuracy` / `val_acc_curve` показывают, как она
+  справляется с новыми данными, а `fit` даёт вердикт простыми словами (`0` — учить и мерить
+  на всех строках).
 * `GET /layers` → палитра, из которой рисуется редактор.
 * `edge_settings` (необязательно) → как соединение меняет форму данных; без него каждое
   соединение подстраивается само (развернуть в вектор, свернуть в картинку, прочитать

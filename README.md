@@ -135,7 +135,11 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
 ```
 
 * `POST /build` → per-layer shapes + parameter counts (or a `422` with the reason).
-* `POST /train` → `{ loss_curve, final_loss, final_accuracy, steps, ... }`.
+* `POST /train` → `{ loss_curve, final_loss, final_accuracy, final_val_accuracy, fit, steps, ... }`.
+* `train.val_fraction` (default `0.2`) → the share of rows held out for validation: the
+  network never trains on them, so `final_val_accuracy` / `val_acc_curve` show how it
+  does on new data and `fit` gives a plain-words verdict (`0` = train and measure on
+  every row).
 * `GET /layers` → the palette the editor renders.
 * `edge_settings` (optional) → how a connection reshapes its data; without it every
   connection adapts by itself (flatten, fold into an image, read an image as a

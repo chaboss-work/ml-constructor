@@ -183,15 +183,15 @@ project channels.
 
 The stages come in six blocks, ordered by dependency (Stages 14 and 17–20 were added
 on 2026-11-25 and Stages 15–16 on 2026-11-26, at the user's request, before the rest —
-the original later stages moved up by seven):
+the original later stages moved up by seven; the same day the flagships, 17–19, moved ahead
+of clear errors, now 20):
 
-- **A · Foundation & clarity** (13–17) — save your work, connections that adapt by
-  themselves, honest accuracy on held-out data, repeatable runs with saved weights and a
-  final test, errors in plain words with one-click fixes.
-- **B · Flagship architectures** (18–20) — today's language models, the models behind
+- **A · Foundation** (13–16) — save your work, connections that adapt by themselves,
+  honest accuracy on held-out data, repeatable runs with saved weights and a final test.
+- **B · Flagship architectures** (17–19) — today's language models, the models behind
   images, 3D, sound and vision, and training that generates.
-- **C · Look & feel** (21–23) — a new look, a truly interactive editor, a Russian
-  interface.
+- **C · Clarity, look & feel** (20–23) — errors in plain words with one-click fixes, a new
+  look, a truly interactive editor, a Russian interface.
 - **D · The model in action** (24–25) — try the trained model on your own input and
   see what happens inside it.
 - **E · Data workbench** (26–29) — datasets as tables, a universal column → input
@@ -206,10 +206,10 @@ the original later stages moved up by seven):
 | 14 | A | Smart connections: wires that adapt the data, with settings — **done** | Plug anything into anything |
 | 15 | A | Honest accuracy: held-out data, training vs new-data curves, a verdict — **done** | Learning or memorising? |
 | 16 | A | The same seed, the same numbers; save / load weights; a final test — **done** | Train, check, test — and keep it |
-| 17 | A | Clear errors: plain words, why, what to do, one-click fixes | Errors you understand without a degree |
-| 18 | B | Flagship language models: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma | Qwen and DeepSeek from the inside |
-| 19 | B | Flagships for images, 3D, sound, vision: Stable Diffusion, DiT, ViT, Whisper | What is inside Stable Diffusion |
-| 20 | B | Teach it to generate: autoencoder, VAE, diffusion | A network draws digits |
+| 17 | B | Flagship language models: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma — **done** | Qwen and DeepSeek from the inside |
+| 18 | B | Flagships for images, 3D, sound, vision: Stable Diffusion, DiT, ViT, Whisper | What is inside Stable Diffusion |
+| 19 | B | Teach it to generate: autoencoder, VAE, diffusion | A network draws digits |
+| 20 | C | Clear errors: plain words, why, what to do, one-click fixes | Errors you understand without a degree |
 | 21 | C | A new look: design system, themes, live training on the canvas | Before / after |
 | 22 | C | Interactive editor: drag & drop, multi-select, undo / redo, mini-map | A ResNet in under a minute |
 | 23 | C | Russian interface (EN / RU) | The app in Russian |
@@ -363,7 +363,63 @@ Train, check on new data, test once at the end — and keep what you trained.
   front-end project tests 17/17); checked live in the browser — train, test, save, load,
   train on from the loaded weights.
 
-### Stage 17 — Clear errors with fixes · *planned*
+### Stage 17 — Flagship language models · **DONE (2026-11-26)**
+The architectures behind today's chatbots, as editable graphs.
+- New layers: RMSNorm, a SwiGLU feed-forward, rotary position embedding (RoPE),
+  grouped-query attention (GQA) with a causal mask, a mixture of experts (MoE) with a
+  router and shared experts, multi-head latent attention (MLA).
+- Library entries: **Qwen3** (dense and MoE), **DeepSeek-V3 / R1**, **Llama 3**,
+  **Mistral / Mixtral**, **Gemma 3**, **Phi-4** — each in two scales: a **mini** one that
+  trains here, and the **real** one built from its published `config.json` (Hugging
+  Face) on PyTorch's memory-free "meta" device, with the true parameter count and every
+  shape; a link to the model card.
+- *Done when:* each real-scale model's parameter count matches the official figure
+  (within 1 %), and each mini model trains.
+- *Video:* Qwen and DeepSeek from the inside.
+- **Shipped:** six new layers — RMSNorm; attention with rotary positions and grouped
+  key/value heads (GQA, with query/key norms, a sliding window, Gemma's post-norm, q/k/v
+  bias); DeepSeek's multi-head latent attention (MLA); the gated MLP (SwiGLU / GeGLU); a
+  mixture of experts (softmax or sigmoid routing with a balancing bias, shared experts);
+  the vocabulary head, optionally tied to the embedding. Each attention and feed-forward
+  block carries its pre-norm and residual, so a decoder is one Repeat of two nodes. Eight
+  flagships in the library — Qwen3, Qwen3-MoE, DeepSeek-V3 / R1, Llama 3, Mistral, Mixtral,
+  Gemma 3, Phi-4 — each a **mini** model (100–230 thousand parameters) that learns the new
+  **Next token** task here in 15–45 s (about 0.9 on new data; Gemma 3 0.99), and its
+  **real** size from the published config.json, built on the meta device: Qwen3-8B
+  8,190,735,360, Qwen3-30B-A3B 30,532,122,624, Llama-3.1-8B 8,030,261,248, Mistral-7B-v0.3
+  7,248,023,552, Mixtral-8x7B 46,702,792,704, Gemma-3-1B 999,885,952, Phi-4 14,659,507,200
+  — the Hub's count to the parameter — and DeepSeek-V3 671,026,419,200 (the model card's
+  671B; the Hub's 684.5B adds the multi-token-prediction module). A real-size model builds,
+  previews and exports but never trains (more than 25 million parameters is refused with
+  an explanation); `/build` now always sizes on the meta device. The export copies the LLM
+  blocks verbatim. A clash in a layer's own settings (e.g. 4 query heads over 3 key/value
+  groups) is now reported as such, not as a connection problem. Tested: 7 new backend tests
+  (real sizes, minis learn, exact export, causal and sliding-window attention, tied heads,
+  clear errors, inspect-only real sizes, the next-token data); the tests caught all 10 bugs
+  planted on purpose in a copy of the code; checked live in the browser.
+
+### Stage 18 — Flagships for images, 3D, sound and vision · *planned*
+- New layers: patch embedding, Conv3d, up-sampling, a timestep embedding,
+  cross-attention, adaptive normalization.
+- Library entries: **ViT**, **CLIP**, **Stable Diffusion** (VAE + U-Net with
+  cross-attention + text encoder), **DiT / FLUX-style** diffusion transformers, **3D
+  generators** (triplane / point-cloud models in the spirit of TripoSR), **Whisper**
+  (speech) — the same two scales (mini / real on "meta") and model-card links.
+- *Done when:* each real-scale model matches its published parameter count, and each
+  mini model builds and runs a forward pass.
+- *Video:* what is inside Stable Diffusion.
+
+### Stage 19 — Teach it to generate · *planned*
+Training beyond classification.
+- New training tasks: **reconstruction** (autoencoder, VAE) and **denoising diffusion**,
+  with the right losses and samplers.
+- Generate pictures right in the app: MNIST digits from a small VAE and a small
+  diffusion model, with a gallery that fills in as training goes.
+- *Done when:* a small diffusion model trained here draws recognizable digits, and a
+  VAE reconstructs them.
+- *Video:* a network draws digits.
+
+### Stage 20 — Clear errors with fixes · *planned*
 Every message says what happened, why, and what to do — in plain words.
 - A catalogue of every error the editor can meet (shapes, wiring, parameters, data,
   training): each gets a short title in plain words, a "why" — with a small glossary
@@ -378,41 +434,6 @@ Every message says what happened, why, and what to do — in plain words.
   covered by tests; a newcomer repairs every broken graph of a test set without
   reading code.
 - *Video:* errors you understand without a degree.
-
-### Stage 18 — Flagship language models · *planned*
-The architectures behind today's chatbots, as editable graphs.
-- New layers: RMSNorm, a SwiGLU feed-forward, rotary position embedding (RoPE),
-  grouped-query attention (GQA) with a causal mask, a mixture of experts (MoE) with a
-  router and shared experts, multi-head latent attention (MLA).
-- Library entries: **Qwen3** (dense and MoE), **DeepSeek-V3 / R1**, **Llama 3**,
-  **Mistral / Mixtral**, **Gemma 3**, **Phi-4** — each in two scales: a **mini** one that
-  trains here, and the **real** one built from its published `config.json` (Hugging
-  Face) on PyTorch's memory-free "meta" device, with the true parameter count and every
-  shape; a link to the model card.
-- *Done when:* each real-scale model's parameter count matches the official figure
-  (within 1 %), and each mini model trains.
-- *Video:* Qwen and DeepSeek from the inside.
-
-### Stage 19 — Flagships for images, 3D, sound and vision · *planned*
-- New layers: patch embedding, Conv3d, up-sampling, a timestep embedding,
-  cross-attention, adaptive normalization.
-- Library entries: **ViT**, **CLIP**, **Stable Diffusion** (VAE + U-Net with
-  cross-attention + text encoder), **DiT / FLUX-style** diffusion transformers, **3D
-  generators** (triplane / point-cloud models in the spirit of TripoSR), **Whisper**
-  (speech) — the same two scales (mini / real on "meta") and model-card links.
-- *Done when:* each real-scale model matches its published parameter count, and each
-  mini model builds and runs a forward pass.
-- *Video:* what is inside Stable Diffusion.
-
-### Stage 20 — Teach it to generate · *planned*
-Training beyond classification.
-- New training tasks: **reconstruction** (autoencoder, VAE) and **denoising diffusion**,
-  with the right losses and samplers.
-- Generate pictures right in the app: MNIST digits from a small VAE and a small
-  diffusion model, with a gallery that fills in as training goes.
-- *Done when:* a small diffusion model trained here draws recognizable digits, and a
-  VAE reconstructs them.
-- *Video:* a network draws digits.
 
 ### Stage 21 — A new look · *planned*
 An editor that is attractive at first sight.
@@ -679,15 +700,15 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 
 Шесть блоков, по порядку зависимостей (Этапы 14 и 17–20 добавлены 25.11, Этапы 15–16 —
 26.11, всё по просьбе пользователя, и идут раньше остальных — прежние последующие этапы
-сдвинулись на семь):
+сдвинулись на семь; в тот же день флагманы, 17–19, встали раньше понятных ошибок, теперь 20):
 
-- **A · Фундамент и понятность** (13–17) — сохранение работы, соединения, которые
-  подстраиваются сами, честная точность на отложенных данных, повторяемые запуски с
-  сохранением весов и финальным тестом, ошибки простыми словами с исправлением в один клик.
-- **B · Флагманские архитектуры** (18–20) — языковые модели наших дней, модели для
+- **A · Фундамент** (13–16) — сохранение работы, соединения, которые подстраиваются сами,
+  честная точность на отложенных данных, повторяемые запуски с сохранением весов и
+  финальным тестом.
+- **B · Флагманские архитектуры** (17–19) — языковые модели наших дней, модели для
   картинок, 3D, звука и зрения и обучение, которое генерирует.
-- **C · Облик и удобство** (21–23) — новый облик, по-настоящему интерактивный редактор,
-  русский интерфейс.
+- **C · Понятность, облик и удобство** (20–23) — ошибки простыми словами с исправлением в
+  один клик, новый облик, по-настоящему интерактивный редактор, русский интерфейс.
 - **D · Модель в деле** (24–25) — проверить обученную сеть на своём примере и заглянуть
   внутрь.
 - **E · Цех данных** (26–29) — датасеты как таблицы, универсальный редактор «колонки →
@@ -702,10 +723,10 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 | 14 | A | Умные соединения: связи, которые сами подгоняют данные, с настройками — **готово** | Соединяй что угодно с чем угодно |
 | 15 | A | Честная точность: отложенная выборка, кривые «обучение / новые данные», вердикт — **готово** | Учится или зубрит? |
 | 16 | A | Один seed — одни цифры; сохранить / загрузить веса; финальный тест — **готово** | Обучили, проверили, протестировали — и сохранили |
-| 17 | A | Понятные ошибки: простыми словами, почему, что делать, исправление в один клик | Ошибки, понятные без диплома |
-| 18 | B | Флагманские языковые модели: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma | Qwen и DeepSeek изнутри |
-| 19 | B | Флагманы для картинок, 3D, звука и зрения: Stable Diffusion, DiT, ViT, Whisper | Что внутри у Stable Diffusion |
-| 20 | B | Учим генерировать: автоэнкодер, VAE, диффузия | Нейросеть рисует цифры |
+| 17 | B | Флагманские языковые модели: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma — **готово** | Qwen и DeepSeek изнутри |
+| 18 | B | Флагманы для картинок, 3D, звука и зрения: Stable Diffusion, DiT, ViT, Whisper | Что внутри у Stable Diffusion |
+| 19 | B | Учим генерировать: автоэнкодер, VAE, диффузия | Нейросеть рисует цифры |
+| 20 | C | Понятные ошибки: простыми словами, почему, что делать, исправление в один клик | Ошибки, понятные без диплома |
 | 21 | C | Новый облик: дизайн-система, темы, живое обучение на холсте | Было / стало |
 | 22 | C | Интерактивный редактор: перетаскивание, мультивыделение, отмена, мини-карта | ResNet меньше чем за минуту |
 | 23 | C | Русский интерфейс (EN / RU) | Приложение на русском |
@@ -862,7 +883,66 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   проектов во фронте 17/17); вживую в браузере — обучить, протестировать, сохранить,
   загрузить, продолжить обучение с загруженных весов.
 
-#### Этап 17 — Понятные ошибки с исправлениями (в планах)
+#### Этап 17 — Флагманские языковые модели · ГОТОВО (26.11)
+Архитектуры, на которых работают современные чат-боты, — как редактируемые графы.
+- Новые слои: RMSNorm, SwiGLU-блок, вращающиеся позиционные эмбеддинги (RoPE),
+  внимание с группами запросов (GQA) и казуальной маской, смесь экспертов (MoE) с
+  роутером и общими экспертами, латентное внимание (MLA).
+- В библиотеке: **Qwen3** (плотная и MoE), **DeepSeek-V3 / R1**, **Llama 3**,
+  **Mistral / Mixtral**, **Gemma 3**, **Phi-4** — каждая в двух масштабах: **мини**, которая
+  обучается прямо здесь, и **настоящая**, собранная по опубликованному `config.json`
+  (Hugging Face) на «meta»-устройстве PyTorch без расхода памяти — с настоящим числом
+  параметров и всеми формами; ссылка на карточку модели.
+- *Готово, когда:* число параметров у каждой модели настоящего масштаба совпадает с
+  официальным (в пределах 1 %), а каждая мини-модель обучается.
+- *Ролик:* Qwen и DeepSeek изнутри.
+- **Сделано:** шесть новых слоёв — RMSNorm; внимание с поворотными позициями и группами
+  ключей/значений (GQA: нормы запросов и ключей, скользящее окно, пост-норма Gemma, смещения
+  q/k/v); латентное внимание DeepSeek (MLA); вентильный MLP (SwiGLU / GeGLU); смесь экспертов
+  (маршрутизация softmax или sigmoid с балансирующим смещением, общие эксперты); выходной
+  слой словаря, по желанию связанный с эмбеддингом. Блоки внимания и прямого прохода несут
+  свою пре-норму и остаточную связь, поэтому декодер — один Repeat из двух узлов. Восемь
+  флагманов в библиотеке — Qwen3, Qwen3-MoE, DeepSeek-V3 / R1, Llama 3, Mistral, Mixtral,
+  Gemma 3, Phi-4: у каждого **мини**-модель (100–230 тысяч параметров), которая учит новую
+  задачу **Next token** прямо здесь за 15–45 с (около 0.9 на новых данных; Gemma 3 — 0.99), и
+  **настоящий** размер по опубликованному config.json, собранный на meta-устройстве:
+  Qwen3-8B 8 190 735 360, Qwen3-30B-A3B 30 532 122 624, Llama-3.1-8B 8 030 261 248,
+  Mistral-7B-v0.3 7 248 023 552, Mixtral-8x7B 46 702 792 704, Gemma-3-1B 999 885 952,
+  Phi-4 14 659 507 200 — до параметра как на Hub, — и DeepSeek-V3 671 026 419 200 (671 млрд
+  по карточке модели; 684,5 млрд на Hub включают модуль предсказания нескольких токенов).
+  Модель настоящего размера собирается, показывает данные и экспортируется, но не обучается
+  (больше 25 млн параметров — отказ с объяснением); `/build` теперь всегда считает на
+  meta-устройстве. Экспорт копирует блоки LLM дословно. Противоречие в собственных
+  настройках слоя (например, 4 головы запросов на 3 группы ключей/значений) теперь так и
+  называется, а не выдаётся за проблему соединения. Проверено: 7 новых тестов бэкенда
+  (настоящие размеры, мини учатся, точный экспорт, причинное внимание и скользящее окно,
+  связанный выходной слой, понятные ошибки, настоящий размер — только просмотр, данные
+  «следующий токен»); тесты поймали все 10 ошибок, нарочно внесённых в копию кода; вживую в
+  браузере.
+
+#### Этап 18 — Флагманы для картинок, 3D, звука и зрения (в планах)
+- Новые слои: нарезка на патчи, Conv3d, повышение разрешения, эмбеддинг шага диффузии,
+  перекрёстное внимание, адаптивная нормализация.
+- В библиотеке: **ViT**, **CLIP**, **Stable Diffusion** (VAE + U-Net с перекрёстным
+  вниманием + текстовый энкодер), диффузионные трансформеры **DiT / в духе FLUX**,
+  **3D-генераторы** (модели на трёх плоскостях / облаках точек в духе TripoSR),
+  **Whisper** (речь) — в тех же двух масштабах (мини / настоящий на «meta») и со ссылками
+  на карточки моделей.
+- *Готово, когда:* у каждой модели настоящего масштаба число параметров совпадает с
+  опубликованным, а каждая мини-модель собирается и выполняет прямой проход.
+- *Ролик:* что внутри у Stable Diffusion.
+
+#### Этап 19 — Учим генерировать (в планах)
+Обучение не только классификации.
+- Новые задачи обучения: **восстановление** (автоэнкодер, VAE) и **диффузионное
+  шумоподавление** — с правильными функциями потерь и сэмплерами.
+- Картинки генерируются прямо в приложении: цифры MNIST от маленького VAE и маленькой
+  диффузионной модели, галерея пополняется по ходу обучения.
+- *Готово, когда:* маленькая диффузионная модель, обученная здесь, рисует узнаваемые
+  цифры, а VAE их восстанавливает.
+- *Ролик:* нейросеть рисует цифры.
+
+#### Этап 20 — Понятные ошибки с исправлениями (в планах)
 Каждое сообщение говорит, что случилось, почему и что сделать — простыми словами.
 - Каталог всех ошибок, которые встречаются в редакторе (формы, связи, параметры, данные,
   обучение): у каждой — короткий заголовок простыми словами, «почему» — с маленьким
@@ -877,42 +957,6 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   исправление, всё покрыто тестами; новичок чинит каждый сломанный граф из тестового
   набора, не читая код.
 - *Ролик:* ошибки, понятные без диплома.
-
-#### Этап 18 — Флагманские языковые модели (в планах)
-Архитектуры, на которых работают современные чат-боты, — как редактируемые графы.
-- Новые слои: RMSNorm, SwiGLU-блок, вращающиеся позиционные эмбеддинги (RoPE),
-  внимание с группами запросов (GQA) и казуальной маской, смесь экспертов (MoE) с
-  роутером и общими экспертами, латентное внимание (MLA).
-- В библиотеке: **Qwen3** (плотная и MoE), **DeepSeek-V3 / R1**, **Llama 3**,
-  **Mistral / Mixtral**, **Gemma 3**, **Phi-4** — каждая в двух масштабах: **мини**, которая
-  обучается прямо здесь, и **настоящая**, собранная по опубликованному `config.json`
-  (Hugging Face) на «meta»-устройстве PyTorch без расхода памяти — с настоящим числом
-  параметров и всеми формами; ссылка на карточку модели.
-- *Готово, когда:* число параметров у каждой модели настоящего масштаба совпадает с
-  официальным (в пределах 1 %), а каждая мини-модель обучается.
-- *Ролик:* Qwen и DeepSeek изнутри.
-
-#### Этап 19 — Флагманы для картинок, 3D, звука и зрения (в планах)
-- Новые слои: нарезка на патчи, Conv3d, повышение разрешения, эмбеддинг шага диффузии,
-  перекрёстное внимание, адаптивная нормализация.
-- В библиотеке: **ViT**, **CLIP**, **Stable Diffusion** (VAE + U-Net с перекрёстным
-  вниманием + текстовый энкодер), диффузионные трансформеры **DiT / в духе FLUX**,
-  **3D-генераторы** (модели на трёх плоскостях / облаках точек в духе TripoSR),
-  **Whisper** (речь) — в тех же двух масштабах (мини / настоящий на «meta») и со ссылками
-  на карточки моделей.
-- *Готово, когда:* у каждой модели настоящего масштаба число параметров совпадает с
-  опубликованным, а каждая мини-модель собирается и выполняет прямой проход.
-- *Ролик:* что внутри у Stable Diffusion.
-
-#### Этап 20 — Учим генерировать (в планах)
-Обучение не только классификации.
-- Новые задачи обучения: **восстановление** (автоэнкодер, VAE) и **диффузионное
-  шумоподавление** — с правильными функциями потерь и сэмплерами.
-- Картинки генерируются прямо в приложении: цифры MNIST от маленького VAE и маленькой
-  диффузионной модели, галерея пополняется по ходу обучения.
-- *Готово, когда:* маленькая диффузионная модель, обученная здесь, рисует узнаваемые
-  цифры, а VAE их восстанавливает.
-- *Ролик:* нейросеть рисует цифры.
 
 #### Этап 21 — Новый облик
 Редактор, который цепляет с первого взгляда.

@@ -147,6 +147,11 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
   downloads them (`.pt`), `POST /weights/upload` loads a file back (read with
   `weights_only=True`, tensors only), `train.init_run` trains on from them, and the
   exported `model.py` has `load_weights()`.
+* Flagship language models — Qwen3, DeepSeek-V3, Llama 3, Mistral / Mixtral, Gemma 3,
+  Phi-4 — are in the library as mini graphs that train here on the `tokens` ("next token")
+  dataset, and at their real size (`GET /architectures/{id}_real`), sized on PyTorch's
+  "meta" device with the exact parameter count. `/build` reports `trainable: false` above
+  25 million parameters; such a model is inspected, never trained.
 * `GET /layers` → the palette the editor renders.
 * `edge_settings` (optional) → how a connection reshapes its data; without it every
   connection adapts by itself (flatten, fold into an image, read an image as a

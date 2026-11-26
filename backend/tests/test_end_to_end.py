@@ -2248,6 +2248,184 @@ def test_stage16_http():
     print("[stage16] HTTP: /health api 16, preview marks train / validation / test, export tests once at the end")
 
 
+# --------------------------------------------------------------------------- #
+# Stage 17 — flagship language models: real sizes on "meta", mini models that train.
+# --------------------------------------------------------------------------- #
+from mlconstructor.flagships import FLAGSHIPS, mini_spec, real_spec  # noqa: E402
+from mlconstructor.shapes import ShapeError as _ShapeError  # noqa: E402
+
+GQA_GRAPH = {
+    "nodes": [
+        {"id": "in", "type": "Input", "params": {"shape": [8]}},
+        {"id": "emb", "type": "Embedding", "params": {"num_embeddings": 32, "embedding_dim": 32}},
+        {"id": "att", "type": "GQAttention", "params": {"heads": 4, "kv_heads": 2, "head_dim": 8}},
+        {"id": "mlp", "type": "GatedMLP", "params": {"hidden": 64}},
+        {"id": "norm", "type": "RMSNorm", "params": {}},
+        {"id": "head", "type": "LMHead", "params": {"vocab": 32}},
+        {"id": "out", "type": "Output", "params": {}},
+    ],
+    "edges": [["in", "emb"], ["emb", "att"], ["att", "mlp"], ["mlp", "norm"], ["norm", "head"], ["head", "out"]],
+    "edge_settings": [{"source": "norm", "target": "head", "transform": "seq_pool", "params": {"mode": "last"}}],
+    "train": {"dataset": "tokens", "epochs": 1, "samples": 64, "seed": 0},
+}
+
+
+def _with(graph: dict, node_id: str, **params) -> dict:
+    g = json.loads(json.dumps(graph))
+    for n in g["nodes"]:
+        if n["id"] == node_id:
+            n["params"].update(params)
+    return g
+
+
+def test_flagship_real_sizes_match_hugging_face():
+    for fam in FLAGSHIPS:
+        model, build = mlc.build_model(GraphSpec.model_validate(real_spec(fam)), meta=True)
+        total = sum(p.numel() for p in model.parameters())
+        assert total == build.total_params, (fam["id"], total, build.total_params)
+        assert all(p.is_meta for p in model.parameters()), fam["id"]  # sized, not allocated
+        if fam["id"] == "deepseek_v3":  # the Hub's 684.5B adds the multi-token-prediction module
+            assert total == 671_026_419_200 and abs(total - fam["official"]) / fam["official"] < 0.01, total
+        else:
+            assert total == fam["official"], (fam["real_name"], total, fam["official"])  # to the parameter
+    print("[flagships] real sizes on meta == Hugging Face: " + ", ".join(
+        f"{f['real_name']} {f['official'] / 1e9:.2f}B" for f in FLAGSHIPS))
+
+
+def test_flagship_minis_train_on_next_token():
+    for fam in FLAGSHIPS:  # every mini model learns (a short run each)
+        raw = mini_spec(fam)
+        raw["train"].update({"samples": 1200, "epochs": 2})
+        spec = GraphSpec.model_validate(raw)
+        model, build = mlc.build_model(spec, seed=0)
+        res = mlc.train_model(model, (16,), spec.train)
+        assert build.total_params < 400_000 and res.final_loss < res.loss_curve[0], (fam["id"], res.final_loss)
+        assert res.final_val_accuracy > 0.15, (fam["id"], res.final_val_accuracy)  # chance is 1/32
+    spec = GraphSpec.model_validate(mini_spec(FLAGSHIPS[3]))  # Llama 3 mini, its full default run
+    model, _ = mlc.build_model(spec, seed=0)
+    res = mlc.train_model(model, (16,), spec.train)
+    assert res.final_val_accuracy >= 0.85, res.final_val_accuracy
+    print(f"[flagships] 8 mini models learn the next token; Llama 3 mini on new data {res.final_val_accuracy:.3f}")
+
+
+def test_flagship_minis_export_exactly():
+    for fam in FLAGSHIPS:
+        spec = GraphSpec.model_validate(mini_spec(fam))
+        model, _ = mlc.build_model(spec, seed=1)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "w.pt")
+            with open(path, "wb") as f:
+                f.write(W.weights_bytes(model, data=None))
+            ns = _exec_exported(mlc.generate_pytorch(spec, include_training=False))
+            gen = ns["load_weights"](ns["Model"](), path)
+        model.eval()
+        gen.eval()
+        x = torch.randint(0, 32, (3, 16)).float()
+        with torch.no_grad():
+            assert torch.allclose(gen(x), model(x), atol=1e-5), fam["id"]
+        assert sum(p.numel() for p in gen.parameters()) == sum(p.numel() for p in model.parameters()), fam["id"]
+    print("[flagships] every mini model exports to model.py: the same parameters, the same answers")
+
+
+def test_llm_layers_behave_and_explain():
+    model, build = mlc.build_model(GraphSpec.model_validate(GQA_GRAPH), seed=0)
+    model.eval()
+    x = torch.randint(0, 32, (2, 8)).float()
+    att = model._mods["n_att"]
+    h = model._mods["n_emb"](x)
+    with torch.no_grad():
+        later = h.clone()
+        later[:, -1] += 1.0  # change the last token only
+        a, b = att(h), att(later)
+    assert torch.allclose(a[:, :-1], b[:, :-1], atol=1e-6) and not torch.allclose(a[:, -1], b[:, -1])  # causal
+    win = mlc.llm_modules.GroupedQueryAttention(32, 4, 2, 8, sliding_window=2).eval()
+    with torch.no_grad():
+        far = h.clone()
+        far[:, 0] += 1.0  # token 0 is out of the last position's 2-token window
+        assert torch.allclose(win(h)[:, -1], win(far)[:, -1], atol=1e-6)
+    # latent attention with unequal head sizes: the exact parameter formula, and it runs
+    mla = mlc.llm_modules.LatentAttention(32, 2, q_lora_rank=16, kv_lora_rank=8, qk_nope_dim=6, qk_rope_dim=4,
+                                          v_dim=10).eval()
+    expected = (32 + 32 * 16 + 16 + 16 * 2 * (6 + 4)  # pre-norm, query down / norm / up
+                + 32 * (8 + 4) + 8 + 8 * 2 * (6 + 10)  # key/value latent + shared rotary key, norm, up
+                + 2 * 10 * 32)  # output projection
+    assert sum(p.numel() for p in mla.parameters()) == expected
+    with torch.no_grad():
+        assert tuple(mla(h).shape) == (2, 8, 32)
+    # a tied head shares the embedding table: counted once, the very same tensor
+    tied = GraphSpec.model_validate(_with(GQA_GRAPH, "head", tie_embedding=True))
+    tm, tb = mlc.build_model(tied, seed=0)
+    assert tm._mods["n_head"].weight is tm._mods["n_emb"].emb.weight
+    assert tb.total_params == build.total_params - 32 * 32 == sum(p.numel() for p in tm.parameters())
+    # clear messages for contradictory settings — the layer is named, not the connection
+    cases = [
+        (_with(GQA_GRAPH, "att", heads=4, kv_heads=3), "cannot be shared evenly", "multiple of the key/value heads"),
+        (_with(GQA_GRAPH, "att", head_dim=7), "must be even", "even head size"),
+        (_with(GQA_GRAPH, "head", tie_embedding=True, vocab=64), "sizes differ", "embedding's vocabulary size"),
+    ]
+    for graph, msg, hint in cases:
+        try:
+            mlc.build_model(GraphSpec.model_validate(graph))
+            raise AssertionError(f"expected an error: {msg}")
+        except _ShapeError as exc:
+            assert msg in str(exc) and hint in (exc.hint or ""), (str(exc), exc.hint)
+    moe = _with(GQA_GRAPH, "mlp")
+    moe["nodes"][3] = {"id": "mlp", "type": "MoE", "params": {"experts": 2, "top_k": 3}}
+    st, res = _asgi("POST", "/build", json.dumps(moe).encode())
+    assert st == 422 and "each token goes to 3 experts" in res["detail"] and res["error"]["node_id"] == "mlp", res
+    assert "no automatic transform" not in res["detail"] and "between 1 and the number" in res["error"]["hint"], res
+    print("[llm layers] causal + sliding window hold; a tied head shares the table; clashing settings named")
+
+
+def test_real_scale_is_inspect_only():
+    real = get_architecture("gemma3_real").model_dump()
+    st, b = _asgi("POST", "/build", json.dumps(real).encode())
+    assert st == 200 and b["total_params"] == 999_885_952 and b["trainable"] is False, b
+    st, res = _asgi("POST", "/train", json.dumps(real).encode())
+    assert st == 422 and "far too big to train" in res["detail"] and "mini version" in res["detail"], res
+    st, res = _upload(real, b"PK\x03\x04 not really")
+    assert st == 422 and "far too big" in res["detail"], res
+    st, prev = _asgi("POST", "/data/preview", json.dumps(real).encode())
+    assert st == 200 and prev["num_classes"] == 262144, prev  # sized on meta: no weights made
+    st, ex = _asgi("POST", "/export/pytorch", json.dumps(real).encode())
+    assert st == 200 and "class GroupedQueryAttention" in ex["code"] and ".emb.weight" in ex["code"], st
+    st, b = _asgi("POST", "/build", json.dumps(get_architecture("gemma3").model_dump()).encode())
+    assert b["trainable"] is True and b["max_train_params"] == mlc.MAX_TRAIN_PARAMS
+    print("[flagships] a real-size model builds and exports (inspect), but never trains or loads weights")
+
+
+def test_next_token_dataset():
+    spec = GraphSpec.model_validate(GQA_GRAPH)
+    X, y = mlc.make_dataset("tokens", (8,), 32, spec.train, torch.device("cpu"))
+    assert X.shape == (64, 8) and y.shape == (64,) and int(X.max()) < 32 and int(y.max()) < 32
+    for row, nxt in zip(X.long().tolist(), y.tolist()):  # the label continues the repeating pattern
+        period = next(p for p in (2, 3, 4) if all(row[i] == row[i - p] for i in range(p, 8)))
+        assert nxt == row[8 - period], (row, nxt)
+    X2, y2 = mlc.make_dataset("tokens", (8,), 32, spec.train, torch.device("cpu"))
+    assert torch.equal(X, X2) and torch.equal(y, y2)
+    for bad in ((1, 28, 28), (2,)):
+        try:
+            mlc.make_dataset("tokens", bad, 32, spec.train, torch.device("cpu"))
+            raise AssertionError(bad)
+        except ValueError as exc:
+            assert "next token" in str(exc), exc
+    print("[data] next token: each label continues its row's pattern; deterministic; wrong inputs explained")
+
+
+def test_stage17_http():
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] == mlc.API_LEVEL >= 17, health
+    st, lib = _asgi("GET", "/architectures")
+    flags = {a["id"]: a for a in lib if a.get("scale") == "mini"}
+    assert set(flags) == {f["id"] for f in FLAGSHIPS}, sorted(flags)
+    ds = flags["deepseek_v3"]
+    assert ds["real_id"] == "deepseek_v3_real" and ds["real_params"] == 671_000_000_000
+    assert ds["hf_url"] == "https://huggingface.co/deepseek-ai/DeepSeek-V3" and "moe" in ds["tags"], ds
+    st, real = _asgi("GET", "/architectures/qwen3_real")
+    assert st == 200 and [n["type"] for n in real["nodes"]][:3] == ["Input", "Embedding", "Repeat"], real
+    print(f"[stage17] HTTP: /health api 17; the library lists {len(flags)} flagships with real size + model card")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -2334,8 +2512,15 @@ if __name__ == "__main__":
     test_training_starts_from_saved_weights()
     test_runs_are_pruned()
     test_stage16_http()
+    test_flagship_real_sizes_match_hugging_face()
+    test_flagship_minis_train_on_next_token()
+    test_flagship_minis_export_exactly()
+    test_llm_layers_behave_and_explain()
+    test_real_scale_is_inspect_only()
+    test_next_token_dataset()
+    test_stage17_http()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "
-        "+ Stage 15 + Stage 16)"
+        "+ Stage 15 + Stage 16 + Stage 17)"
     )

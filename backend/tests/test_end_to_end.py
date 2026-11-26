@@ -2622,6 +2622,80 @@ def test_meta_builds_take_turns():
     print("[meta] meta builds take turns and run no kernel (initialization skipped); CPU builds unchanged")
 
 
+_HIDDEN_GPU_PROBE = r'''
+import ctypes, json, os, sys
+import mlconstructor as mlc
+from mlconstructor import trainer
+import app
+import torch
+
+out = {"hidden": mlc.CUDA_HIDDEN, "var_left": "CUDA_VISIBLE_DEVICES" in os.environ,
+       "health": app.health()["cuda_available"], "auto": str(trainer._device("auto"))}
+try:
+    trainer._device("cuda")  # only a device object: nothing reaches the GPU even if this broke
+    out["refused"] = ""
+except ValueError as exc:
+    out["refused"] = str(exc)
+m = torch.nn.Linear(4, 2)
+opt = torch.optim.Adam(m.parameters(), lr=0.01)
+for _ in range(3):  # the first backward pass is what started the hidden driver
+    opt.zero_grad()
+    m(torch.randn(8, 4)).sum().backward()
+    opt.step()
+out["torch_cuda_initialized"] = torch.cuda.is_initialized()
+out["driver"] = None
+if sys.platform == "win32":
+    try:
+        cu = ctypes.WinDLL("nvcuda.dll")
+    except OSError:
+        cu = None  # no NVIDIA driver here
+    if cu is not None:
+        ctx, dev, flags, active = ctypes.c_void_p(), ctypes.c_int(), ctypes.c_uint(), ctypes.c_int()
+        started = cu.cuCtxGetCurrent(ctypes.byref(ctx)) == 0  # 3 = not initialized (it stays so when hidden)
+        has_ctx = None
+        if started and cu.cuDeviceGet(ctypes.byref(dev), 0) == 0:
+            if cu.cuDevicePrimaryCtxGetState(dev, ctypes.byref(flags), ctypes.byref(active)) == 0:
+                has_ctx = bool(active.value)
+        out["driver"] = {"started": started, "context": has_ctx}
+print(json.dumps(out))
+'''
+
+
+def test_hidden_gpus_stay_unused_and_never_crash():
+    # 26.11: the demo backend, started with CUDA_VISIBLE_DEVICES=-1, died (an access violation in
+    # the NVIDIA driver's own thread) a minute or so after torch first started the driver — in
+    # /health, and in the first backward pass even on the CPU. Hidden GPUs now stay unused by the
+    # app, and on Windows the variable is removed before the driver starts: the driver then starts
+    # normally, and CPU training opens no CUDA context (no video memory taken).
+    import subprocess
+
+    from mlconstructor.gpu import hides_every_gpu
+
+    for value, hidden in [(None, False), ("-1", True), ("", True), (" -1 ", True), ("none", True),
+                          ("-1,0", True), ("0", False), ("1,2", False), ("0,-1", False),
+                          ("GPU-5c1e2a", False), ("MIG-1", False)]:
+        assert hides_every_gpu(value) is hidden, (value, hidden)
+    backend = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES="-1", PYTHONIOENCODING="utf-8")
+    env.pop("PYTORCH_NVML_BASED_CUDA_CHECK", None)
+    proc = subprocess.run([sys.executable, "-c", _HIDDEN_GPU_PROBE], cwd=backend, env=env, stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, encoding="utf-8", timeout=180)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    out = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert out["hidden"] and out["health"] is False and out["auto"] == "cpu", out
+    assert "CUDA_VISIBLE_DEVICES='-1'" in out["refused"], out["refused"]
+    assert out["torch_cuda_initialized"] is False, out
+    if sys.platform == "win32":
+        assert out["var_left"] is False and "hides every GPU" in proc.stderr, out  # removed, and said so
+        driver = out["driver"]
+        if driver and driver["started"]:
+            assert driver["context"] is False, driver  # the driver runs, the card stays free
+    else:
+        assert out["var_left"] is True, out  # elsewhere the variable is left as it was
+    print(f"[gpu] hidden GPUs: /health no, 'cuda' refused, auto -> cpu; driver {out['driver']} "
+          "(on Windows the variable is removed before the driver starts — no crash, no CUDA context)")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -2722,6 +2796,7 @@ if __name__ == "__main__":
     test_text_errors_are_clear()
     test_stage18_http()
     test_meta_builds_take_turns()
+    test_hidden_gpus_stay_unused_and_never_crash()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "

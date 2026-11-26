@@ -47,12 +47,23 @@ class OutputNode(LayerNode):
     """Marks the network output: one score per class. Pass-through (no parameters).
 
     It takes a flat vector — a classifier's class scores. Since Stage 14 a
-    connection into it flattens a sequence or a feature map automatically."""
+    connection into it flattens a sequence or a feature map automatically.
+
+    Stage 18 — "every position": a language model's (L, vocab) scores, the next
+    token guessed at every position at once — how a GPT trains."""
 
     category = "io"
     label = "Output"
 
+    @classmethod
+    def param_defs(cls) -> list[ParamDef]:
+        return [ParamDef(name="per_token", type="bool", default=False, label="Every position (a language model)",
+                         help="On: the next token is scored at every position (L x vocab), as a GPT trains on "
+                              "every character at once. Off: one score per class.")]
+
     def out_shape(self, in_shape: Shape | None) -> Shape:
+        if bool(self.p("per_token", False)):
+            return self._require_shape(in_shape, ndim=2, what="(L, vocab): scores at every position")
         return self._require_shape(in_shape, ndim=1, what="(one score per class)")
 
     def build(self, in_shape: Shape | None) -> Optional[nn.Module]:

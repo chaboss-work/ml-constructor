@@ -1,0 +1,78 @@
+// Stage 15 — honest accuracy: held-out (validation) numbers, the verdict, split rows.
+
+// The headline number: green only when it generalises, amber when it over- or underfits.
+.kv-main {
+  margin-top: 4px;
+  font-size: 15px;
+  b {
+    font-size: 17px;
+  }
+  &.kv-good b {
+    color: var(--ion-color-success-shade, #28ba62);
+  }
+  &.kv-bad b {
+    color: var(--ion-color-warning-shade, #e0ac08);
+  }
+}
+
+// With a held-out curve the training curve turns grey and dashed; alone it stays as it was.
+.spark.acc.has-val .train-line {
+  stroke: var(--ion-color-medium, #92949c);
+  stroke-dasharray: 4 3;
+}
+.spark.acc .val-line {
+  stroke: var(--ion-color-success, #2dd36f);
+  stroke-width: 2;
+}
+
+.acc-legend {
+  .lg-val {
+    color: var(--ion-color-success, #2dd36f);
+  }
+  .lg-train {
+    opacity: 0.75;
+  }
+}
+
+.fit,
+.train-warn {
+  margin: 6px 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.fit {
+  border-left: 3px solid var(--ion-color-warning, #ffc409);
+  background: rgba(255, 196, 9, 0.1);
+  .fit-i {
+    margin-right: 6px;
+    font-weight: 700;
+  }
+  &.fit-good {
+    border-left-color: var(--ion-color-success, #2dd36f);
+    background: rgba(45, 211, 111, 0.1);
+  }
+}
+
+.train-warn {
+  border-left: 3px solid var(--ion-color-medium, #92949c);
+  background: rgba(146, 148, 156, 0.12);
+}
+
+.dp-table {
+  .dp-split {
+    white-space: nowrap;
+    font-size: 11px;
+    opacity: 0.7;
+  }
+  tr.dp-held {
+    background: rgba(45, 211, 111, 0.08);
+    .dp-split {
+      color: var(--ion-color-success, #2dd36f);
+      opacity: 1;
+      font-weight: 600;
+    }
+  }
+}

@@ -63,9 +63,19 @@ const NODE_H = 78;
 const AUTOSAVE_DELAY_MS = 700;
 const ANALYSIS_DELAY_MS = 450;
 /** The backend API this page needs: Stage 14 (smart connections, structured errors). */
-const REQUIRED_API = 14;
+const REQUIRED_API = 15;
 const OUTDATED_MSG =
-  'The server still runs an older backend: connection settings, automatic adaptation and hints need a restart of the backend.';
+  'The server still runs an older backend: connection settings, automatic adaptation, hints and validation accuracy need a restart of the backend.';
+/** Stage 15 — the share of rows held out for validation unless the project says otherwise. */
+const DEFAULT_VAL_FRACTION = 0.2;
+/** The choices of the "Check on new data" picker. */
+const VAL_CHOICES: { value: number; label: string }[] = [
+  { value: 0, label: 'Off — measure on the training rows' },
+  { value: 0.1, label: '10 % of rows' },
+  { value: 0.2, label: '20 % of rows (default)' },
+  { value: 0.3, label: '30 % of rows' },
+  { value: 0.5, label: '50 % of rows' },
+];
 const ORIGINS: readonly ProjectOrigin[] = ['new', 'browser', 'server', 'file'];
 
 interface Notice {
@@ -95,7 +105,7 @@ interface Notice {
     IonSearchbar,
   ],
   templateUrl: './editor.page.html',
-  styleUrls: ['./editor.page.scss', './projects.scss', './connections.scss'],
+  styleUrls: ['./editor.page.scss', './projects.scss', './connections.scss', './training.scss'],
 })
 export class EditorPage {
   private api = inject(ApiService);
@@ -133,6 +143,8 @@ export class EditorPage {
   // ---- live training + checkpoints (Stage 11) ----
   liveLoss = signal<number[]>([]);
   liveAcc = signal<number[]>([]);
+  /** Stage 15 — held-out accuracy per epoch while training streams. */
+  liveValAcc = signal<number[]>([]);
   saveCheckpoint = signal(false);
   resumeCheckpoint = signal(false);
 
@@ -205,6 +217,9 @@ export class EditorPage {
   lr = signal(0.01);
   batchSize = signal(64);
   samples = signal(512);
+  /** Stage 15 — share of rows held out for validation (the network never trains on them). */
+  valFraction = signal(DEFAULT_VAL_FRACTION);
+  readonly valChoices = VAL_CHOICES;
 
   // ---- interaction internals ----
   private mode: 'idle' | 'drag' | 'pan' = 'idle';
@@ -414,10 +429,17 @@ export class EditorPage {
     const live = this.liveAcc();
     return live.length ? live : (this.trainResult()?.acc_curve ?? []);
   });
+  curveValAcc = computed(() => {
+    const live = this.liveValAcc();
+    return live.length ? live : (this.trainResult()?.val_acc_curve ?? []);
+  });
 
   lossPoints = computed(() => this.pointsOf(this.curveLoss(), false));
   // Accuracy on a fixed 0..1 axis so the height reads as accuracy.
   accPoints = computed(() => this.pointsOf(this.curveAcc(), true));
+  valAccPoints = computed(() => this.pointsOf(this.curveValAcc(), true));
+  /** Stage 15 — the picker's label for a share that is not one of its choices (from a project). */
+  valChoiceMissing = computed(() => !VAL_CHOICES.some((c) => c.value === this.valFraction()));
 
   // Everything a project file holds, as one value (autosave tracks it).
   private snapshot = computed<EditorSnapshot>(() => {
@@ -826,6 +848,7 @@ export class EditorPage {
       lr: this.lr(),
       batch_size: this.batchSize(),
       samples: this.samples(),
+      val_fraction: this.valFraction(),
     };
     if (this.dataset() === 'custom') train.custom_rows = this.customRows();
     if (this.saveCheckpoint()) train.checkpoint = true;
@@ -855,7 +878,26 @@ export class EditorPage {
     if (this.saveCheckpoint()) t.checkpoint = true;
     if (this.resumeCheckpoint()) t.resume = true;
     if (this.device() !== 'cpu') t.device = this.device();
+    if (this.valFraction() !== DEFAULT_VAL_FRACTION) t.val_fraction = this.valFraction();
     return t;
+  }
+
+  /** Stage 15 — the "Check on new data" picker. */
+  setValFraction(v: string | number): void {
+    const f = Number(v);
+    if (!Number.isFinite(f) || f < 0 || f > 0.5) return;
+    this.valFraction.set(f);
+    this.trainResult.set(null);
+  }
+
+  /** Stage 15 — a share as a percentage for the picker ("25 %"). */
+  pct(v: number): string {
+    return `${Math.round(v * 100)} %`;
+  }
+
+  /** Stage 15 — the verdict's symbol: ✓ generalises, ⚠ otherwise. */
+  fitIcon(fit: string | null | undefined): string {
+    return fit === 'generalises' ? '✓' : '⚠';
   }
 
   onBuild(): void {
@@ -892,16 +934,19 @@ export class EditorPage {
     this.trainResult.set(null);
     this.liveLoss.set([]);
     this.liveAcc.set([]);
+    this.liveValAcc.set([]);
     const spec = this.toSpec();
     this.api
       .trainStream(spec, (e) => {
         if (e.type === 'start') {
           this.liveLoss.set([]);
           this.liveAcc.set([]);
+          this.liveValAcc.set([]);
         } else if (e.type === 'step' && e.loss != null) {
           this.liveLoss.update((a) => [...a, e.loss as number]);
         } else if (e.type === 'epoch' && e.acc != null) {
           this.liveAcc.update((a) => [...a, e.acc as number]);
+          if (e.val_acc != null) this.liveValAcc.update((a) => [...a, e.val_acc as number]);
         } else if (e.type === 'done' && e.result) {
           this.trainResult.set(e.result);
           this.busy.set(false);
@@ -1421,6 +1466,8 @@ export class EditorPage {
     this.batchSize.set(num(t.batch_size, 64));
     this.samples.set(num(t.samples, 512));
     this.customRows.set(Array.isArray(t.custom_rows) ? t.custom_rows : []);
+    const vf = num(t.val_fraction, DEFAULT_VAL_FRACTION);
+    this.valFraction.set(vf >= 0 && vf <= 0.5 ? vf : DEFAULT_VAL_FRACTION);
     this.saveCheckpoint.set(t.checkpoint === true);
     this.resumeCheckpoint.set(t.resume === true);
     this.device.set(t.device === 'cuda' || t.device === 'auto' ? t.device : 'cpu');
@@ -1442,6 +1489,7 @@ export class EditorPage {
     this.proposals.set([]);
     this.liveLoss.set([]);
     this.liveAcc.set([]);
+    this.liveValAcc.set([]);
     this.seq = s.nodes.length;
   }
 

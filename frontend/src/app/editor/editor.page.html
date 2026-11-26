@@ -142,8 +142,8 @@
       <div class="zoomhint">{{ zoom() * 100 | number: '1.0-0' }}%</div>
       @if (backendOutdated()) {
         <div class="outdated" (pointerdown)="$event.stopPropagation()">
-          ⚠ The server still runs an older backend than this page. Connections will not adapt by themselves and
-          errors come without hints until the backend is restarted.
+          ⚠ The server still runs an older backend than this page. Connections will not adapt by themselves, errors
+          come without hints and there is no accuracy on new data until the backend is restarted.
         </div>
       }
       @if (dropHover()) {
@@ -388,6 +388,25 @@
           <ion-label position="stacked">Samples</ion-label>
           <ion-input type="number" [value]="samples()" (ionInput)="samples.set(+$any($event).detail.value)"></ion-input>
         </ion-item>
+        <ion-item>
+          <ion-label position="stacked">Check on new data</ion-label>
+          <select class="ds-select" (change)="setValFraction($any($event).target.value)">
+            @for (c of valChoices; track c.value) {
+              <option [value]="c.value" [selected]="c.value === valFraction()">{{ c.label }}</option>
+            }
+            @if (valChoiceMissing()) {
+              <option [value]="valFraction()" selected>{{ pct(valFraction()) }} of rows</option>
+            }
+          </select>
+          <ion-note class="help">
+            @if (valFraction() > 0) {
+              {{ pct(valFraction()) }} of the rows are held out: the network never trains on them, so their accuracy
+              shows how it does on new data.
+            } @else {
+              Off: accuracy is measured on the very rows it trained on.
+            }
+          </ion-note>
+        </ion-item>
         @if (stage8()) {
           <ion-item>
             <ion-checkbox
@@ -459,20 +478,48 @@
             <polyline [attr.points]="lossPoints()"></polyline>
           </svg>
           @if (curveAcc().length) {
-            <svg class="spark acc" viewBox="0 0 220 60" preserveAspectRatio="none">
-              <polyline [attr.points]="accPoints()"></polyline>
+            <svg class="spark acc" [class.has-val]="curveValAcc().length > 0" viewBox="0 0 220 60" preserveAspectRatio="none">
+              <polyline class="train-line" [attr.points]="accPoints()"></polyline>
+              @if (curveValAcc().length) {
+                <polyline class="val-line" [attr.points]="valAccPoints()"></polyline>
+              }
             </svg>
           }
           <ion-note class="muted">training live · {{ curveLoss().length }} steps</ion-note>
         }
         @if (trainResult(); as t) {
-          <div class="kv"><span>Accuracy</span><b>{{ t.final_accuracy | number: '1.3-3' }}</b></div>
-          <div class="kv"><span>Final loss</span><b>{{ t.final_loss | number: '1.4-4' }}</b></div>
+          @if (t.final_val_accuracy != null) {
+            <div
+              class="kv kv-main"
+              [class.kv-good]="t.fit === 'generalises'"
+              [class.kv-bad]="t.fit === 'overfits' || t.fit === 'underfits'"
+              title="Accuracy on the rows held out from training: how it does on new data"
+            >
+              <span>On new data</span><b>{{ t.final_val_accuracy | number: '1.3-3' }}</b>
+            </div>
+            <div class="kv" title="Accuracy on the rows the network trained on">
+              <span>On training rows</span><b>{{ t.final_accuracy | number: '1.3-3' }}</b>
+            </div>
+            <div class="kv"><span>Loss · new / training</span>
+              <b>{{ t.final_val_loss | number: '1.4-4' }} / {{ t.final_loss | number: '1.4-4' }}</b></div>
+            <div class="kv"><span>Rows · trained / held out</span><b>{{ t.train_samples }} / {{ t.val_samples }}</b></div>
+          } @else {
+            <div class="kv"><span>Accuracy (training rows)</span><b>{{ t.final_accuracy | number: '1.3-3' }}</b></div>
+            <div class="kv"><span>Final loss</span><b>{{ t.final_loss | number: '1.4-4' }}</b></div>
+          }
+          @if (t.fit_note) {
+            <div class="fit" [class.fit-good]="t.fit === 'generalises'">
+              <span class="fit-i">{{ fitIcon(t.fit) }}</span>{{ t.fit_note }}
+            </div>
+          }
+          @for (w of t.warnings ?? []; track $index) {
+            <div class="train-warn">{{ w }}</div>
+          }
           <div class="kv"><span>Steps</span><b>{{ t.steps }}</b></div>
           @if (t.checkpoint) {
             <div class="kv">
               <span>Checkpoint</span>
-              <b>saved{{ t.best_accuracy != null ? ' · best ' + (t.best_accuracy | number: '1.3-3') : '' }}</b>
+              <b>saved{{ t.best_accuracy != null ? (t.final_val_accuracy != null ? ' · best on new data ' : ' · best ') + (t.best_accuracy | number: '1.3-3') : '' }}</b>
             </div>
           }
           @if (t.resumed) {
@@ -483,10 +530,20 @@
           </svg>
           <ion-note class="muted">loss curve · {{ t.device }}</ion-note>
           @if (t.acc_curve?.length) {
-            <svg class="spark acc" viewBox="0 0 220 60" preserveAspectRatio="none">
-              <polyline [attr.points]="accPoints()"></polyline>
+            <svg class="spark acc" [class.has-val]="!!t.val_acc_curve?.length" viewBox="0 0 220 60" preserveAspectRatio="none">
+              <polyline class="train-line" [attr.points]="accPoints()"></polyline>
+              @if (t.val_acc_curve?.length) {
+                <polyline class="val-line" [attr.points]="valAccPoints()"></polyline>
+              }
             </svg>
-            <ion-note class="muted">accuracy curve · per epoch (0–1)</ion-note>
+            @if (t.val_acc_curve?.length) {
+              <ion-note class="muted acc-legend">
+                accuracy per epoch (0–1) · <span class="lg-val">━ new data</span> ·
+                <span class="lg-train">┅ training rows</span>
+              </ion-note>
+            } @else {
+              <ion-note class="muted">accuracy curve · per epoch (0–1)</ion-note>
+            }
           }
         }
       </div>
@@ -545,17 +602,21 @@
                 <span>{{ p.feature_count | number }} features · {{ p.dtype }}</span>
                 <span>{{ p.num_classes }} classes</span>
                 <span>{{ p.num_samples | number }} samples</span>
+                @if (p.val_samples) {
+                  <span>{{ p.train_samples | number }} trained on · {{ p.val_samples | number }} held out</span>
+                }
               </div>
             </div>
             <table class="dp-table">
               <thead>
-                <tr><th>label</th><th>features</th></tr>
+                <tr><th>label</th><th>features</th><th>part</th></tr>
               </thead>
               <tbody>
                 @for (r of p.rows; track $index) {
-                  <tr>
+                  <tr [class.dp-held]="r.split === 'validation'">
                     <td class="dp-label">{{ r.label }}</td>
                     <td class="dp-vals">{{ rowValues(r) }}</td>
+                    <td class="dp-split">{{ r.split === 'validation' ? 'new data' : 'training' }}</td>
                   </tr>
                 }
               </tbody>
@@ -563,7 +624,13 @@
             @if (p.dataset === 'custom') {
               <ion-note class="muted block">Your rows, as the model will see them.</ion-note>
             } @else {
-              <ion-note class="muted block">The exact first rows the model trains on (same dataset &amp; seed).</ion-note>
+              <ion-note class="muted block">The exact first rows of the data (same dataset &amp; seed).</ion-note>
+            }
+            @if (p.val_samples) {
+              <ion-note class="muted block">
+                Rows marked <b>new data</b> are held out: the network never trains on them, and they show how it does
+                on data it has not seen.
+              </ion-note>
             }
           }
         </div>

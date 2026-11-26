@@ -140,6 +140,13 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
   network never trains on them, so `final_val_accuracy` / `val_acc_curve` show how it
   does on new data and `fit` gives a plain-words verdict (`0` = train and measure on
   every row).
+* `train.test_fraction` (default `0.1`) → rows kept for a final test; `POST /test`
+  (`{spec, run_id}`) measures a run's weights on them and says whether that is a fair
+  check. The same `seed` gives the same numbers: it sets the starting weights too.
+* Every training run keeps its weights (`run_id` in the result): `GET /runs/{run_id}/weights`
+  downloads them (`.pt`), `POST /weights/upload` loads a file back (read with
+  `weights_only=True`, tensors only), `train.init_run` trains on from them, and the
+  exported `model.py` has `load_weights()`.
 * `GET /layers` → the palette the editor renders.
 * `edge_settings` (optional) → how a connection reshapes its data; without it every
   connection adapts by itself (flatten, fold into an image, read an image as a

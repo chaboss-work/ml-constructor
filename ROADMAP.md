@@ -181,23 +181,23 @@ math. The rule stays the same: every stage is a self-contained increment — tes
 deployed to the live app, published on GitHub and turned into a narrated video on the
 project channels.
 
-The stages come in six blocks, ordered by dependency (Stages 14 and 16–19 were added
-on 2026-11-25 and Stage 15 on 2026-11-26, at the user's request, before the rest — the
-original later stages moved up by six):
+The stages come in six blocks, ordered by dependency (Stages 14 and 17–20 were added
+on 2026-11-25 and Stages 15–16 on 2026-11-26, at the user's request, before the rest —
+the original later stages moved up by seven):
 
-- **A · Foundation & clarity** (13–16) — save your work, connections that adapt by
-  themselves, honest accuracy on held-out data, errors in plain words with one-click
-  fixes.
-- **B · Flagship architectures** (17–19) — today's language models, the models behind
+- **A · Foundation & clarity** (13–17) — save your work, connections that adapt by
+  themselves, honest accuracy on held-out data, repeatable runs with saved weights and a
+  final test, errors in plain words with one-click fixes.
+- **B · Flagship architectures** (18–20) — today's language models, the models behind
   images, 3D, sound and vision, and training that generates.
-- **C · Look & feel** (20–22) — a new look, a truly interactive editor, a Russian
+- **C · Look & feel** (21–23) — a new look, a truly interactive editor, a Russian
   interface.
-- **D · The model in action** (23–24) — try the trained model on your own input and
+- **D · The model in action** (24–25) — try the trained model on your own input and
   see what happens inside it.
-- **E · Data workbench** (25–28) — datasets as tables, a universal column → input
+- **E · Data workbench** (26–29) — datasets as tables, a universal column → input
   mapper with warnings, and parsers that build datasets from raw material (text for
   language models, exported price candles for time series).
-- **F · Custom layers** (29–30) — your own activation formulas, gradients and weighted
+- **F · Custom layers** (30–31) — your own activation formulas, gradients and weighted
   layers, saved under your own names.
 
 | Stage | Block | In one line | Video |
@@ -205,25 +205,26 @@ original later stages moved up by six):
 | 13 | A | Projects: save, open, autosave — **done** | Close the tab, come back — it's all there |
 | 14 | A | Smart connections: wires that adapt the data, with settings — **done** | Plug anything into anything |
 | 15 | A | Honest accuracy: held-out data, training vs new-data curves, a verdict — **done** | Learning or memorising? |
-| 16 | A | Clear errors: plain words, why, what to do, one-click fixes | Errors you understand without a degree |
-| 17 | B | Flagship language models: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma | Qwen and DeepSeek from the inside |
-| 18 | B | Flagships for images, 3D, sound, vision: Stable Diffusion, DiT, ViT, Whisper | What is inside Stable Diffusion |
-| 19 | B | Teach it to generate: autoencoder, VAE, diffusion | A network draws digits |
-| 20 | C | A new look: design system, themes, live training on the canvas | Before / after |
-| 21 | C | Interactive editor: drag & drop, multi-select, undo / redo, mini-map | A ResNet in under a minute |
-| 22 | C | Russian interface (EN / RU) | The app in Russian |
-| 23 | D | Try the model: draw a digit, see the prediction | Draw a digit — it guesses |
-| 24 | D | Inside the model: confusion matrix, activations, early stopping | What is inside a neural network |
-| 25 | E | Datasets as tables: browse, statistics, edit, import | Fix your data like a spreadsheet |
-| 26 | E | Column → input mapper with warnings; regression | Plug any table into a network |
-| 27 | E | Text → dataset for language models; text generation | Feed it a book |
-| 28 | E | Time series from exported candles (e.g. SOLUSDT) | A network on SOLUSDT candles |
-| 29 | F | Your own activations: a formula editor | Invent an activation function |
-| 30 | F | Your own gradients and weighted layers | A layer from scratch |
+| 16 | A | The same seed, the same numbers; save / load weights; a final test — **done** | Train, check, test — and keep it |
+| 17 | A | Clear errors: plain words, why, what to do, one-click fixes | Errors you understand without a degree |
+| 18 | B | Flagship language models: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma | Qwen and DeepSeek from the inside |
+| 19 | B | Flagships for images, 3D, sound, vision: Stable Diffusion, DiT, ViT, Whisper | What is inside Stable Diffusion |
+| 20 | B | Teach it to generate: autoencoder, VAE, diffusion | A network draws digits |
+| 21 | C | A new look: design system, themes, live training on the canvas | Before / after |
+| 22 | C | Interactive editor: drag & drop, multi-select, undo / redo, mini-map | A ResNet in under a minute |
+| 23 | C | Russian interface (EN / RU) | The app in Russian |
+| 24 | D | Try the model: draw a digit, see the prediction | Draw a digit — it guesses |
+| 25 | D | Inside the model: confusion matrix, activations, early stopping | What is inside a neural network |
+| 26 | E | Datasets as tables: browse, statistics, edit, import | Fix your data like a spreadsheet |
+| 27 | E | Column → input mapper with warnings; regression | Plug any table into a network |
+| 28 | E | Text → dataset for language models; text generation | Feed it a book |
+| 29 | E | Time series from exported candles (e.g. SOLUSDT) | A network on SOLUSDT candles |
+| 30 | F | Your own activations: a formula editor | Invent an activation function |
+| 31 | F | Your own gradients and weighted layers | A layer from scratch |
 
 Cross-cutting rules for Phase 2: user formulas are read by a **safe math parser** and
 are never executed as code; file parsers have size limits; project files carry a format
-version, so older files keep opening; from Stage 22 on, every new string ships in
+version, so older files keep opening; from Stage 23 on, every new string ships in
 English and Russian.
 
 ### Stage 13 — Projects: save, open, autosave · **DONE (2026-11-25)**
@@ -324,7 +325,45 @@ Is the network learning the rule, or just memorising its rows?
   front-end project tests cover the new setting; the tests caught all 10 bugs planted on
   purpose in a copy of the code); checked live in the browser.
 
-### Stage 16 — Clear errors with fixes · *planned*
+### Stage 16 — The same seed, the same numbers; saved weights; a final test · **DONE (2026-11-26)**
+Train, check on new data, test once at the end — and keep what you trained.
+- **Repeatable runs:** the starting weights now come from the run's seed too, so Train
+  with the same settings gives the same numbers every time (before, the weights depended
+  on whatever the server had done earlier). The global random state is left alone and
+  CUDA is never touched.
+- **A test part:** besides validation, a share of the rows (10 % by default; off / 10 /
+  20 / 30 % in **Final test**) is kept for one final check — used neither for training
+  nor for judging epochs. **Test** measures the weights on it once you are done tuning,
+  next to their validation accuracy, and says whether it is a fair check: weights trained
+  on another split (some test rows were training rows) or of unknown origin are flagged.
+- **Saved weights:** every training run keeps its weights on the server; **Save weights**
+  downloads them (`.pt`), **Load weights** brings a file back into the same graph — by
+  name, or by position for files saved by the exported script — to test it or to train
+  on from it. Files are read with `weights_only=True`: plain tensors only, nothing in a
+  file ever runs. The exported `model.py` gains `load_weights()`, so the trained network
+  runs anywhere.
+- *Done when:* two runs with the same settings match number for number; Test reports the
+  test rows honestly; a downloaded file loads back (and into `model.py`) and gives the
+  same answers; a file that tries to run code is refused before it runs.
+- *Video:* train, check, test — and keep the weights.
+- **Shipped:** `build_model(spec, seed=…)` (the app passes the run's seed);
+  `datasets.split_parts` (train / validation / test; with no test part it is exactly
+  Stage 15's split); `train.test_fraction` (0–0.5, default 0.1; validation + test may hold
+  out at most 70 %) and `train.init_run`; `TrainResult.test_samples` / `run_id`;
+  `POST /test`, `GET /runs/{id}/weights`, `POST /weights/upload` (64 MB at most; the last
+  30 runs are kept); a weights file records which data and split it was trained on;
+  `/health` reports API 16. **Behaviour change:** by default training uses 70 % of the
+  rows (20 % validation, 10 % test). Tested: the same seed gives the same weights, curves
+  and test; the split keeps its guarantees on 400 random label sets; downloaded weights
+  equal the trained ones and load back to the same test; the exported `model.py` loads
+  them for an MLP, a CNN with BatchNorm, the GPT with a Repeat block and the screenshot
+  graph; a resized layer is named, a renamed one matched by position, another network
+  refused, a code-running file refused before it runs, an id is never a path (9 new
+  backend tests; the tests caught all 14 bugs planted on purpose in a copy of the code;
+  front-end project tests 17/17); checked live in the browser — train, test, save, load,
+  train on from the loaded weights.
+
+### Stage 17 — Clear errors with fixes · *planned*
 Every message says what happened, why, and what to do — in plain words.
 - A catalogue of every error the editor can meet (shapes, wiring, parameters, data,
   training): each gets a short title in plain words, a "why" — with a small glossary
@@ -340,7 +379,7 @@ Every message says what happened, why, and what to do — in plain words.
   reading code.
 - *Video:* errors you understand without a degree.
 
-### Stage 17 — Flagship language models · *planned*
+### Stage 18 — Flagship language models · *planned*
 The architectures behind today's chatbots, as editable graphs.
 - New layers: RMSNorm, a SwiGLU feed-forward, rotary position embedding (RoPE),
   grouped-query attention (GQA) with a causal mask, a mixture of experts (MoE) with a
@@ -354,7 +393,7 @@ The architectures behind today's chatbots, as editable graphs.
   (within 1 %), and each mini model trains.
 - *Video:* Qwen and DeepSeek from the inside.
 
-### Stage 18 — Flagships for images, 3D, sound and vision · *planned*
+### Stage 19 — Flagships for images, 3D, sound and vision · *planned*
 - New layers: patch embedding, Conv3d, up-sampling, a timestep embedding,
   cross-attention, adaptive normalization.
 - Library entries: **ViT**, **CLIP**, **Stable Diffusion** (VAE + U-Net with
@@ -365,7 +404,7 @@ The architectures behind today's chatbots, as editable graphs.
   mini model builds and runs a forward pass.
 - *Video:* what is inside Stable Diffusion.
 
-### Stage 19 — Teach it to generate · *planned*
+### Stage 20 — Teach it to generate · *planned*
 Training beyond classification.
 - New training tasks: **reconstruction** (autoencoder, VAE) and **denoising diffusion**,
   with the right losses and samplers.
@@ -375,7 +414,7 @@ Training beyond classification.
   VAE reconstructs them.
 - *Video:* a network draws digits.
 
-### Stage 20 — A new look · *planned*
+### Stage 21 — A new look · *planned*
 An editor that is attractive at first sight.
 - A design system — palette, typography, spacing, elevation — with **dark and light
   themes** and a switch.
@@ -392,7 +431,7 @@ An editor that is attractive at first sight.
   animation does not slow training down.
 - *Video:* before / after.
 
-### Stage 21 — An interactive editor · *planned*
+### Stage 22 — An interactive editor · *planned*
 Editing that feels like a real tool.
 - **Drag & drop** layers from the palette onto the canvas; connect by **dragging from
   port to port**, with valid targets highlighted and shape mismatches flagged while you
@@ -406,7 +445,7 @@ Editing that feels like a real tool.
   tests cover drag, connect, copy / paste and undo.
 - *Video:* building a ResNet in under a minute with drag & drop and shortcuts.
 
-### Stage 22 — Russian interface (EN / RU) · *planned*
+### Stage 23 — Russian interface (EN / RU) · *planned*
 - A translation layer for the UI with a language switch, remembered per browser.
 - Every UI string, layer description and parameter hint in English and Russian; the
   backend's layer catalogue and error messages become translatable (stable error codes
@@ -416,10 +455,10 @@ Editing that feels like a real tool.
   check fails the build on a missing key).
 - *Video:* the app in Russian, for the Russian-speaking audience.
 
-### Stage 23 — Try the model · *planned*
+### Stage 24 — Try the model · *planned*
 Use the network you have just trained.
-- The backend keeps the session's last trained model (and can load a saved checkpoint);
-  `POST /predict` returns class probabilities.
+- The backend already keeps every run's weights (Stage 16) and loads a saved weights
+  file; `POST /predict` returns class probabilities for a run.
 - A **Try it** panel: for images a **drawing canvas** (MNIST-style preprocessing —
   centring and scaling to 28×28) and image upload; for vectors and custom data, a value
   or row input.
@@ -429,7 +468,7 @@ Use the network you have just trained.
   and the predictions match the backend's offline result.
 - *Video:* draw a digit — the network guesses it.
 
-### Stage 24 — Inside the model · *planned*
+### Stage 25 — Inside the model · *planned*
 See what the network has learned — and where it struggles.
 - **Early stopping** on the held-out loss, and per-class numbers on the held-out rows (the
   train / validation split and its curves arrived in Stage 15).
@@ -443,7 +482,7 @@ See what the network has learned — and where it struggles.
   are covered by tests.
 - *Video:* what is going on inside a neural network.
 
-### Stage 25 — Datasets as tables · *planned*
+### Stage 26 — Datasets as tables · *planned*
 A real view of the data instead of a few preview rows.
 - One table model for every dataset — columns with types (number, category, text,
   image, time) and rows — built-in datasets included.
@@ -452,13 +491,13 @@ A real view of the data instead of a few preview rows.
 - Column statistics: min / max / mean / standard deviation, missing values, unique
   values, histograms, class balance.
 - **Editing:** cells, add / delete rows and columns, filter, sort, search.
-- Import CSV / TSV / JSON (more formats later), export, and a train / validation / test
-  split with a preview.
+- Import CSV / TSV / JSON (more formats later), export, and a preview of the train /
+  validation / test split (the split itself arrived in Stages 15–16).
 - *Done when:* a CSV can be imported, inspected, edited and saved with the project, and
   large tables page smoothly.
 - *Video:* look at and fix your data like in a spreadsheet.
 
-### Stage 26 — Column mapper & data warnings · *planned*
+### Stage 27 — Column mapper & data warnings · *planned*
 A universal editor that wires table columns to the model.
 - Columns on one side, the model's inputs on the other, connected by dragging; one
   column is picked as the **target**. The task follows from the target:
@@ -482,7 +521,7 @@ A universal editor that wires table columns to the model.
   end in both task types.
 - *Video:* plug any table into a network — the editor warns you before you train.
 
-### Stage 27 — Text → dataset for language models · *planned*
+### Stage 28 — Text → dataset for language models · *planned*
 Feed raw material, get a dataset built for the model.
 - Load material (txt / md; pdf and docx converted to text) or paste it.
 - A parser that cleans the text, tokenizes it (by characters, or with a BPE vocabulary
@@ -497,7 +536,7 @@ Feed raw material, get a dataset built for the model.
   material's style; parser tests cover tokenization and windowing.
 - *Video:* feed it a book — the model writes in its style.
 
-### Stage 28 — Time series: price candles · *planned*
+### Stage 29 — Time series: price candles · *planned*
 Build a dataset from an exported timeframe, e.g. SOLUSDT candles.
 - Import exported candles (CSV: time, open, high, low, close, volume); columns are
   detected and gaps in time are reported.
@@ -514,7 +553,7 @@ Build a dataset from an exported timeframe, e.g. SOLUSDT candles.
   test-period chart, and the leakage checks are tested.
 - *Video:* a neural network on SOLUSDT candles — and why it is harder than it looks.
 
-### Stage 29 — Your own activations: a formula editor · *planned*
+### Stage 30 — Your own activations: a formula editor · *planned*
 Create layers with your own math and keep them under your own names.
 - **Create a layer from…**: take any layer as the parent (ReLU, GELU, Sigmoid, …) and
   open its formula.
@@ -532,7 +571,7 @@ Create layers with your own math and keep them under your own names.
   standalone PyTorch, and the parser rejects anything outside the allow-list (tested).
 - *Video:* invent an activation function and train a network with it.
 
-### Stage 30 — Your own gradients & weighted layers · *planned*
+### Stage 31 — Your own gradients & weighted layers · *planned*
 - A **custom backward**: write your own derivative (a surrogate gradient) for step,
   threshold, quantization or spiking functions, and compare it with the automatic one.
 - **Layers with weights**: a formula over the input and trainable tensors (W, b, …)
@@ -638,23 +677,23 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 со своей математикой. Правило прежнее: каждый этап — самостоятельный инкремент: тесты,
 деплой в живое приложение, GitHub и озвученный ролик в каналах проекта.
 
-Шесть блоков, по порядку зависимостей (Этапы 14 и 16–19 добавлены 25.11, Этап 15 —
+Шесть блоков, по порядку зависимостей (Этапы 14 и 17–20 добавлены 25.11, Этапы 15–16 —
 26.11, всё по просьбе пользователя, и идут раньше остальных — прежние последующие этапы
-сдвинулись на шесть):
+сдвинулись на семь):
 
-- **A · Фундамент и понятность** (13–16) — сохранение работы, соединения, которые
-  подстраиваются сами, честная точность на отложенных данных, ошибки простыми словами с
-  исправлением в один клик.
-- **B · Флагманские архитектуры** (17–19) — языковые модели наших дней, модели для
+- **A · Фундамент и понятность** (13–17) — сохранение работы, соединения, которые
+  подстраиваются сами, честная точность на отложенных данных, повторяемые запуски с
+  сохранением весов и финальным тестом, ошибки простыми словами с исправлением в один клик.
+- **B · Флагманские архитектуры** (18–20) — языковые модели наших дней, модели для
   картинок, 3D, звука и зрения и обучение, которое генерирует.
-- **C · Облик и удобство** (20–22) — новый облик, по-настоящему интерактивный редактор,
+- **C · Облик и удобство** (21–23) — новый облик, по-настоящему интерактивный редактор,
   русский интерфейс.
-- **D · Модель в деле** (23–24) — проверить обученную сеть на своём примере и заглянуть
+- **D · Модель в деле** (24–25) — проверить обученную сеть на своём примере и заглянуть
   внутрь.
-- **E · Цех данных** (25–28) — датасеты как таблицы, универсальный редактор «колонки →
+- **E · Цех данных** (26–29) — датасеты как таблицы, универсальный редактор «колонки →
   входы» с предупреждениями и парсеры, которые собирают датасет из сырого материала
   (текст для языковых моделей, выгруженные свечи для временных рядов).
-- **F · Свои слои** (29–30) — свои формулы активации, градиенты и слои с весами — под
+- **F · Свои слои** (30–31) — свои формулы активации, градиенты и слои с весами — под
   своими названиями.
 
 | Этап | Блок | Коротко | Ролик |
@@ -662,26 +701,27 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 | 13 | A | Проекты: сохранить, открыть, автосохранение — **готово** | Закрыл вкладку, вернулся — всё на месте |
 | 14 | A | Умные соединения: связи, которые сами подгоняют данные, с настройками — **готово** | Соединяй что угодно с чем угодно |
 | 15 | A | Честная точность: отложенная выборка, кривые «обучение / новые данные», вердикт — **готово** | Учится или зубрит? |
-| 16 | A | Понятные ошибки: простыми словами, почему, что делать, исправление в один клик | Ошибки, понятные без диплома |
-| 17 | B | Флагманские языковые модели: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma | Qwen и DeepSeek изнутри |
-| 18 | B | Флагманы для картинок, 3D, звука и зрения: Stable Diffusion, DiT, ViT, Whisper | Что внутри у Stable Diffusion |
-| 19 | B | Учим генерировать: автоэнкодер, VAE, диффузия | Нейросеть рисует цифры |
-| 20 | C | Новый облик: дизайн-система, темы, живое обучение на холсте | Было / стало |
-| 21 | C | Интерактивный редактор: перетаскивание, мультивыделение, отмена, мини-карта | ResNet меньше чем за минуту |
-| 22 | C | Русский интерфейс (EN / RU) | Приложение на русском |
-| 23 | D | Проверка модели: нарисуй цифру — увидишь предсказание | Нарисовал цифру — сеть угадала |
-| 24 | D | Внутри модели: матрица ошибок, активации, ранняя остановка | Что внутри у нейросети |
-| 25 | E | Датасеты как таблицы: просмотр, статистика, правка, импорт | Правим данные, как в таблице |
-| 26 | E | Редактор «колонки → входы» с предупреждениями; регрессия | Подключаем любую таблицу к сети |
-| 27 | E | Текст → датасет для языковых моделей; генерация текста | Скормили книгу |
-| 28 | E | Временные ряды из выгруженных свечей (например, SOLUSDT) | Нейросеть на свечах SOLUSDT |
-| 29 | F | Свои функции активации: редактор формул | Придумали свою активацию |
-| 30 | F | Свои градиенты и слои с весами | Слой с нуля |
+| 16 | A | Один seed — одни цифры; сохранить / загрузить веса; финальный тест — **готово** | Обучили, проверили, протестировали — и сохранили |
+| 17 | A | Понятные ошибки: простыми словами, почему, что делать, исправление в один клик | Ошибки, понятные без диплома |
+| 18 | B | Флагманские языковые модели: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma | Qwen и DeepSeek изнутри |
+| 19 | B | Флагманы для картинок, 3D, звука и зрения: Stable Diffusion, DiT, ViT, Whisper | Что внутри у Stable Diffusion |
+| 20 | B | Учим генерировать: автоэнкодер, VAE, диффузия | Нейросеть рисует цифры |
+| 21 | C | Новый облик: дизайн-система, темы, живое обучение на холсте | Было / стало |
+| 22 | C | Интерактивный редактор: перетаскивание, мультивыделение, отмена, мини-карта | ResNet меньше чем за минуту |
+| 23 | C | Русский интерфейс (EN / RU) | Приложение на русском |
+| 24 | D | Проверка модели: нарисуй цифру — увидишь предсказание | Нарисовал цифру — сеть угадала |
+| 25 | D | Внутри модели: матрица ошибок, активации, ранняя остановка | Что внутри у нейросети |
+| 26 | E | Датасеты как таблицы: просмотр, статистика, правка, импорт | Правим данные, как в таблице |
+| 27 | E | Редактор «колонки → входы» с предупреждениями; регрессия | Подключаем любую таблицу к сети |
+| 28 | E | Текст → датасет для языковых моделей; генерация текста | Скормили книгу |
+| 29 | E | Временные ряды из выгруженных свечей (например, SOLUSDT) | Нейросеть на свечах SOLUSDT |
+| 30 | F | Свои функции активации: редактор формул | Придумали свою активацию |
+| 31 | F | Свои градиенты и слои с весами | Слой с нуля |
 
 Сквозные правила фазы 2: пользовательские формулы разбирает **безопасный математический
 парсер** — они никогда не исполняются как код; у парсеров файлов есть лимиты размера; у
 файлов проектов есть версия формата, поэтому старые файлы продолжают открываться; с
-Этапа 22 каждая новая строка интерфейса — сразу на английском и русском.
+Этапа 23 каждая новая строка интерфейса — сразу на английском и русском.
 
 #### Этап 13 — Проекты: сохранить, открыть, автосохранение · ГОТОВО (25.11)
 Работа больше не пропадает при обновлении страницы.
@@ -784,7 +824,45 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   покрывают новую настройку; тесты поймали все 10 ошибок, нарочно внесённых в копию кода);
   вживую в браузере.
 
-#### Этап 16 — Понятные ошибки с исправлениями (в планах)
+#### Этап 16 — Один seed — одни цифры; сохранённые веса; финальный тест · ГОТОВО (26.11)
+Обучили, проверили на новых данных, один раз протестировали в конце — и сохранили результат.
+- **Повторяемые запуски:** начальные веса теперь тоже берутся из seed запуска, поэтому Train
+  с теми же настройками каждый раз даёт те же цифры (раньше веса зависели от того, что
+  сервер делал до этого). Общее состояние генератора не меняется, CUDA не задействуется.
+- **Тестовая часть:** кроме валидации, часть строк (по умолчанию 10 %; в **Final test**:
+  выкл. / 10 / 20 / 30 %) откладывается для одной финальной проверки — не для обучения и не
+  для оценки эпох. **Test** меряет на ней веса, когда настройка закончена, рядом с их
+  точностью на валидации, и говорит, честная ли это проверка: веса, обученные на другом
+  разбиении (часть тестовых строк была в обучении) или неизвестного происхождения,
+  помечаются.
+- **Сохранение весов:** каждый запуск хранит свои веса на сервере; **Save weights** скачивает
+  их (`.pt`), **Load weights** возвращает файл в тот же граф — по именам или, для файлов из
+  экспортированного скрипта, по позиции, — чтобы протестировать или продолжить обучение.
+  Файлы читаются с `weights_only=True`: только тензоры, ничего из файла не исполняется. В
+  экспортированном `model.py` появилась `load_weights()`, так что обученная сеть работает
+  где угодно.
+- *Готово, когда:* два запуска с одинаковыми настройками совпадают цифра в цифру; Test честно
+  сообщает о тестовых строках; скачанный файл загружается обратно (и в `model.py`) и даёт те
+  же ответы; файл, пытающийся выполнить код, отклоняется до выполнения.
+- *Ролик:* обучили, проверили, протестировали — и сохранили веса.
+- **Сделано:** `build_model(spec, seed=…)` (приложение передаёт seed запуска);
+  `datasets.split_parts` (обучение / валидация / тест; без тестовой части — ровно разбиение
+  Этапа 15); `train.test_fraction` (0–0.5, по умолчанию 0.1; валидация + тест — не больше
+  70 % строк) и `train.init_run`; `TrainResult.test_samples` / `run_id`; `POST /test`,
+  `GET /runs/{id}/weights`, `POST /weights/upload` (до 64 МБ; хранятся последние 30
+  запусков); файл весов помнит, на каких данных и разбиении обучен; `/health` сообщает
+  API 16. **Изменение поведения:** по умолчанию обучение идёт на 70 % строк (20 % —
+  валидация, 10 % — тест). Проверено: одинаковый seed даёт одинаковые веса, кривые и тест;
+  разбиение держит гарантии на 400 случайных наборах меток; скачанные веса равны обученным
+  и после загрузки дают тот же тест; экспортированный `model.py` загружает их для MLP, CNN с
+  BatchNorm, GPT с блоком Repeat и графа со скриншота; изменённый размер слоя называется по
+  имени, переименованный слой сопоставляется по позиции, чужая сеть отклоняется, файл с
+  попыткой выполнить код отклоняется до выполнения, id никогда не бывает путём (9 новых
+  тестов бэкенда; тесты поймали все 14 ошибок, нарочно внесённых в копию кода; тесты
+  проектов во фронте 17/17); вживую в браузере — обучить, протестировать, сохранить,
+  загрузить, продолжить обучение с загруженных весов.
+
+#### Этап 17 — Понятные ошибки с исправлениями (в планах)
 Каждое сообщение говорит, что случилось, почему и что сделать — простыми словами.
 - Каталог всех ошибок, которые встречаются в редакторе (формы, связи, параметры, данные,
   обучение): у каждой — короткий заголовок простыми словами, «почему» — с маленьким
@@ -800,7 +878,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   набора, не читая код.
 - *Ролик:* ошибки, понятные без диплома.
 
-#### Этап 17 — Флагманские языковые модели (в планах)
+#### Этап 18 — Флагманские языковые модели (в планах)
 Архитектуры, на которых работают современные чат-боты, — как редактируемые графы.
 - Новые слои: RMSNorm, SwiGLU-блок, вращающиеся позиционные эмбеддинги (RoPE),
   внимание с группами запросов (GQA) и казуальной маской, смесь экспертов (MoE) с
@@ -814,7 +892,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   официальным (в пределах 1 %), а каждая мини-модель обучается.
 - *Ролик:* Qwen и DeepSeek изнутри.
 
-#### Этап 18 — Флагманы для картинок, 3D, звука и зрения (в планах)
+#### Этап 19 — Флагманы для картинок, 3D, звука и зрения (в планах)
 - Новые слои: нарезка на патчи, Conv3d, повышение разрешения, эмбеддинг шага диффузии,
   перекрёстное внимание, адаптивная нормализация.
 - В библиотеке: **ViT**, **CLIP**, **Stable Diffusion** (VAE + U-Net с перекрёстным
@@ -826,7 +904,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   опубликованным, а каждая мини-модель собирается и выполняет прямой проход.
 - *Ролик:* что внутри у Stable Diffusion.
 
-#### Этап 19 — Учим генерировать (в планах)
+#### Этап 20 — Учим генерировать (в планах)
 Обучение не только классификации.
 - Новые задачи обучения: **восстановление** (автоэнкодер, VAE) и **диффузионное
   шумоподавление** — с правильными функциями потерь и сэмплерами.
@@ -836,7 +914,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   цифры, а VAE их восстанавливает.
 - *Ролик:* нейросеть рисует цифры.
 
-#### Этап 20 — Новый облик
+#### Этап 21 — Новый облик
 Редактор, который цепляет с первого взгляда.
 - Дизайн-система — палитра, типографика, отступы, тени — с **тёмной и светлой темами** и
   переключателем.
@@ -853,7 +931,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   замедляет само обучение.
 - *Ролик:* было / стало.
 
-#### Этап 21 — Интерактивный редактор
+#### Этап 22 — Интерактивный редактор
 Редактирование, как в настоящем инструменте.
 - **Перетаскивание** слоёв из палитры на холст; соединение **протягиванием от порта к
   порту** — допустимые цели подсвечиваются, несовпадение форм видно ещё при наведении (на
@@ -868,7 +946,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   редактора покрывают перетаскивание, соединение, копирование и отмену.
 - *Ролик:* собираем ResNet меньше чем за минуту мышкой и горячими клавишами.
 
-#### Этап 22 — Русский интерфейс (EN / RU)
+#### Этап 23 — Русский интерфейс (EN / RU)
 - Слой переводов интерфейса с переключателем языка (запоминается в браузере).
 - Все строки интерфейса, описания слоёв и подсказки параметров — на английском и русском;
   каталог слоёв и сообщения об ошибках бэкенда становятся переводимыми (стабильные коды
@@ -878,10 +956,10 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   (проверка роняет сборку при пропущенном ключе).
 - *Ролик:* приложение на русском — для русскоязычной аудитории.
 
-#### Этап 23 — Проверка модели
+#### Этап 24 — Проверка модели
 Применить только что обученную сеть.
-- Бэкенд хранит последнюю обученную модель сессии (и умеет загрузить сохранённый
-  чекпоинт); `POST /predict` возвращает вероятности классов.
+- Бэкенд уже хранит веса каждого запуска (Этап 16) и загружает сохранённый файл весов;
+  `POST /predict` возвращает вероятности классов для запуска.
 - Панель **«Проверить»**: для картинок — **холст для рисования** (предобработка как у
   MNIST: центрирование и масштаб до 28×28) и загрузка изображения; для векторов и своих
   данных — ввод значений или строки.
@@ -891,7 +969,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   приложении, а предсказания совпадают с офлайн-результатом бэкенда.
 - *Ролик:* нарисовал цифру — сеть угадала.
 
-#### Этап 24 — Внутри модели
+#### Этап 25 — Внутри модели
 Увидеть, что выучила сеть и где она ошибается.
 - **Ранняя остановка** по потерям на отложенной части и точность по классам на ней (само
   разделение и его кривые появились в Этапе 15).
@@ -903,7 +981,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   покрыты тестами.
 - *Ролик:* что происходит внутри нейросети.
 
-#### Этап 25 — Датасеты как таблицы
+#### Этап 26 — Датасеты как таблицы
 Настоящий просмотр данных вместо пары строк превью.
 - Единая табличная модель для любого датасета — колонки с типами (число, категория,
   текст, изображение, время) и строки, — включая встроенные датасеты.
@@ -913,13 +991,13 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   значения, гистограммы, баланс классов.
 - **Редактирование:** ячейки, добавить / удалить строки и колонки, фильтр, сортировка,
   поиск.
-- Импорт CSV / TSV / JSON (другие форматы — позже), экспорт и разбиение на обучение /
-  валидацию / тест с предпросмотром.
+- Импорт CSV / TSV / JSON (другие форматы — позже), экспорт и предпросмотр разбиения на
+  обучение / валидацию / тест (само разбиение появилось в Этапах 15–16).
 - *Готово, когда:* CSV импортируется, просматривается, правится и сохраняется вместе с
   проектом, а большие таблицы листаются плавно.
 - *Ролик:* смотрим и правим свои данные, как в таблице.
 
-#### Этап 26 — Редактор «колонки → входы» и предупреждения
+#### Этап 27 — Редактор «колонки → входы» и предупреждения
 Универсальный редактор, который подключает колонки таблицы к модели.
 - Колонки — с одной стороны, входы модели — с другой, соединяются перетаскиванием; одна
   колонка выбирается **целевой**. Тип задачи следует из цели: **классификация**
@@ -943,7 +1021,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 - *Ролик:* подключаем любую таблицу к сети — редактор предупреждает об ошибках ещё до
   обучения.
 
-#### Этап 27 — Текст → датасет для языковых моделей
+#### Этап 28 — Текст → датасет для языковых моделей
 Подаём сырой материал — получаем датасет, собранный под модель.
 - Загрузка материала (txt / md; pdf и docx — с переводом в текст) или вставка текста.
 - Парсер чистит текст, токенизирует его (по символам или словарём BPE, обученным на самом
@@ -958,7 +1036,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   материала; тесты парсера покрывают токенизацию и нарезку окон.
 - *Ролик:* скормили книгу — модель пишет в её стиле.
 
-#### Этап 28 — Временные ряды: свечи
+#### Этап 29 — Временные ряды: свечи
 Датасет из выгруженного таймфрейма, например свечей SOLUSDT.
 - Импорт выгруженных свечей (CSV: время, open, high, low, close, volume); колонки
   распознаются, дыры во времени — показываются.
@@ -975,7 +1053,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   графика тестового периода, а проверки утечки покрыты тестами.
 - *Ролик:* нейросеть на свечах SOLUSDT — и почему это сложнее, чем кажется.
 
-#### Этап 29 — Свои функции активации: редактор формул
+#### Этап 30 — Свои функции активации: редактор формул
 Создавать слои со своей математикой и хранить их под своими названиями.
 - **«Создать слой на основе…»:** берём любой слой как родительский (ReLU, GELU, Sigmoid и
   т. д.) и открываем его формулу.
@@ -994,7 +1072,7 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   автономный PyTorch, а парсер отклоняет всё вне белого списка (проверено тестами).
 - *Ролик:* придумали свою функцию активации и обучили на ней сеть.
 
-#### Этап 30 — Свои градиенты и слои с весами
+#### Этап 31 — Свои градиенты и слои с весами
 - **Свой backward:** собственная формула производной (surrogate gradient) для
   ступенчатых, пороговых, квантующих или спайковых функций и сравнение с автоматической
   производной.

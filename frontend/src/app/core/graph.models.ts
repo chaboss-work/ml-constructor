@@ -123,6 +123,19 @@ export interface TrainCfg {
   test_fraction?: number;
   /** Stage 16 — start from the weights of an earlier run (a finished training or loaded file). */
   init_run?: string | null;
+  /** Stage 18 — the text for the "text" dataset (Your text). */
+  text?: string | null;
+}
+
+/** Stage 18 — your GPT writes: a prompt and its continuation. */
+export interface GenerateResult {
+  ok: boolean;
+  run_id: string;
+  prompt: string;
+  text: string;
+  unknown: number;
+  vocab_size: number;
+  context: number;
 }
 
 /** Stage 11 — one streamed progress event from POST /train/stream. */
@@ -293,6 +306,9 @@ export interface DataSampleRow {
   total: number;
   /** Stage 15 — "train", "validation" (held out) or "test" (kept for the final test, Stage 16). */
   split?: string;
+  /** Stage 18 — Your text: the window as text and the character that follows. */
+  text?: string | null;
+  label_text?: string | null;
 }
 
 export interface DataPreview {
@@ -309,6 +325,10 @@ export interface DataPreview {
   train_samples?: number | null;
   val_samples?: number;
   test_samples?: number;
+  /** Stage 18 — Your text: its length, its different characters, the tokens the network scores. */
+  text_chars?: number | null;
+  distinct_chars?: number | null;
+  vocab_size?: number | null;
 }
 
 /** Export (Stage 8): standalone PyTorch source for the current graph. */

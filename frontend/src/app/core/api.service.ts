@@ -9,6 +9,7 @@ import {
   DataPreview,
   DatasetInfo,
   ExportResult,
+  GenerateResult,
   GraphSpec,
   HealthInfo,
   LayerInfo,
@@ -98,6 +99,23 @@ export class ApiService {
   /** Load a weights file (.pt, base64) into the graph; the server keeps it as a run. */
   uploadWeights(spec: GraphSpec, data: string, name?: string): Observable<WeightsInfo> {
     return this.http.post<WeightsInfo>(`${API_BASE}/weights/upload`, { spec, data, name });
+  }
+
+  /** Stage 18 — continue a prompt with weights trained on your text. */
+  generate(spec: GraphSpec, runId: string, prompt: string, length: number, temperature: number, seed: number) {
+    return this.http.post<GenerateResult>(`${API_BASE}/generate`, {
+      spec,
+      run_id: runId,
+      prompt,
+      length,
+      temperature,
+      seed,
+    });
+  }
+
+  /** Stage 18 — the example text for Your text. */
+  textExample(): Observable<{ text: string }> {
+    return this.http.get<{ text: string }>(`${API_BASE}/text/example`);
   }
 
   /** Where a run's weights download from (a .pt file). */

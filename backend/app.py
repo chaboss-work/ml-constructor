@@ -10,6 +10,7 @@ Endpoints:
     POST /build    graph spec -> model summary (shapes, param counts) or 422
     POST /train    graph spec -> tiny training run -> loss curve + accuracy
     POST /test     the final test: a run's weights on the test rows (Stage 16)
+    POST /generate continue a prompt with weights trained on your text (Stage 18)
     GET  /runs/{id}/weights   download a run's weights (.pt)
     POST /weights/upload      load a weights file into the graph (kept as a run)
     POST /projects/normalize   any project file version -> current format + warnings
@@ -45,6 +46,8 @@ from mlconstructor.schema import (
     ProjectLoadResult,
     ProjectSaveResult,
     ProjectSummary,
+    GenerateRequest,
+    GenerateResult,
     SuggestResult,
     TestRequest,
     TestResult,
@@ -232,6 +235,24 @@ def test(req: TestRequest) -> TestResult:
         raise HTTPException(status_code=404, detail=str(exc))
     except _USER_ERRORS as exc:
         return _unprocessable(exc)
+
+
+@app.post("/generate", response_model=GenerateResult)
+def generate(req: GenerateRequest) -> GenerateResult:
+    """Stage 18 — your GPT writes: continue a prompt with a run's weights, trained on
+    "Your text", one character at a time."""
+    try:
+        return mlc.generate(req.spec, req.run_id, req.prompt, req.length, req.temperature, req.seed)
+    except mlc.RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except _USER_ERRORS as exc:
+        return _unprocessable(exc)
+
+
+@app.get("/text/example")
+def text_example() -> dict:
+    """Stage 18 — the example text for "Your text" (an original short story)."""
+    return {"text": mlc.EXAMPLE_TEXT}
 
 
 @app.get("/runs/{run_id}/weights")

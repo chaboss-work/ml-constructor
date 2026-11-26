@@ -46,6 +46,7 @@ from mlconstructor.schema import (
     ProjectLoadResult,
     ProjectSaveResult,
     ProjectSummary,
+    RunResult,
     GenerateRequest,
     GenerateResult,
     SuggestResult,
@@ -106,9 +107,22 @@ def build(spec: GraphSpec) -> BuildResult:
     made, so even a 671-billion-parameter flagship is sized in seconds."""
     try:
         _model, result = mlc.build_model(spec, meta=True)
-        result.trainable = result.total_params <= mlc.MAX_TRAIN_PARAMS
+        result.runnable = result.total_params <= mlc.MAX_TRAIN_PARAMS
+        # Stage 19: several inputs, or a picture as output — it builds and runs, not trains (yet)
+        result.train_note = mlc.train_block_reason(spec, result) if result.runnable else None
+        result.trainable = result.runnable and result.train_note is None
         result.max_train_params = mlc.MAX_TRAIN_PARAMS
         return result
+    except _USER_ERRORS as exc:
+        return _unprocessable(exc)
+
+
+@app.post("/run", response_model=RunResult)
+def run(spec: GraphSpec) -> RunResult:
+    """Stage 19 — one forward pass on random inputs: the network really runs (the
+    output's shape and numbers, the time it took). Works for several inputs."""
+    try:
+        return mlc.run_once(spec)
     except _USER_ERRORS as exc:
         return _unprocessable(exc)
 

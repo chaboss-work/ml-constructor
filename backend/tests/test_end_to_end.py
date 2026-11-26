@@ -17,8 +17,17 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # backend/ on path
+# Stage 16: every /train keeps its weights as a run — in a throwaway folder during the suite,
+# removed when the process ends (unless the caller chose the folder).
+if "MLC_RUNS_DIR" not in os.environ:
+    import atexit
+    import shutil
+
+    os.environ["MLC_RUNS_DIR"] = tempfile.mkdtemp(prefix="mlc-test-runs-")
+    atexit.register(shutil.rmtree, os.environ["MLC_RUNS_DIR"], True)
 
 import torch  # noqa: E402
 
@@ -308,7 +317,7 @@ def test_embedding_lstm_classifier_trains():
         "edges": [["in", "emb"], ["emb", "lstm"], ["lstm", "fc"], ["fc", "out"]],
         "train": {"epochs": 6, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
     })
-    model, build = mlc.build_model(spec)
+    model, build = mlc.build_model(spec, seed=0)  # fixed starting weights: not hostage to the tests before it
     out = {s.id: s.out_shape for s in build.layers}
     assert out["emb"] == [6, 8] and out["lstm"] == [16] and out["fc"] == [4], out
     in_shape = tuple(build.layers[0].out_shape)
@@ -1731,7 +1740,8 @@ SPLIT_MLP = {
         {"id": "out", "type": "Output", "params": {}},
     ],
     "edges": [["in", "fc1"], ["fc1", "a1"], ["a1", "fc2"], ["fc2", "out"]],
-    "train": {"dataset": "blobs", "epochs": 5, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+    "train": {"dataset": "blobs", "epochs": 5, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0,
+              "test_fraction": 0},  # Stage 15's checks are about validation alone
 }
 
 INSEPARABLE_MLP = {
@@ -1745,7 +1755,7 @@ INSEPARABLE_MLP = {
         {"id": "out", "type": "Output", "params": {}},
     ],
     "edges": [["in", "fc1"], ["fc1", "a1"], ["a1", "fc2"], ["fc2", "a2"], ["a2", "fc3"], ["fc3", "out"]],
-    "train": {"dataset": "custom", "epochs": 40, "lr": 0.02, "batch_size": 64, "seed": 0},
+    "train": {"dataset": "custom", "epochs": 40, "lr": 0.02, "batch_size": 64, "seed": 0, "test_fraction": 0},
 }
 
 
@@ -1907,7 +1917,7 @@ def test_stream_and_checkpoint_use_validation():
 
     # shells, so the training and held-out curves differ and the checkpoint's choice shows
     spec = GraphSpec.model_validate({**CKPT_MLP, "train": {**CKPT_MLP["train"], "dataset": "shells", "epochs": 6,
-                                                           "checkpoint": True}})
+                                                           "checkpoint": True, "test_fraction": 0}})
     model, build = mlc.build_model(spec)
     events = list(mlc.train_iter(model, tuple(build.layers[0].out_shape), spec.train))
     start, done = events[0], events[-1]["result"]
@@ -1939,11 +1949,11 @@ def test_preview_and_export_share_the_split():
     assert [r.split for r in prev.rows] == ["validation" if i in held else "train" for i in range(40)]
     assert {r.split for r in prev.rows} == {"train", "validation"}
     code = mlc.generate_pytorch(spec, include_training=True)
-    assert "VAL_FRACTION = 0.2" in code and "def split_indices" in code and "mlconstructor" not in code
+    assert "VAL_FRACTION = 0.2" in code and "def split_parts" in code and "mlconstructor" not in code
     ns = _exec_exported(code)
     for ys in (torch.randint(0, 5, (97,)), torch.tensor([0, 0, 1]), torch.tensor([3])):
         for f in (0.0, 0.2, 0.5):
-            assert all(torch.equal(p, q) for p, q in zip(ns["split_indices"](ys, f, 4), split_indices(ys, f, 4)))
+            assert all(torch.equal(p, q) for p, q in zip(ns["split_parts"](ys, f, 0.0, 4), split_indices(ys, f, 4)))
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         ns["main"]()
@@ -1964,6 +1974,278 @@ def test_stage15_http():
     st, res = _asgi("POST", "/train", json.dumps(bad).encode())
     assert st == 422, (st, res)  # at most half the rows can be held out
     print("[validation] HTTP: /health api 15, /train held-out fields + verdict, /data/preview split, 0.9 rejected")
+
+
+# --------------------------------------------------------------------------- #
+# Stage 16 — the same seed, the same numbers; a test part; keep / load / test weights.
+# --------------------------------------------------------------------------- #
+import base64  # noqa: E402
+import io  # noqa: E402
+
+from mlconstructor import weights as W  # noqa: E402
+from mlconstructor.datasets import split_parts  # noqa: E402
+
+RUN_MLP = {
+    "nodes": SPLIT_MLP["nodes"],
+    "edges": SPLIT_MLP["edges"],
+    "train": {"dataset": "blobs", "epochs": 3, "lr": 0.01, "batch_size": 64, "samples": 512, "seed": 0},
+}
+
+
+def _post(path: str, obj) -> tuple[int, object]:
+    return _asgi("POST", path, json.dumps(obj).encode())
+
+
+def _get_raw(path: str, query: str = "") -> tuple[int, bytes, dict]:
+    """GET over raw ASGI, returning the body as bytes (a file download)."""
+    import asyncio
+
+    from app import app as asgi_app
+
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET", "scheme": "http",
+        "path": path, "raw_path": path.encode(), "root_path": "", "query_string": query.encode(), "headers": [],
+        "client": ("127.0.0.1", 50000), "server": ("127.0.0.1", 8050),
+    }
+    out = {"status": 0, "body": b"", "headers": {}}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            out["status"] = message["status"]
+            out["headers"] = {k.decode().lower(): v.decode() for k, v in message.get("headers", [])}
+        elif message["type"] == "http.response.body":
+            out["body"] += message.get("body", b"")
+
+    asyncio.run(asgi_app(scope, receive, send))
+    return out["status"], out["body"], out["headers"]
+
+
+def _upload(spec: dict, raw: bytes) -> tuple[int, object]:
+    return _post("/weights/upload", {"spec": spec, "data": base64.b64encode(raw).decode()})
+
+
+def test_same_seed_same_weights_and_numbers():
+    spec = GraphSpec.model_validate(RUN_MLP)
+    before = torch.get_rng_state()
+    a, _ = mlc.build_model(spec, seed=3)
+    b, _ = mlc.build_model(spec, seed=3)
+    c, _ = mlc.build_model(spec, seed=4)
+    assert torch.equal(torch.get_rng_state(), before)  # the global random state is left alone
+    sa, sb, sc = a.state_dict(), b.state_dict(), c.state_dict()
+    assert all(torch.equal(sa[k], sb[k]) for k in sa)  # the same seed -> the same starting weights
+    assert not all(torch.equal(sa[k], sc[k]) for k in sa)  # another seed -> other weights
+    # Through the app: Train twice, the same numbers — curves, validation, the final test.
+    (s1, r1), (s2, r2) = _post("/train", RUN_MLP), _post("/train", RUN_MLP)
+    assert s1 == s2 == 200 and r1["loss_curve"] == r2["loss_curve"], (s1, s2)
+    assert r1["val_acc_curve"] == r2["val_acc_curve"] and r1["run_id"] != r2["run_id"]
+    t1, t2 = (_post("/test", {"spec": RUN_MLP, "run_id": r["run_id"]})[1] for r in (r1, r2))
+    assert (t1["accuracy"], t1["loss"]) == (t2["accuracy"], t2["loss"]), (t1, t2)
+    assert not torch.cuda.is_initialized()  # seeding never opens CUDA
+    print(f"[seed] the same seed -> the same weights, curves and test ({t1['accuracy']:.3f}); global RNG untouched")
+
+
+def test_three_part_split_keeps_its_guarantees():
+    y = torch.tensor([0] * 600 + [1] * 300 + [2] * 100)
+    tr, va, te = split_parts(y, 0.2, 0.1, 0)
+    assert (len(tr), len(va), len(te)) == (700, 200, 100), (len(tr), len(va), len(te))
+    assert [int((y[te] == c).sum()) for c in range(3)] == [60, 30, 10]  # stratified test part
+    assert [int((y[va] == c).sum()) for c in range(3)] == [120, 60, 20]  # and validation part
+    assert sorted(tr.tolist() + va.tolist() + te.tolist()) == list(range(1000))  # disjoint, nothing lost
+    assert all(torch.equal(p, q) for p, q in zip(split_parts(y, 0.2, 0.1, 0), split_parts(y, 0.2, 0.1, 0)))
+    g = torch.Generator().manual_seed(2)
+    for trial in range(400):
+        n = int(torch.randint(1, 90, (1,), generator=g))
+        ys = torch.randint(0, int(torch.randint(1, 10, (1,), generator=g)), (n,), generator=g)
+        fv = round(float(torch.rand(1, generator=g)) * 0.4, 2)
+        ft = round(float(torch.rand(1, generator=g)) * 0.3, 2)
+        tr, va, te = split_parts(ys, fv, ft, trial)
+        assert sorted(tr.tolist() + va.tolist() + te.tolist()) == list(range(n)), trial
+        assert set(ys[tr].tolist()) == set(ys.tolist()), trial  # no class vanishes from training
+        old = split_indices(ys, fv, trial)  # without a test part it is exactly Stage 15's split
+        assert all(torch.equal(p, q) for p, q in zip(split_parts(ys, fv, 0.0, trial)[:2], old)), trial
+    for ys in ([0], [0, 1], [0, 0, 1]):  # tiny sets: training keeps every class
+        tr, va, te = split_parts(torch.tensor(ys), 0.2, 0.1, 0)
+        assert {ys[i] for i in tr.tolist()} == set(ys), (ys, tr, va, te)
+    try:
+        GraphSpec.model_validate({**RUN_MLP, "train": {**RUN_MLP["train"], "val_fraction": 0.5, "test_fraction": 0.3}})
+        raise AssertionError("80 % held out should be refused")
+    except ValueError as exc:
+        assert "at least 30 %" in str(exc), exc
+    print("[split] train / validation / test 700/200/100 stratified; test 0 == Stage 15; 400 random sets hold")
+
+
+def test_weights_download_upload_and_test():
+    st, res = _post("/train", RUN_MLP)
+    assert st == 200 and (res["train_samples"], res["val_samples"], res["test_samples"]) == (359, 102, 51), res
+    st, raw, headers = _get_raw(f"/runs/{res['run_id']}/weights", "name=My%20net")
+    assert st == 200 and headers["content-type"] == "application/octet-stream", (st, headers)
+    assert 'filename="My net-weights.pt"' in headers["content-disposition"], headers
+    payload = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)  # plain tensors and values
+    assert payload["format"] == W.WEIGHTS_FORMAT and payload["data"] and payload["metrics"]["steps"] == res["steps"]
+    # the very weights the run ended with (training repeats exactly, so retrain and compare)
+    spec = GraphSpec.model_validate(RUN_MLP)
+    model, build = mlc.build_model(spec, seed=0)
+    mlc.train_model(model, (12,), spec.train)
+    assert all(torch.equal(payload["state_dict"][k], v) for k, v in model.state_dict().items())
+    st, test = _post("/test", {"spec": RUN_MLP, "run_id": res["run_id"]})
+    assert st == 200 and test["samples"] == 51 and test["same_split"] is True and test["accuracy"] >= 0.9, test
+    st, up = _upload(RUN_MLP, raw)  # the downloaded file loads back, knows its data, tests the same
+    assert st == 200 and up["matched"] == "names" and up["data_known"] and up["same_split"] is True, up
+    st, again = _post("/test", {"spec": RUN_MLP, "run_id": up["run_id"]})
+    assert (again["accuracy"], again["loss"]) == (test["accuracy"], test["loss"]), (again, test)
+    assert _get_raw("/runs/0123456789abcdef/weights")[0] == 404 and _get_raw("/runs/..%2Fx/weights")[0] == 404
+    print(f"[weights] download -> {len(raw):,} bytes (safe to load), upload -> the same test {test['accuracy']:.3f}")
+
+
+def test_final_test_reports_honestly():
+    st, res = _post("/train", RUN_MLP)
+    st, test = _post("/test", {"spec": RUN_MLP, "run_id": res["run_id"]})
+    assert test["note"].startswith("Confirmed") and not test["warnings"], test
+    other = {**RUN_MLP, "train": {**RUN_MLP["train"], "seed": 9}}  # another split: some test rows were trained on
+    st, unfair = _post("/test", {"spec": other, "run_id": res["run_id"]})
+    assert st == 200 and unfair["same_split"] is False and "not a fair check" in unfair["warnings"][0], unfair
+    st, none = _post("/test", {"spec": {**RUN_MLP, "train": {**RUN_MLP["train"], "test_fraction": 0}},
+                               "run_id": res["run_id"]})
+    assert st == 422 and "no test part" in none["detail"], none
+    st, gone = _post("/test", {"spec": RUN_MLP, "run_id": "0123456789abcdef"})
+    assert st == 404 and "no longer on the server" in gone["detail"], gone
+    # the inseparable set keeps an error on the test rows too
+    insep = {**INSEPARABLE_MLP, "train": {**INSEPARABLE_MLP["train"], "test_fraction": 0.1,
+                                          "custom_rows": _inseparable_rows()}}
+    st, r2 = _post("/train", insep)
+    st, t2 = _post("/test", {"spec": insep, "run_id": r2["run_id"]})
+    assert st == 200 and t2["samples"] == 50 and 0.5 < t2["accuracy"] < 0.95, t2
+    # a tiny test part: a warning, no reading
+    tiny = {**RUN_MLP, "train": {**RUN_MLP["train"], "samples": 100}}
+    st, r3 = _post("/train", tiny)
+    st, t3 = _post("/test", {"spec": tiny, "run_id": r3["run_id"]})
+    assert t3["samples"] == 10 and t3["note"] is None and "Only 10 rows" in t3["warnings"][-1], t3
+    print(f"[test] blobs confirmed; another split flagged unfair; inseparable test {t2['accuracy']:.3f}; "
+          "no test part / gone run / tiny part explained")
+
+
+def test_exported_script_runs_app_weights():
+    graphs = {aid: get_architecture(aid) for aid in ("mlp", "cnn", "gpt")}
+    graphs["screenshot"] = GraphSpec.model_validate(SCREENSHOT_GRAPH)
+    for name, spec in graphs.items():
+        model, build = mlc.build_model(spec, seed=1)
+        in_shape = tuple(build.layers[0].out_shape)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "w.pt")
+            with open(path, "wb") as f:
+                f.write(W.weights_bytes(model, data=None))
+            ns = _exec_exported(mlc.generate_pytorch(spec, include_training=False))
+            gen = ns["load_weights"](ns["Model"](), path)
+        model.eval()
+        gen.eval()
+        x = (torch.randint(0, 10, (3, *in_shape)) if name == "gpt" else torch.randn(3, *in_shape))
+        with torch.no_grad():
+            assert torch.allclose(gen(x), model(x), atol=1e-6), name  # the same network, the same answers
+    print("[weights] the exported model.py loads app weights (mlp, cnn + BatchNorm, gpt + Repeat, screenshot)")
+
+
+def test_uploads_are_checked_and_safe():
+    model, _ = mlc.build_model(GraphSpec.model_validate(RUN_MLP), seed=0)
+    good = W.weights_bytes(model, data=None)
+    wider = {**RUN_MLP, "nodes": [dict(n, params={"out_features": 64}) if n["id"] == "fc1" else n
+                                  for n in RUN_MLP["nodes"]]}
+    st, res = _upload(wider, good)
+    assert st == 422 and "fc1.weight is [32, 12] in the file but [64, 12] here" in res["detail"], res
+    st, res = _upload({**RUN_MLP, "nodes": SPLIT_MLP["nodes"][:3] + [
+        {"id": "fc9", "type": "Linear", "params": {"out_features": 4}}, SPLIT_MLP["nodes"][4]],
+        "edges": [["in", "fc1"], ["fc1", "a1"], ["a1", "fc9"], ["fc9", "out"]]}, good)
+    assert st == 200 and res["matched"] == "order", res  # renamed layer, same shapes: matched by position
+    st, res = _upload(get_architecture("cnn").model_dump(), good)
+    assert st == 422 and "different network" in res["detail"], res
+    bare = io.BytesIO()
+    torch.save({k.removeprefix("_mods."): v for k, v in model.state_dict().items()}, bare)  # the exported script's
+    st, res = _upload(RUN_MLP, bare.getvalue())
+    assert st == 200 and res["matched"] == "order" and res["data_known"] is False and res["same_split"] is None
+    st, res = _upload(RUN_MLP, b"definitely not a torch file")
+    assert st == 422 and "not a PyTorch weights file" in res["detail"], res
+    marker = os.path.join(tempfile.gettempdir(), f"mlc-pwned-{os.getpid()}")
+
+    class Evil:
+        def __reduce__(self):
+            return (os.makedirs, (marker,))
+
+    evil = io.BytesIO()
+    torch.save({"w": Evil()}, evil)
+    st, res = _upload(RUN_MLP, evil.getvalue())
+    assert st == 422 and "nothing in it was run" in res["detail"] and not os.path.exists(marker), res
+    st, res = _post("/weights/upload", {"spec": RUN_MLP, "data": "@@not base64@@"})
+    assert st == 422 and "bad base64" in res["detail"], res
+    big = json.dumps({"spec": RUN_MLP, "data": "A" * 16}).encode()
+    st, res = _asgi("POST", "/weights/upload", big[:10], content_length=False)  # truncated JSON
+    assert st == 422, (st, res)
+    import app as app_module
+
+    old = app_module._MAX_UPLOAD_JSON
+    app_module._MAX_UPLOAD_JSON = 1000
+    try:
+        st, res = _upload(RUN_MLP, good)
+        assert st == 413, (st, res)
+    finally:
+        app_module._MAX_UPLOAD_JSON = old
+    print("[weights] uploads: a resized layer named, renamed / bare files by position, another network refused, "
+          "junk refused, a code-running file refused before it runs, too big -> 413")
+
+
+def test_training_starts_from_saved_weights():
+    st, first = _post("/train", RUN_MLP)
+    st, cont = _post("/train", {**RUN_MLP, "train": {**RUN_MLP["train"], "init_run": first["run_id"]}})
+    assert st == 200 and cont["loss_curve"][0] < 0.25 * first["loss_curve"][0], (cont["loss_curve"][0],
+                                                                                   first["loss_curve"][0])
+    st, stale = _post("/train", {**RUN_MLP, "train": {**RUN_MLP["train"], "init_run": "ffffffffffffffff"}})
+    assert st == 422 and "no longer on the server" in stale["detail"], stale
+    print(f"[weights] training from saved weights starts at loss {cont['loss_curve'][0]:.3f} "
+          f"(fresh {first['loss_curve'][0]:.3f}); a stale id is explained")
+
+
+def test_runs_are_pruned():
+    old_max = W.MAX_RUNS
+    with tempfile.TemporaryDirectory() as d:
+        os.environ["MLC_RUNS_DIR"], prev = d, os.environ["MLC_RUNS_DIR"]
+        W.MAX_RUNS = 3
+        try:
+            model, _ = mlc.build_model(GraphSpec.model_validate(RUN_MLP), seed=0)
+            ids = [W.save_run(W.weights_bytes(model, data=None)) for _ in range(5)]
+            left = sorted(f[:-3] for f in os.listdir(d) if f.endswith(".pt"))
+            assert sorted(ids[-3:]) == left, (ids, left)  # exactly the newest three survive
+            # an id is never a path: a .pt next to the store stays out of reach
+            outside = os.path.join(os.path.dirname(d), f"outside-{os.getpid()}.pt")
+            with open(outside, "wb") as f:
+                f.write(W.weights_bytes(model, data=None))
+            try:
+                for bad in ("../" + os.path.basename(outside)[:-3], "..\\" + os.path.basename(outside)[:-3]):
+                    st, res = _post("/test", {"spec": RUN_MLP, "run_id": bad})
+                    assert st == 404, (bad, st, res)
+            finally:
+                os.remove(outside)
+        finally:
+            W.MAX_RUNS = old_max
+            os.environ["MLC_RUNS_DIR"] = prev
+    print("[weights] the server keeps the last runs only (oldest removed first)")
+
+
+def test_stage16_http():
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] == mlc.API_LEVEL >= 16, health
+    st, prev = _post("/data/preview", RUN_MLP)
+    assert st == 200 and (prev["train_samples"], prev["val_samples"], prev["test_samples"]) == (359, 102, 51), prev
+    assert {r["split"] for r in prev["rows"]} <= {"train", "validation", "test"}
+    code = mlc.generate_pytorch(GraphSpec.model_validate(RUN_MLP), include_training=True)
+    assert "TEST_FRACTION = 0.1" in code and "def load_weights" in code
+    import contextlib
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        _exec_exported(code)["main"]()
+    assert "final test on 51 rows" in buf.getvalue(), buf.getvalue()
+    print("[stage16] HTTP: /health api 16, preview marks train / validation / test, export tests once at the end")
 
 
 if __name__ == "__main__":
@@ -2043,8 +2325,17 @@ if __name__ == "__main__":
     test_stream_and_checkpoint_use_validation()
     test_preview_and_export_share_the_split()
     test_stage15_http()
+    test_same_seed_same_weights_and_numbers()
+    test_three_part_split_keeps_its_guarantees()
+    test_weights_download_upload_and_test()
+    test_final_test_reports_honestly()
+    test_exported_script_runs_app_weights()
+    test_uploads_are_checked_and_safe()
+    test_training_starts_from_saved_weights()
+    test_runs_are_pruned()
+    test_stage16_http()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "
-        "+ Stage 15)"
+        "+ Stage 15 + Stage 16)"
     )

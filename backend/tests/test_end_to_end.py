@@ -2566,6 +2566,62 @@ def test_stage18_http():
     print("[stage18] HTTP: /health api 18, /text/example, preview shows windows as text, Your GPT in the library")
 
 
+def test_meta_builds_take_turns():
+    # Two meta builds at once crashed a CPU-only backend (a native access violation in torch's
+    # Python meta kernels): every meta build holds the lock, so they run one at a time.
+    import threading as _th
+
+    from mlconstructor import builder as B
+
+    seen = []
+    real = B._build_model
+
+    def probe(spec):
+        free = []
+
+        def try_lock():  # from another thread: is the lock free right now?
+            ok = B.META_LOCK.acquire(blocking=False)
+            if ok:
+                B.META_LOCK.release()
+            free.append(ok)
+
+        t = _th.Thread(target=try_lock)
+        t.start()
+        t.join()
+        seen.append(free[0])
+        return real(spec)
+
+    B._build_model = probe
+    try:
+        mlc.build_model(get_architecture("gemma3"), meta=True)
+        mlc.build_model(get_architecture("gemma3"))  # a CPU build does not need it
+    finally:
+        B._build_model = real
+    assert seen == [False, True], seen  # taken during the meta build, free during the CPU one
+    # ... and a meta build runs no kernel at all: initialization is skipped, so torch's meta
+    # kernels (whose Python implementations crashed a CPU-only server) are never entered
+    from torch.utils._python_dispatch import TorchDispatchMode
+
+    class AtenOps(TorchDispatchMode):  # the operators that really reach torch's dispatcher
+        def __init__(self):
+            super().__init__()
+            self.ops = []
+
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            self.ops.append(func.overloadpacket.__name__)
+            return func(*args, **(kwargs or {}))
+
+    with AtenOps() as meta_ops:
+        model, build = mlc.build_model(get_architecture("gpt"), meta=True)  # Linear, Embedding, attention
+    fills = [o for o in meta_ops.ops if o.endswith("_")]  # uniform_, normal_, fill_, zero_, copy_ ...
+    assert not fills and all(p.is_meta for p in model.parameters()), sorted(set(fills))
+    assert build.total_params == mlc.build_model(get_architecture("gpt"))[1].total_params
+    with AtenOps() as cpu_ops:
+        mlc.build_model(get_architecture("mlp"))
+    assert any(o.endswith("_") for o in cpu_ops.ops), "a CPU build still initializes its weights"
+    print("[meta] meta builds take turns and run no kernel (initialization skipped); CPU builds unchanged")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -2665,6 +2721,7 @@ if __name__ == "__main__":
     test_text_export_writes_like_the_app()
     test_text_errors_are_clear()
     test_stage18_http()
+    test_meta_builds_take_turns()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "

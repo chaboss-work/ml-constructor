@@ -30,6 +30,7 @@ import {
   EdgeSummary,
   EditorEdge,
   EditorNode,
+  GenerateResult,
   GraphErrorInfo,
   GraphSpec,
   LayerInfo,
@@ -65,9 +66,11 @@ const NODE_H = 78;
 const AUTOSAVE_DELAY_MS = 700;
 const ANALYSIS_DELAY_MS = 450;
 /** The backend API this page needs: Stage 14 (smart connections, structured errors). */
-const REQUIRED_API = 17;
+const REQUIRED_API = 18;
 const OUTDATED_MSG =
-  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights and the flagship models need a restart of the backend.';
+  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights, the flagship models and Your text need a restart of the backend.';
+/** Stage 18 — the longest text Your text takes (characters). */
+const MAX_TEXT_CHARS = 1_000_000;
 
 /** Stage 17 — a parameter count in words for the library: 8.2B, 671B, 999.9M, 152K. */
 export function humanCount(n: number | null | undefined): string {
@@ -173,6 +176,26 @@ export class EditorPage {
   exportCopied = signal(false);
   overlayBusy = signal(false);
   overlayError = signal<string | null>(null);
+
+  // ---- Your text (Stage 18): a GPT learns it, then writes ----
+  textData = signal<string>('');
+  textError = signal<string | null>(null);
+  genPrompt = signal('');
+  genLength = signal(200);
+  genTemperature = signal(0.8);
+  genBusy = signal(false);
+  genError = signal<string | null>(null);
+  genResult = signal<GenerateResult | null>(null);
+  private genSeed = 0;
+  /** the text's different characters (code points, as the backend counts them) */
+  textDistinct = computed(() => new Set(Array.from(this.textData())).size);
+  /** how many tokens the network scores: its LM head (else its Embedding) */
+  networkVocab = computed(() => {
+    const head = this.nodes().find((n) => n.type === 'LMHead');
+    const emb = this.nodes().find((n) => n.type === 'Embedding');
+    const v = head ? head.params['vocab'] : emb ? emb.params['num_embeddings'] : null;
+    return typeof v === 'number' ? v : null;
+  });
 
   // ---- custom data: bring your own rows (Stage 9) ----
   customText = signal<string>('');
@@ -913,6 +936,7 @@ export class EditorPage {
     const loaded = this.loadedWeights();
     if (loaded) train.init_run = loaded.run_id;
     if (this.dataset() === 'custom') train.custom_rows = this.customRows();
+    if (this.dataset() === 'text') train.text = this.textData();
     if (this.saveCheckpoint()) train.checkpoint = true;
     if (this.resumeCheckpoint()) train.resume = true;
     // The GPU only where this backend has one: a project saved on a CUDA machine still trains elsewhere.
@@ -937,6 +961,7 @@ export class EditorPage {
       samples: this.samples(),
     };
     if (this.customRows().length) t.custom_rows = this.customRows(); // pasted rows travel with the project
+    if (this.textData()) t.text = this.textData(); // and so does your text (Stage 18)
     if (this.saveCheckpoint()) t.checkpoint = true;
     if (this.resumeCheckpoint()) t.resume = true;
     if (this.device() !== 'cpu') t.device = this.device();
@@ -1079,6 +1104,11 @@ export class EditorPage {
       this.runError.set('Select some data first: open “Data”, paste your rows, and Apply.');
       return;
     }
+    if (this.dataset() === 'text' && !this.textData().trim()) {
+      this.runError.set('Add your text first: open “Data”, paste or upload a text (or use the example).');
+      return;
+    }
+    this.genResult.set(null);
     this.busy.set(true);
     this.runError.set(null);
     this.runErrorInfo.set(null);
@@ -1159,7 +1189,93 @@ export class EditorPage {
       if (this.customRows().length) this.previewData();
       return;
     }
+    if (this.dataset() === 'text') {
+      this.overlayBusy.set(false);
+      if (this.textData().trim()) this.previewData();
+      return;
+    }
     this.previewData();
+  }
+
+  // ------------------------------------------------ Your text (Stage 18)
+  setTextData(v: string): void {
+    if (v.length > MAX_TEXT_CHARS) {
+      this.textError.set(`That is ${v.length.toLocaleString('en-US')} characters; Your text takes up to 1,000,000.`);
+      return;
+    }
+    this.textError.set(null);
+    this.textData.set(v);
+    this.trainResult.set(null);
+  }
+
+  applyText(): void {
+    if (!this.textData().trim()) {
+      this.textError.set('Paste or upload a text first (or use the example).');
+      return;
+    }
+    this.previewData();
+  }
+
+  onTextFile(ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      this.setTextData(String(reader.result ?? ''));
+      if (!this.textError()) this.applyText();
+    };
+    reader.readAsText(file);
+  }
+
+  useExampleText(): void {
+    this.api.textExample().subscribe({
+      next: (r) => {
+        this.setTextData(r.text);
+        this.applyText();
+      },
+      error: (e) => this.textError.set(this.errMsg(e)),
+    });
+  }
+
+  /** Give every character of the text a token of its own: the Embedding and the LM head
+   * get the text's number of different characters. */
+  fitVocabulary(): void {
+    const v = Math.max(2, this.textDistinct());
+    this.nodes.update((ns) =>
+      ns.map((n) =>
+        n.type === 'LMHead'
+          ? { ...n, params: { ...n.params, vocab: v } }
+          : n.type === 'Embedding'
+            ? { ...n, params: { ...n.params, num_embeddings: v } }
+            : n,
+      ),
+    );
+    this.trainResult.set(null);
+    this.showNotice('info', `Vocabulary set to ${v}: every character of your text has its own token.`);
+    this.previewData();
+  }
+
+  /** Your GPT writes: continue the prompt with the current weights. */
+  onGenerate(): void {
+    const runId = this.currentRunId();
+    if (!runId) return;
+    this.genBusy.set(true);
+    this.genError.set(null);
+    this.genSeed += 1;
+    this.api
+      .generate(this.toSpec(), runId, this.genPrompt(), this.genLength(), this.genTemperature(), this.genSeed)
+      .subscribe({
+        next: (r) => {
+          this.genResult.set(r);
+          this.genBusy.set(false);
+        },
+        error: (err) => {
+          this.genError.set(this.errMsg(err));
+          this.genBusy.set(false);
+        },
+      });
   }
 
   private previewData(): void {
@@ -1341,6 +1457,7 @@ export class EditorPage {
             // template needs its own task (the flagships learn "next token")
             ...this.uiTrain(),
             ...(t.dataset && t.dataset !== 'synthetic' ? { dataset: t.dataset } : {}),
+            ...(t.text ? { text: this.textData() || t.text } : {}),
             epochs: t.epochs ?? this.epochs(),
             lr: t.lr ?? this.lr(),
             batch_size: t.batch_size ?? this.batchSize(),
@@ -1635,6 +1752,10 @@ export class EditorPage {
     this.batchSize.set(num(t.batch_size, 64));
     this.samples.set(num(t.samples, 512));
     this.customRows.set(Array.isArray(t.custom_rows) ? t.custom_rows : []);
+    this.textData.set(typeof t.text === 'string' ? t.text : '');
+    this.textError.set(null);
+    this.genResult.set(null);
+    this.genError.set(null);
     const vf = num(t.val_fraction, DEFAULT_VAL_FRACTION);
     this.valFraction.set(vf >= 0 && vf <= 0.5 ? vf : DEFAULT_VAL_FRACTION);
     const tf = num(t.test_fraction, DEFAULT_TEST_FRACTION);

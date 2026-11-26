@@ -194,3 +194,84 @@
   font-size: 12.5px;
   line-height: 1.4;
 }
+
+// Stage 18 — Your text and your GPT writing.
+.text-ta {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 13px;
+}
+
+.as-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.text-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.dp-table {
+  .dp-char {
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .dp-text {
+    white-space: pre;
+    font-family: Georgia, "Times New Roman", serif;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 420px;
+  }
+}
+
+.gen-box {
+  margin: 10px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--ion-color-step-150, #e2e4e8);
+  border-radius: 8px;
+  .ft-h {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.65;
+    margin-bottom: 4px;
+  }
+  .gen-prompt-ta {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 13px;
+    resize: vertical;
+  }
+  .gen-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0;
+    font-size: 12px;
+    input {
+      width: 64px;
+    }
+  }
+  .gen-out {
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 6px 0 0;
+    padding: 8px;
+    border-radius: 6px;
+    background: rgba(146, 148, 156, 0.1);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 13px;
+    line-height: 1.45;
+    .gen-given {
+      opacity: 0.55;
+    }
+  }
+}

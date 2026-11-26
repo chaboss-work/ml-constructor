@@ -604,6 +604,34 @@
               }
             </div>
           }
+          @if (dataset() === 'text' && t.run_id) {
+            <div class="gen-box">
+              <div class="ft-h">Write with your model</div>
+              <textarea class="gen-prompt-ta" rows="2" placeholder="Start a sentence… (empty: the text's beginning)"
+                [value]="genPrompt()" (input)="genPrompt.set($any($event).target.value)"></textarea>
+              <div class="gen-controls">
+                <label>Length <input type="number" min="1" max="2000" [value]="genLength()"
+                  (input)="genLength.set(+$any($event).target.value || 200)" /></label>
+                <label title="0 = always the most likely character; higher = bolder">Boldness
+                  <select (change)="genTemperature.set(+$any($event).target.value)">
+                    <option value="0" [selected]="genTemperature() === 0">0 · most likely</option>
+                    <option value="0.5" [selected]="genTemperature() === 0.5">0.5</option>
+                    <option value="0.8" [selected]="genTemperature() === 0.8">0.8</option>
+                    <option value="1.2" [selected]="genTemperature() === 1.2">1.2 · bold</option>
+                  </select>
+                </label>
+                <ion-button size="small" fill="solid" [disabled]="genBusy()" (click)="onGenerate()">
+                  {{ genBusy() ? 'Writing…' : 'Write' }}
+                </ion-button>
+              </div>
+              @if (genError()) {
+                <ion-note color="danger" class="block">{{ genError() }}</ion-note>
+              }
+              @if (genResult(); as g) {
+                <pre class="gen-out"><span class="gen-given">{{ g.prompt }}</span><b>{{ g.text }}</b></pre>
+              }
+            </div>
+          }
           @if (t.checkpoint) {
             <div class="kv">
               <span>Checkpoint</span>
@@ -668,6 +696,46 @@
           <ion-button fill="clear" size="small" (click)="closeData()">✕</ion-button>
         </div>
         <div class="sheet-body">
+          @if (dataset() === 'text') {
+            <div class="custom-ed text-ed">
+              <div class="custom-hint">
+                Your text: a book, notes, letters, code — anything. The network learns to continue it, one
+                character at a time (every character is a token), then writes from your prompt.
+              </div>
+              <textarea
+                class="custom-ta text-ta"
+                rows="9"
+                placeholder="Paste your text here…"
+                [value]="textData()"
+                (input)="setTextData($any($event).target.value)"
+              ></textarea>
+              <div class="custom-actions">
+                <ion-button size="small" fill="solid" (click)="applyText()">Apply &amp; preview</ion-button>
+                <label class="file-btn">
+                  Upload .txt
+                  <input type="file" accept=".txt,.md,text/*" (change)="onTextFile($event)" hidden />
+                </label>
+                <button class="file-btn as-link" (click)="useExampleText()">Use the example</button>
+              </div>
+              @if (textData()) {
+                <div class="text-stats">
+                  {{ textData().length | number }} characters · {{ textDistinct() }} different
+                  @if (networkVocab(); as nv) {
+                    · the network scores {{ nv }}
+                  }
+                  @if (networkVocab() != null && textDistinct() > networkVocab()!) {
+                    <ion-button size="small" fill="outline" (click)="fitVocabulary()"
+                      title="Set the Embedding's and the LM head's vocabulary to the text's characters">
+                      Fit vocabulary ({{ textDistinct() }})
+                    </ion-button>
+                  }
+                </div>
+              }
+              @if (textError()) {
+                <ion-note color="danger" class="block">{{ textError() }}</ion-note>
+              }
+            </div>
+          }
           @if (dataset() === 'custom') {
             <div class="custom-ed">
               <div class="custom-hint">
@@ -728,8 +796,13 @@
               <tbody>
                 @for (r of p.rows; track $index) {
                   <tr [class.dp-held]="r.split === 'validation'" [class.dp-test]="r.split === 'test'">
-                    <td class="dp-label">{{ r.label }}</td>
-                    <td class="dp-vals">{{ rowValues(r) }}</td>
+                    @if (r.text != null) {
+                      <td class="dp-label dp-char">{{ r.label_text === ' ' ? '␣' : r.label_text === '\n' ? '↵' : r.label_text }}</td>
+                      <td class="dp-vals dp-text">…{{ r.text }}</td>
+                    } @else {
+                      <td class="dp-label">{{ r.label }}</td>
+                      <td class="dp-vals">{{ rowValues(r) }}</td>
+                    }
                     <td class="dp-split">
                       {{ r.split === 'validation' ? 'new data' : r.split === 'test' ? 'final test' : 'training' }}
                     </td>

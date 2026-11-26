@@ -101,8 +101,12 @@ def layers() -> list[LayerInfo]:
 
 @app.post("/build", response_model=BuildResult)
 def build(spec: GraphSpec) -> BuildResult:
+    """Shapes and parameter counts. Built on the meta device (Stage 17): no weight is
+    made, so even a 671-billion-parameter flagship is sized in seconds."""
     try:
-        _model, result = mlc.build_model(spec)
+        _model, result = mlc.build_model(spec, meta=True)
+        result.trainable = result.total_params <= mlc.MAX_TRAIN_PARAMS
+        result.max_train_params = mlc.MAX_TRAIN_PARAMS
         return result
     except _USER_ERRORS as exc:
         return _unprocessable(exc)
@@ -111,6 +115,7 @@ def build(spec: GraphSpec) -> BuildResult:
 def _prepare_training(spec: GraphSpec):
     """Build the model with reproducible starting weights (Stage 16: the run's seed)
     and load the weights to start from, if any. Returns (model, in_shape, train spec)."""
+    mlc.check_trainable(spec)  # sized on the meta device first: a real-scale flagship is refused here
     model, result = mlc.build_model(spec, seed=spec.train.seed)
     if not result.layers or result.layers[0].out_shape is None:
         raise ShapeError("graph has no Input node to take a shape from")

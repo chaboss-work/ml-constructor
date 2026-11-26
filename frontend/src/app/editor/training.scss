@@ -195,6 +195,44 @@
   line-height: 1.4;
 }
 
+// Stage 19 — Run once: a forward pass on random inputs.
+.once {
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--ion-color-success, #2dd36f);
+  background: rgba(45, 211, 111, 0.08);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  .once-h {
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .once-chip {
+    display: inline-block;
+    margin: 1px 4px 1px 0;
+    padding: 0 6px;
+    border-radius: 6px;
+    background: rgba(127, 127, 127, 0.14);
+    font-size: 11.5px;
+  }
+  .once-sample {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px;
+    opacity: 0.75;
+    overflow-wrap: anywhere;
+  }
+  .once-warn {
+    color: var(--ion-color-danger, #eb445a);
+  }
+}
+
+.once-err {
+  display: block;
+  margin: 4px 0 8px;
+  font-size: 12px;
+}
+
 // Stage 18 — Your text and your GPT writing.
 .text-ta {
   font-family: Georgia, "Times New Roman", serif;

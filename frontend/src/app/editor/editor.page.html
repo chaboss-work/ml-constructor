@@ -17,8 +17,12 @@
     </ion-title>
     <ion-buttons slot="end">
       <ion-button fill="outline" [disabled]="busy() || !nodes().length" (click)="onBuild()">Build</ion-button>
+      <ion-button fill="outline" color="primary" [disabled]="busy() || onceBusy() || !nodes().length || !runnable()"
+        (click)="onRunOnce()"
+        [title]="runnable() ? 'Run the network once on random inputs: does it run, what comes out, how fast' : 'Real size: too big to run here — the mini version runs'">
+        {{ onceBusy() ? 'Running…' : 'Run once' }}</ion-button>
       <ion-button fill="solid" color="primary" [disabled]="busy() || !nodes().length || inspectOnly()" (click)="onTrain()"
-        [title]="inspectOnly() ? 'Real size: too big to train here — the mini version trains' : 'Train the network'">Train ▶</ion-button>
+        [title]="trainNote() || (inspectOnly() ? 'Real size: too big to train here — the mini version trains' : 'Train the network')">Train ▶</ion-button>
     </ion-buttons>
   </ion-toolbar>
 </ion-header>
@@ -34,6 +38,11 @@
             @if (i === firstFlagship()) {
               <div class="arch-group" title="Each trains here as a mini model; its real size can be inspected">
                 Flagship language models
+              </div>
+            }
+            @if (i === firstVisionFlagship()) {
+              <div class="arch-group" title="Each runs here as a mini model (Run once); its real size can be inspected">
+                Flagships: images, 3D, sound, vision
               </div>
             }
             <ion-item button detail="false" [title]="a.description" (click)="loadArchitecture(a.id)">
@@ -491,12 +500,38 @@
       <div class="panel-h">Result</div>
       <div class="pad result">
         @if (inspectOnly() && analysis(); as an) {
-          <div class="real-size">
-            <b>Real size · {{ an.total_params | number }} parameters.</b>
-            Built on the "meta" device: every layer and shape of the real model, no memory used. It is
-            too big to train here (the limit is {{ human(an.max_train_params) }}): the mini version in the
-            library trains.
+          @if (an.train_note) {
+            <div class="real-size">{{ an.train_note }}</div>
+          } @else {
+            <div class="real-size">
+              <b>Real size · {{ an.total_params | number }} parameters.</b>
+              Built on the "meta" device: every layer and shape of the real model, no memory used. It is
+              too big to train here (the limit is {{ human(an.max_train_params) }}): the mini version in the
+              library trains.
+            </div>
+          }
+        }
+        @if (onceResult(); as r) {
+          <div class="once">
+            <div class="once-h">Run once · {{ r.ms }} ms · {{ r.total_params | number }} parameters</div>
+            <div class="once-row">
+              In:
+              @for (inp of r.inputs; track inp.id) {
+                <span class="once-chip" [title]="kindText(inp.kind)">{{ inp.name || inp.id }} [{{ shapeStr(inp.shape) }}]</span>
+              }
+            </div>
+            <div class="once-row">
+              Out: <b>[{{ shapeStr(r.output_shape) }}]</b> · mean {{ r.mean | number: '1.3-3' }} · spread
+              {{ r.std | number: '1.3-3' }} · from {{ r.min | number: '1.2-2' }} to {{ r.max | number: '1.2-2' }}
+            </div>
+            <div class="once-sample" title="The first numbers of the output">{{ sampleStr(r.sample) }}</div>
+            @if (!r.finite) {
+              <div class="once-warn">Some outputs are not finite numbers (NaN or infinity).</div>
+            }
           </div>
+        }
+        @if (onceError()) {
+          <ion-note color="danger" class="once-err">{{ onceError() }}</ion-note>
         }
         @if (!trainResult() && loadedWeights(); as lw) {
           <div class="weights-actions">

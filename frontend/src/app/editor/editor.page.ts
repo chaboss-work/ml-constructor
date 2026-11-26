@@ -37,6 +37,7 @@ import {
   ParamDef,
   ProjectLoadResult,
   ProjectSummary,
+  RunResult,
   TrainCfg,
   TrainEvent,
   TestResult,
@@ -66,9 +67,9 @@ const NODE_H = 78;
 const AUTOSAVE_DELAY_MS = 700;
 const ANALYSIS_DELAY_MS = 450;
 /** The backend API this page needs: Stage 14 (smart connections, structured errors). */
-const REQUIRED_API = 18;
+const REQUIRED_API = 19;
 const OUTDATED_MSG =
-  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights, the flagship models and Your text need a restart of the backend.';
+  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights, the flagship models, Your text, Run once and models with several inputs need a restart of the backend.';
 /** Stage 18 — the longest text Your text takes (characters). */
 const MAX_TEXT_CHARS = 1_000_000;
 
@@ -856,6 +857,9 @@ export class EditorPage {
 
   // -------------------------------------------------------- block inner chain
   nodeTitle(n: EditorNode): string {
+    if (n.type === 'Input' && typeof n.params['name'] === 'string' && n.params['name'].trim()) {
+      return `Input · ${n.params['name'].trim()}`; // Stage 19: a model can take several inputs
+    }
     return n.type === 'Repeat' ? `Block ×${n.params['repeat'] ?? 1}` : n.type;
   }
 
@@ -979,7 +983,52 @@ export class EditorPage {
   inspectOnly = computed(() => this.analysis()?.trainable === false);
 
   /** Stage 17 — where the flagship group starts in the library list. */
-  firstFlagship = computed(() => this.architectures().findIndex((a) => a.scale === 'mini'));
+  firstFlagship = computed(() =>
+    this.architectures().findIndex((a) => a.scale === 'mini' && a.category === 'language'),
+  );
+  /** Stage 19 — where the image / 3D / sound / vision flagships start. */
+  firstVisionFlagship = computed(() =>
+    this.architectures().findIndex((a) => a.scale === 'mini' && a.category !== 'language'),
+  );
+  /** Stage 19 — why the network cannot be trained here yet (several inputs, a picture as output). */
+  trainNote = computed(() => this.analysis()?.train_note ?? null);
+  /** Stage 19 — small enough to run once here (a real-size flagship is not). */
+  runnable = computed(() => this.analysis()?.runnable !== false);
+  /** Stage 19 — the last forward pass on random inputs. */
+  onceResult = signal<RunResult | null>(null);
+  onceBusy = signal(false);
+  onceError = signal<string | null>(null);
+
+  /** Stage 19 — run the network once on random inputs: does it run, what comes out, how fast. */
+  onRunOnce(): void {
+    if (!this.nodes().length) return;
+    this.onceBusy.set(true);
+    this.onceError.set(null);
+    this.api.run(this.toSpec()).subscribe({
+      next: (r) => {
+        this.onceResult.set(r);
+        this.onceBusy.set(false);
+      },
+      error: (err) => {
+        this.onceResult.set(null);
+        this.onceError.set(err?.status === 404 || err?.status === 405 ? OUTDATED_MSG : this.errMsg(err));
+        this.onceBusy.set(false);
+      },
+    });
+  }
+
+  shapeStr(s: number[] | null | undefined): string {
+    return (s ?? []).join('×');
+  }
+
+  /** What Run once fed an input, in words. */
+  kindText(kind: string): string {
+    return kind === 'tokens' ? 'random token ids' : kind === 'timestep' ? 'random steps' : 'random numbers';
+  }
+
+  sampleStr(v: number[]): string {
+    return v.map((x) => (Math.abs(x) >= 100 ? x.toExponential(2) : x.toFixed(3))).join('  ');
+  }
 
   /** Stage 16 — the "Final test" picker. */
   setTestFraction(v: string | number): void {
@@ -1406,6 +1455,8 @@ export class EditorPage {
     this.buildResult.set(null);
     this.proposals.set([]);
     this.runErrorInfo.set(null);
+    this.onceResult.set(null); // Stage 19: a forward pass of the old graph says nothing about the new one
+    this.onceError.set(null);
   }
 
   /** The structured part of a 422 (where the problem is, what to do), or just the message. */

@@ -512,21 +512,45 @@ Training beyond classification: networks that give back what they see, and netwo
   the tests caught all 16 bugs planted on purpose in a copy of the code; checked live
   in the browser.
 
-### Stage 21 — Clear errors with fixes · *planned*
+### Stage 21 — Clear errors with fixes · **DONE (2026-11-27)**
 Every message says what happened, why, and what to do — in plain words.
-- A catalogue of every error the editor can meet (shapes, wiring, parameters, data,
-  training): each gets a short title in plain words, a "why" — with a small glossary
-  (what C×H×W, a sequence, an embedding are) — and "what to do".
+- **A catalogue of every error and warning** the editor can meet — 63 errors and 9
+  warnings, across connections, shapes, settings, data and training. Each has a stable
+  code, a short title in plain words, a "why" with a small glossary (27 words: C×H×W, a
+  vector, a sequence, an embedding, a kernel, a head…, each explained on a click) and
+  "what to do". Every error the backend raises names its code — a test reads the source
+  to make sure.
 - **One-click fixes** next to the message: set a transform on the connection, change a
-  parameter, insert a layer, reconnect.
-- The culprit node or connection is highlighted and the view jumps to it; the checks
-  run as you edit, before Build.
-- Warnings for graphs that build but are probably wrong (a dropout of 0.9, a tiny
-  hidden layer, an unused branch, a layer after the Output…).
-- *Done when:* every error code has a plain-words explanation and at least one fix,
-  covered by tests; a newcomer repairs every broken graph of a test set without
-  reading code.
+  setting (the nearest head count that divides the width, padding that lets a kernel fit,
+  the Input's shape a dataset needs…), insert a layer (a ReLU between two Linears, Add or
+  Concat to join branches), reconnect (a skip connection, a several-input layer's inputs
+  in the right order), remove what is left over — or open Data, the library, Run once.
+  Each fix is tried on a copy of the graph before it is offered, and the ones that leave
+  no problem at all come first.
+- **Every problem at once, as you edit:** the live check after each edit (`POST /diagnose`)
+  reports all of them, not just the first, and also asks whether the chosen data would
+  refuse the network — before Build or Train. The culprit node or connection glows red
+  (yellow for a warning), "Show" brings it into view, and a failed Build jumps to it;
+  shapes worked out before a problem stay on the nodes.
+- **Warnings** for graphs that build but are probably wrong: a dropout of 0.9, a hidden
+  layer narrower than the classes, a branch that leads nowhere, layers after the Output, a
+  Softmax before the loss, two Linear layers in a row, no Output node, an extreme learning
+  rate, a batch bigger than the data.
+- The library's 37 templates — the real-size flagships too — check clean. The live check
+  of a real-size flagship is now near-instant: FLUX.1 took 7.8 s, it takes 0.04 s (the
+  picture foldings of Stage 14 are only worked out when needed).
 - *Video:* errors you understand without a degree.
+- **Shipped:** `error_codes.py` (the catalogue and the glossary), `fixes.py` (the edits
+  and how they apply), `diagnostics.py` (every problem, the fixers, the warnings, the
+  checks against the data); `GraphError` with `code` and `fixes`; `POST /diagnose`,
+  `GET /errors`; every 422 (and the 404 of weights that are gone) carries the explanation
+  in `error`; the editor's Problems panel, highlights, jumps and `core/fixes.ts`; API
+  level 21. Tested: 7 new backend tests — the test set of 49 broken graphs, each reported
+  where it is and repaired by a newcomer who presses only the offered buttons (at most 3
+  clicks); every code explained with a fix; every error raised with its code; the library
+  clean; HTTP — and the editor's unit tests on 70 cases written by the backend (the editor
+  makes exactly the backend's graph); the tests caught all 20 bugs planted on purpose in a
+  copy of the code; checked live in the browser.
 
 ### Stage 22 — A new look · *planned*
 An editor that is attractive at first sight.
@@ -1121,21 +1145,44 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   читает те же цифры; HTTP); тесты поймали все 16 ошибок, нарочно внесённых в копию
   кода; вживую в браузере.
 
-#### Этап 21 — Понятные ошибки с исправлениями (в планах)
+#### Этап 21 — Понятные ошибки с исправлениями · ГОТОВО (27.11)
 Каждое сообщение говорит, что случилось, почему и что сделать — простыми словами.
-- Каталог всех ошибок, которые встречаются в редакторе (формы, связи, параметры, данные,
-  обучение): у каждой — короткий заголовок простыми словами, «почему» — с маленьким
-  словарём (что такое C×H×W, последовательность, эмбеддинг) — и «что сделать».
+- **Каталог всех ошибок и предупреждений**, которые встречаются в редакторе, — 63 ошибки и
+  9 предупреждений: связи, формы, настройки, данные, обучение. У каждой — стабильный код,
+  короткий заголовок простыми словами, «почему» с маленьким словарём (27 слов: C×H×W,
+  вектор, последовательность, эмбеддинг, ядро, голова…, каждое объясняется по клику) и
+  «что сделать». Каждая ошибка бэкенда называет свой код — тест проверяет это по исходникам.
 - **Исправление в один клик** рядом с сообщением: поставить преобразование на соединение,
-  поменять параметр, вставить слой, переподключить.
-- Виноватая нода или соединение подсвечивается, вид переходит к ней; проверки идут прямо во
-  время правки, до Build.
-- Предупреждения для графов, которые собираются, но скорее всего ошибочны (dropout 0.9,
-  крошечный скрытый слой, неиспользуемая ветка, слой после Output…).
-- *Готово, когда:* у каждого кода ошибки есть объяснение простыми словами и хотя бы одно
-  исправление, всё покрыто тестами; новичок чинит каждый сломанный граф из тестового
-  набора, не читая код.
+  поменять настройку (ближайшее число голов, делящее ширину; отступ, с которым помещается
+  ядро; форма Input, которую требует набор данных…), вставить слой (ReLU между двумя
+  Linear, Add или Concat, чтобы соединить ветви), переподключить (обходная связь, входы
+  многовходового слоя в правильном порядке), убрать лишнее — или открыть Data, библиотеку,
+  Run once. Каждое исправление пробуется на копии графа, прежде чем его предложить, а те,
+  после которых не остаётся ни одной проблемы, идут первыми.
+- **Все проблемы сразу, прямо во время правки:** живая проверка после каждой правки
+  (`POST /diagnose`) сообщает обо всех, а не только о первой, и заодно спрашивает, не
+  откажется ли выбранный набор данных от этой сети, — ещё до Build или Train. Виноватая
+  нода или соединение светится красным (предупреждение — жёлтым), «Show» показывает её на
+  холсте, а неудачный Build сам переходит к ней; формы, посчитанные до проблемы, остаются
+  на нодах.
+- **Предупреждения** для графов, которые собираются, но скорее всего ошибочны: dropout 0,9,
+  скрытый слой уже числа классов, ветка, которая никуда не ведёт, слои после Output,
+  Softmax перед потерей, два Linear подряд, нет ноды Output, крайняя скорость обучения,
+  батч больше данных.
+- Все 37 шаблонов библиотеки — и флагманы настоящего размера — проверяются без замечаний.
+  Живая проверка флагмана настоящего размера стала почти мгновенной: FLUX.1 занимал 7,8 с,
+  теперь 0,04 с (разложения картинки из Этапа 14 считаются, только когда нужны).
 - *Ролик:* ошибки, понятные без диплома.
+- **Сделано:** `error_codes.py` (каталог и словарь), `fixes.py` (правки и их применение),
+  `diagnostics.py` (все проблемы, подбор исправлений, предупреждения, проверка данных);
+  `GraphError` с `code` и `fixes`; `POST /diagnose`, `GET /errors`; каждый ответ 422 (и 404
+  для удалённых весов) несёт объяснение в поле `error`; панель проблем в редакторе,
+  подсветка, переходы и `core/fixes.ts`; уровень API 21. Проверено: 7 новых тестов бэкенда —
+  тестовый набор из 49 сломанных графов, каждый указан на своём месте и починен новичком,
+  который жмёт только предложенные кнопки (не больше 3 нажатий); у каждого кода объяснение
+  и исправление; каждая ошибка поднимается со своим кодом; библиотека чистая; HTTP — и
+  юнит-тесты редактора на 70 случаях, записанных бэкендом (редактор строит ровно тот же
+  граф); тесты поймали все 20 ошибок, нарочно внесённых в копию кода; вживую в браузере.
 
 #### Этап 22 — Новый облик
 Редактор, который цепляет с первого взгляда.

@@ -168,6 +168,13 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
   timestep and an optional class in, the noise out) from the graph. `/train/stream` sends
   a `samples` event with pictures after every epoch; `POST /generate/images`
   (`{spec, run_id, count, label, steps, guidance}`) draws with the trained weights.
+* Clear errors with fixes: `POST /diagnose` (what the editor calls after every edit)
+  reports every problem of a graph at once — and warnings for graphs that build but are
+  probably wrong — each with a stable `code`, a title in plain words, why it happens (with
+  a small glossary), what to do, where it is (`node_id` / `edge`) and one-click `fixes`:
+  short lists of graph edits, each tried on a copy of the graph before it is offered.
+  `GET /errors` lists all 72 codes and the glossary; every 422 (and the 404 of weights
+  that are gone) carries the same explanation in `error`.
 * `GET /layers` → the palette the editor renders.
 * `edge_settings` (optional) → how a connection reshapes its data; without it every
   connection adapts by itself (flatten, fold into an image, read an image as a

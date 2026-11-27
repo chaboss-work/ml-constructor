@@ -3857,6 +3857,102 @@ def test_stage21_http():
     print("[stage21] HTTP: /diagnose, /errors, explained 422s and 404s")
 
 
+# ----------------------------------------------------------------------------------------------
+# Stage 22 — a new look: the design system and live training on the canvas. The look itself is
+# tested by the editor's unit tests (design.spec.ts: every colour from a token, both themes, WCAG
+# contrast); here — what the backend gives it: the run's step count up front, the time it took, and
+# a family (colour + icon) for every layer category.
+
+import re  # noqa: E402
+import time  # noqa: E402
+
+FAMILIES_PATH = os.path.join(os.path.dirname(FIX_CASES_PATH), "families.json")
+TOKENS_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(FIX_CASES_PATH))), "theme", "tokens.css")
+
+
+def _events(graph: dict, pause: float = 0.0, **train_over) -> list[dict]:
+    """Drain a training stream; `pause` seconds per step event play a reader that draws slowly."""
+    spec = GraphSpec.model_validate({**graph, "train": {**graph["train"], **train_over}})
+    model, build = mlc.build_model(spec, seed=spec.train.seed)
+    out = []
+    for e in mlc.train_iter(model, tuple(build.layers[0].out_shape), spec.train):
+        out.append(e)
+        if pause and e["type"] == "step":
+            time.sleep(pause)
+    return out
+
+
+def test_stream_says_how_many_steps():
+    """The first event says how many steps the run takes: the canvas draws a true progress ring."""
+    for graph, over in [(CKPT_MLP, {}), (CKPT_MLP, {"batch_size": 50, "epochs": 3}), (CKPT_MLP, {"steps": 7}),
+                        (CKPT_MLP, {"batch_size": 1000}), (_tiny_vae(), {})]:
+        ev = _events(graph, **over)
+        start, done = ev[0], ev[-1]
+        steps = sum(e["type"] == "step" for e in ev)
+        assert start["type"] == "start" and done["type"] == "done", (start, done)
+        assert start["total_steps"] == steps == done["result"].steps, (over, start["total_steps"], steps)
+        assert start["epochs"] == {**graph["train"], **over}["epochs"], start
+        # the editor's fallback for an older backend counts the same way: epochs × ⌈rows / batch⌉ (capped)
+        n, bs = start["train_samples"], {**graph["train"], **over}["batch_size"]
+        guess = start["epochs"] * -(-n // min(bs, n))
+        assert min(guess, over.get("steps") or guess) == steps, (over, guess, steps)
+    print("[stage22] the start event's total_steps = the step events, for classification and generation")
+
+
+def test_result_says_how_long_training_took():
+    """`seconds` is measured on the server and counts the reading of the stream too: a page that
+    read too slowly would show here — the meter for "the animation does not slow training down"."""
+    fast = _events(CKPT_MLP)[-1]["result"]
+    slow = _events(CKPT_MLP, pause=0.01)[-1]["result"]
+    n_steps = slow.steps
+    assert fast.seconds and fast.seconds > 0, fast.seconds
+    assert slow.seconds - fast.seconds >= 0.8 * 0.01 * n_steps, (fast.seconds, slow.seconds, n_steps)
+    assert slow.loss_curve == fast.loss_curve  # the same run: only the reader differed
+    gen = _events(_tiny_vae())[-1]["result"]
+    assert gen.seconds and gen.seconds > 0, gen.seconds
+    print(f"[stage22] seconds: {fast.seconds:.3f} s read at once, {slow.seconds:.3f} s read slowly "
+          f"({n_steps} steps × 10 ms) — the same losses")
+
+
+def test_every_layer_has_a_family_and_a_colour():
+    """Every category of the catalogue has a family in the editor (families.json), and every
+    family a colour in both themes (tokens.css): a new kind of layer cannot arrive without its look."""
+    with open(FAMILIES_PATH, encoding="utf-8") as f:
+        fam = json.load(f)
+    with open(TOKENS_PATH, encoding="utf-8") as f:
+        css = f.read()
+    dark_at = css.index(":root.mlc-dark {")  # the block, not the mention in the header
+    light_part, dark_part = css[:dark_at], css[dark_at:]
+    cats = {l.category for l in mlc.catalog()}
+    assert cats <= set(fam["categories"]), sorted(cats - set(fam["categories"]))
+    assert set(fam["categories"].values()) <= set(fam["families"]), fam["categories"]
+    for key in fam["families"]:
+        for part in (light_part, dark_part):
+            assert re.search(rf"--fam-{re.escape(key)}:\s*#[0-9a-f]{{6}};", part), key
+    types = {l.type for l in mlc.catalog()}
+    assert set(fam["typeIcons"]) <= types, set(fam["typeIcons"]) - types
+    params = {p.name for l in mlc.catalog() for p in l.params}
+    assert set(fam["advancedParams"]) <= params, set(fam["advancedParams"]) - params
+    arch_cats = {a.category for a in list_architectures()}
+    assert arch_cats <= set(fam["architectures"]), arch_cats - set(fam["architectures"])
+    print(f"[stage22] {len(cats)} layer categories, {len(fam['families'])} families with a colour in both themes, "
+          f"{len(arch_cats)} library categories")
+
+
+def test_stage22_http():
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] == mlc.API_LEVEL >= 22, health
+    st, body = _post_raw_stream("/train/stream", CKPT_MLP)
+    assert st == 200, body
+    lines = [json.loads(line) for line in body.splitlines() if line.strip()]
+    steps = sum(e["type"] == "step" for e in lines)
+    assert lines[0]["type"] == "start" and lines[0]["total_steps"] == steps > 0, lines[0]
+    assert lines[-1]["type"] == "done" and lines[-1]["result"]["seconds"] > 0, lines[-1]
+    st, res = _post("/train", CKPT_MLP)
+    assert st == 200 and res["seconds"] > 0, res
+    print("[stage22] HTTP: /health api 22; the stream starts with total_steps; results carry seconds")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -3980,8 +4076,12 @@ if __name__ == "__main__":
     test_library_is_free_of_problems_and_quick_to_check()
     test_diagnosis_reports_everything_at_once()
     test_stage21_http()
+    test_stream_says_how_many_steps()
+    test_result_says_how_long_training_took()
+    test_every_layer_has_a_family_and_a_colour()
+    test_stage22_http()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "
-        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18 + Stage 19 + Stage 20 + Stage 21)"
+        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18 + Stage 19 + Stage 20 + Stage 21 + Stage 22)"
     )

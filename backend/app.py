@@ -8,6 +8,8 @@ Endpoints:
     GET  /health   liveness + layer count
     GET  /layers   the layer palette the UI renders
     POST /build    graph spec -> model summary (shapes, param counts) or 422
+    POST /diagnose every problem and warning of a graph, explained, with one-click fixes (Stage 21)
+    GET  /errors   the catalogue of every error / warning code and the glossary (Stage 21)
     POST /train    graph spec -> tiny training run -> loss curve + accuracy
     POST /test     the final test: a run's weights on the test rows (Stage 16)
     POST /generate continue a prompt with weights trained on your text (Stage 18)
@@ -40,6 +42,8 @@ from mlconstructor.schema import (
     ConnectionOptionsRequest,
     DataPreview,
     DatasetInfo,
+    Diagnosis,
+    ErrorCatalog,
     ExportResult,
     GraphSpec,
     LayerInfo,
@@ -74,16 +78,26 @@ app.add_middleware(
 _USER_ERRORS = (ShapeError, KeyError, ValueError)
 
 
-def _error_info(exc: Exception) -> dict:
-    if isinstance(exc, ShapeError):
-        return exc.to_detail()
-    return {"message": str(exc), "node_id": None, "edge": None, "hint": None}
+def _error_info(exc: Exception, spec: GraphSpec | None = None) -> dict:
+    """Stage 21 — the problem in plain words: its code, title, why, what to do and fixes
+    checked on ``spec`` (plus Stage 14's message / node_id / edge / hint)."""
+    try:
+        return mlc.describe_error(exc, spec)
+    except Exception:  # noqa: BLE001 - explaining an error must never hide it
+        return {"message": str(exc), "node_id": getattr(exc, "node_id", None), "edge": None,
+                "hint": getattr(exc, "hint", None), "code": getattr(exc, "code", None)}
 
 
-def _unprocessable(exc: Exception) -> JSONResponse:
+def _unprocessable(exc: Exception, spec: GraphSpec | None = None) -> JSONResponse:
     """422 for a mistake in the graph: ``detail`` is the message (as before) and,
-    since Stage 14, ``error`` says where it is (node / connection) and what to do."""
-    return JSONResponse(status_code=422, content={"detail": str(exc), "error": _error_info(exc)})
+    since Stage 14, ``error`` says where it is (node / connection) and what to do —
+    since Stage 21 with its catalogue code, why it happens and one-click fixes."""
+    return JSONResponse(status_code=422, content={"detail": str(exc), "error": _error_info(exc, spec)})
+
+
+def _not_found(exc: Exception) -> JSONResponse:
+    """404 for weights that are gone (Stage 21: with what to do about it)."""
+    return JSONResponse(status_code=404, content={"detail": str(exc), "error": _error_info(exc)})
 
 
 @app.get("/health")
@@ -117,7 +131,22 @@ def build(spec: GraphSpec) -> BuildResult:
         result.max_train_params = mlc.MAX_TRAIN_PARAMS
         return result
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, spec)
+
+
+@app.post("/diagnose", response_model=Diagnosis)
+def diagnose(spec: GraphSpec) -> Diagnosis:
+    """Stage 21 — the editor's live check after each edit: every problem at once (not
+    just the first), warnings for graphs that build but are probably wrong, each with
+    a title in plain words, why, what to do and fixes checked on a copy of the graph;
+    plus the build (as ``/build`` gives it) when there is one. Never a 422."""
+    return mlc.diagnose(spec)
+
+
+@app.get("/errors", response_model=ErrorCatalog)
+def errors() -> ErrorCatalog:
+    """Stage 21 — every error and warning the editor can meet, and the glossary."""
+    return mlc.error_catalog()
 
 
 @app.post("/generate/images", response_model=DrawResult)
@@ -126,9 +155,9 @@ def generate_images(req: DrawRequest) -> DrawResult:
     try:
         return mlc.draw(req.spec, req.run_id, req.count, req.label, req.steps, req.guidance, req.seed)
     except mlc.RunNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from None
+        return _not_found(exc)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, req.spec)
 
 
 @app.post("/run", response_model=RunResult)
@@ -138,7 +167,7 @@ def run(spec: GraphSpec) -> RunResult:
     try:
         return mlc.run_once(spec)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, spec)
 
 
 def _prepare_training(spec: GraphSpec):
@@ -159,7 +188,7 @@ def train(spec: GraphSpec) -> TrainResult:
         result = mlc.train_model(model, in_shape, train_spec)
         return mlc.save_trained(model, in_shape, train_spec, result)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, spec)
 
 
 @app.post("/train/stream")
@@ -170,7 +199,7 @@ def train_stream(spec: GraphSpec) -> StreamingResponse:
     try:
         model, in_shape, train_spec = _prepare_training(spec)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, spec)
 
     def events():
         try:
@@ -180,7 +209,7 @@ def train_stream(spec: GraphSpec) -> StreamingResponse:
                     event = {"type": "done", "result": result.model_dump()}
                 yield json.dumps(event) + "\n"
         except _USER_ERRORS as exc:  # a training-time error -> stream it, don't 500
-            yield json.dumps({"type": "error", "detail": str(exc), "error": _error_info(exc)}) + "\n"
+            yield json.dumps({"type": "error", "detail": str(exc), "error": _error_info(exc, spec)}) + "\n"
 
     return StreamingResponse(events(), media_type="application/x-ndjson")
 
@@ -192,7 +221,7 @@ def suggest(spec: GraphSpec) -> SuggestResult:
     try:
         return SuggestResult(ok=True, proposals=mlc.suggest_for_graph(spec))
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, spec)
 
 
 @app.get("/architectures", response_model=list[ArchitectureInfo])
@@ -225,7 +254,7 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
     try:
         return mlc.data_preview(spec, rows)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, spec)
 
 
 @app.post("/export/pytorch", response_model=ExportResult)
@@ -236,7 +265,7 @@ def export_pytorch(spec: GraphSpec, include_training: bool = True) -> ExportResu
         code = mlc.generate_pytorch(spec, include_training=include_training)
         return ExportResult(ok=True, filename="model.py", code=code)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, spec)
 
 
 @app.post("/connections/options", response_model=ConnectionOptions)
@@ -247,7 +276,7 @@ def connections_options(req: ConnectionOptionsRequest) -> ConnectionOptions:
     try:
         return mlc.connection_options(req.spec, req.source, req.target)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, req.spec)
 
 
 # --- Final test & trained weights (Stage 16) --------------------------------------
@@ -258,9 +287,9 @@ def test(req: TestRequest) -> TestResult:
     try:
         return mlc.test_run(req.spec, req.run_id)
     except mlc.RunNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        return _not_found(exc)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, req.spec)
 
 
 @app.post("/generate", response_model=GenerateResult)
@@ -270,9 +299,9 @@ def generate(req: GenerateRequest) -> GenerateResult:
     try:
         return mlc.generate(req.spec, req.run_id, req.prompt, req.length, req.temperature, req.seed)
     except mlc.RunNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        return _not_found(exc)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, req.spec)
 
 
 @app.get("/text/example")
@@ -324,7 +353,7 @@ async def weights_upload(request: Request) -> WeightsInfo:
     try:
         return await run_in_threadpool(mlc.adopt_weights, req.spec, data)
     except _USER_ERRORS as exc:
-        return _unprocessable(exc)
+        return _unprocessable(exc, req.spec)
 
 
 # --- Projects: open any format version, optional server-side store (Stage 13) --

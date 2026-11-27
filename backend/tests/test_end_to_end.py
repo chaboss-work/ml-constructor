@@ -2796,8 +2796,8 @@ def test_ported_layers_wire_and_explain():
         raise AssertionError("a U-Net with two of its three inputs must be refused")
     except ShapeError as exc:
         msg = str(exc)
-        assert "takes 3 inputs" in msg and "“text”" in msg and exc.node_id == "unet", msg
-        assert exc.hint and "latent → timestep → text" in exc.hint, exc.hint
+        assert "takes 3 inputs" in msg and "“context”" in msg and exc.node_id == "unet", msg
+        assert exc.hint and "latent → timestep → context" in exc.hint, exc.hint
     # the order of the connections decides the inputs: the text first is explained, not crashed
     spec = json.loads(json.dumps(base))
     i, j = spec["edges"].index(["add_noise", "unet"]), spec["edges"].index(["text_norm", "unet"])
@@ -2822,7 +2822,7 @@ def test_ported_layers_wire_and_explain():
     assert ports[("timestep", "unet")] == "timestep" and ports[("add_noise", "predict_clean")] == "noisy latent"
     assert ports[("unet", "predict_clean")] == "predicted noise" and ports[("image", "vae_encoder")] is None
     label = next(e.label for e in res.edges if (e.source, e.target) == ("text_norm", "unet"))
-    assert label == "text", label
+    assert label == "context", label
     # a block whose inner layers read a condition takes it as its own second input
     dit = vision_mini(_vfam("dit"))
     blocks = mlc.get_layer_cls("Repeat")("blocks", next(n for n in dit["nodes"] if n["id"] == "blocks")["params"])
@@ -2991,6 +2991,363 @@ def test_stage19_http():
     print("[stage19] HTTP: /health api 19; library with real sizes; /build says runnable / trainable and why; "
           "/run runs once; training a several-input network is explained")
 
+# --------------------------------------------------------------------------- #
+# Stage 20 — teach it to generate: reconstruction (autoencoder, VAE) and
+# denoising diffusion, a sampler, the gallery, Draw, the export.
+# --------------------------------------------------------------------------- #
+from mlconstructor import generative as GENR  # noqa: E402
+
+
+def _tiny_vae(kl_weight: float = 1.0) -> dict:
+    ids = ["image", "code", "sample", "back", "out"]
+    return {
+        "nodes": [
+            {"id": "image", "type": "Input", "params": {"shape": [1, 8, 8], "name": "image"}},
+            {"id": "code", "type": "Linear", "params": {"out_features": 16}},
+            {"id": "sample", "type": "Reparameterize", "params": {"kl_weight": kl_weight}},
+            {"id": "back", "type": "Linear", "params": {"out_features": 64}},
+            {"id": "out", "type": "Output", "params": {"any_shape": True}},
+        ],
+        "edges": [[a, b] for a, b in zip(ids, ids[1:])],
+        "edge_settings": [{"source": "back", "target": "out", "transform": "to_image",
+                           "params": {"channels": 1, "height": 8, "width": 8}}],
+        "train": {"dataset": "blobs", "epochs": 3, "lr": 0.01, "batch_size": 32, "samples": 320, "seed": 0,
+                  "sample_steps": 5},
+    }
+
+
+def _tiny_diffusion(rows: int = 11) -> dict:
+    return {
+        "nodes": [
+            {"id": "noisy", "type": "Input", "params": {"shape": [1, 8, 8], "name": "noisy image"}},
+            {"id": "timestep", "type": "Input", "params": {"shape": [1], "name": "timestep"}},
+            {"id": "label", "type": "Input", "params": {"shape": [1], "name": "class"}},
+            {"id": "label_emb", "type": "Embedding", "params": {"num_embeddings": rows, "embedding_dim": 16}},
+            {"id": "unet", "type": "UNet2D", "params": {"out_channels": 1, "block_channels": [8, 16],
+                                                        "layers_per_block": 1, "attention_levels": [0, 1],
+                                                        "heads": 2, "groups": 4}},
+            {"id": "out", "type": "Output", "params": {"any_shape": True}},
+        ],
+        "edges": [["label", "label_emb"], ["noisy", "unet"], ["timestep", "unet"], ["label_emb", "unet"],
+                  ["unet", "out"]],
+        "train": {"dataset": "blobs", "epochs": 3, "lr": 0.005, "batch_size": 32, "samples": 320, "seed": 0,
+                  "sample_steps": 5},
+    }
+
+
+def _post_raw_stream(path: str, obj) -> tuple[int, str]:
+    """POST over raw ASGI and return the streamed body as text (the client stays connected)."""
+    import asyncio
+
+    from app import app as asgi_app
+
+    body = json.dumps(obj).encode()
+    scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+        "scheme": "http", "path": path, "raw_path": path.encode(), "root_path": "", "query_string": b"",
+        "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+        "client": ("127.0.0.1", 50000), "server": ("127.0.0.1", 8050),
+    }
+    state = {"sent": False}
+    out = {"status": 0, "body": b""}
+
+    async def receive():
+        if not state["sent"]:
+            state["sent"] = True
+            return {"type": "http.request", "body": body, "more_body": False}
+        await asyncio.Event().wait()  # never disconnects: the stream runs to its end
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            out["status"] = message["status"]
+        elif message["type"] == "http.response.body":
+            out["body"] += message.get("body", b"")
+
+    asyncio.run(asgi_app(scope, receive, send))
+    return out["status"], out["body"].decode("utf-8")
+
+
+def _train_events(spec: GraphSpec):
+    model, build = mlc.build_model(spec, seed=spec.train.seed)
+    events = list(mlc.train_iter(model, tuple(build.inputs[0].shape), spec.train))
+    return model, build, events, events[-1]["result"]
+
+
+def test_task_is_chosen_from_the_graph():
+    def plan(raw):
+        spec = GraphSpec.model_validate(raw)
+        return mlc.build_model(spec, meta=True)[0].task_plan
+
+    assert plan(get_architecture("mlp").model_dump()).task == "classification"
+    p = plan(get_architecture("digit_vae").model_dump())
+    assert p.task == "reconstruction" and p.vae and p.sigmoid_out, p
+    p = plan(get_architecture("digit_diffusion").model_dump())
+    assert (p.task, p.image_input, p.timestep_input, p.class_input, p.class_rows) == \
+        ("diffusion", "noisy", "timestep", "digit", 11), p
+    assert plan(_tiny_vae()).task == "reconstruction" and plan(_tiny_diffusion()).task == "diffusion"
+    # a pipeline that is not a denoiser (Stable Diffusion's one-step graph) is explained, not trained
+    sd = plan(vision_mini(_vfam("stable_diffusion")))
+    assert sd.task is None and "takes 4 inputs" in sd.reason and "diffusion" in sd.reason, sd.reason
+    # an output of another shape cannot reconstruct its input
+    raw = _tiny_vae()
+    raw["edge_settings"][0]["params"] = {"channels": 1, "height": 4, "width": 16}
+    p = plan(raw)
+    assert p.task is None and "input's shape" in p.reason, p.reason
+    # asking for classification of a picture-shaped output: a clear no
+    raw = _tiny_vae()
+    raw["train"]["task"] = "classification"
+    assert plan(raw).task is None and "Any shape" in plan(raw).reason
+    st, b = _post("/build", get_architecture("digit_diffusion").model_dump())
+    assert st == 200 and b["task"] == "diffusion" and b["trainable"] and b["train_note"] is None, b
+    print("[stage20] the task comes from the graph: classification, reconstruction (VAE) or diffusion — "
+          "or a plain-words reason")
+
+
+def test_generative_math():
+    alphas = GENR.noise_schedule(1000)
+    assert alphas.shape == (1000,) and bool((alphas[1:] < alphas[:-1]).all()) and 0 < float(alphas[-1]) < 0.01
+    # a perfect noise predictor: DDIM gives back the very picture
+    x0 = torch.rand(3, 1, 6, 6) * 2 - 1
+
+    def perfect(x, t):
+        a = alphas[t.view(-1).long()].view(-1, 1, 1, 1)
+        return (x - a.sqrt() * x0) / (1 - a).sqrt()
+
+    out = GENR.ddim_sample(perfect, (3, 1, 6, 6), alphas, steps=20, generator=torch.Generator().manual_seed(0))
+    assert torch.allclose(out, x0, atol=1e-4), float((out - x0).abs().max())
+    t, noise, xt = GENR.noisy_batch(x0, alphas, torch.Generator().manual_seed(1))
+    a = alphas[t].view(-1, 1, 1, 1)
+    assert torch.allclose(xt, a.sqrt() * x0 + (1 - a).sqrt() * noise)
+    # the VAE sampling layer: a sample while training, the mean otherwise, noise from the prior; its KL
+    rep = mlc.gen_modules.Reparameterize(kl_weight=2.0)
+    h = torch.cat([torch.zeros(4, 3), torch.zeros(4, 3)], dim=1)
+    rep.eval()
+    assert torch.equal(rep(h), torch.zeros(4, 3)) and float(rep.kl) == 0.0
+    h2 = torch.cat([torch.ones(4, 3), torch.zeros(4, 3)], dim=1)
+    rep(h2)
+    assert abs(float(rep.kl) - 2.0 * 0.5 * 3) < 1e-5  # KL(N(1, 1) || N(0, 1)) = 1/2 per number, ×3, × weight 2
+    rep.train()
+    assert not torch.equal(rep(h), torch.zeros(4, 3))
+    rep.from_prior = True
+    assert rep(h2).shape == (4, 3) and not torch.equal(rep(h2), torch.ones(4, 3))
+    assert torch.equal(GENR.kl_total(torch.nn.Sequential(rep)), rep.kl) and GENR.kl_total(torch.nn.Linear(2, 2)) == 0.0
+    assert float(GENR.recon_loss(torch.full((2, 3), 0.5), torch.ones(2, 3), "bce")) == pytest_approx(0.6931, 1e-3)
+    # classifier-free guidance: 1 = the class alone; more pushes past it, away from the class-free guess
+    c, f = torch.full((2,), 3.0), torch.full((2,), 1.0)
+    assert torch.equal(GENR.guide(c, f, 1.0), c) and torch.equal(GENR.guide(c, f, 0.0), f)
+    assert torch.equal(GENR.guide(c, f, 2.0), torch.full((2,), 5.0))
+    # gallery pictures: 0…1 -> bytes, channels last
+    items = GENR.image_items(torch.full((2, 1, 3, 4), 0.5), ["a", "b"])
+    raw = base64.b64decode(items[0]["data"])
+    assert [(i["w"], i["h"], i["c"], i["label"]) for i in items] == [(4, 3, 1, "a"), (4, 3, 1, "b")]
+    assert len(raw) == 12 and set(raw) == {128}
+    rgb = GENR.image_items(torch.stack([torch.zeros(2, 2), torch.ones(2, 2), torch.zeros(2, 2)]).unsqueeze(0), [])
+    assert base64.b64decode(rgb[0]["data"])[:3] == bytes([0, 255, 0])
+    # the learning rate falls from 1 to a tenth; the averaged weights swap in and back
+    assert GENR.lr_factor(0, 100) == 1.0 and abs(GENR.lr_factor(100, 100) - 0.1) < 1e-9
+    assert GENR.lr_factor(50, 100) < 1.0 and GENR.ema_decay(100) == 0.99 and GENR.ema_decay(10**6) == 0.999
+    net = torch.nn.Linear(2, 2)
+    ema = GENR.EMA(net, 0.5)
+    before = net.weight.detach().clone()
+    with torch.no_grad():
+        net.weight.add_(1.0)
+    ema.update(net)
+    assert torch.allclose(ema.shadow[0], before + 0.5)
+    ema.swap(net)
+    assert torch.allclose(net.weight, before + 0.5)
+    ema.swap(net)
+    assert torch.allclose(net.weight, before + 1.0)
+    print("[stage20] the math: schedule, noisy pictures, DDIM (a perfect predictor gives the picture back), "
+          "VAE sampling and its KL, losses, the learning-rate curve, averaged weights")
+
+
+def pytest_approx(v: float, tol: float):
+    class _A:
+        def __eq__(self, other):
+            return abs(float(other) - v) <= tol
+    return _A()
+
+
+def test_vae_learns_and_draws():
+    spec = GraphSpec.model_validate(_tiny_vae())
+    model, build, events, res = _train_events(spec)
+    epochs = [e for e in events if e["type"] == "epoch"]
+    samples = [e for e in events if e["type"] == "samples"]
+    assert res.task == "reconstruction" and len(epochs) == 3 and len(samples) == 3, [e["type"] for e in events]
+    assert epochs[-1]["val_loss"] < epochs[0]["val_loss"], [e["val_loss"] for e in epochs]
+    assert all(e["acc"] is None for e in epochs) and res.final_kl and res.final_kl > 0 and res.final_recon > 0
+    labels = [g.label for g in res.gallery]
+    assert labels == ["original"] * 8 + ["reconstruction"] * 8 + ["new"] * 8, labels
+    assert res.draw_free and res.draw_classes == 0 and "reconstruction error" in res.loss_name and "KL" in res.loss_name
+    assert res.final_loss == epochs[-1]["loss"]  # no averaged weights for a VAE: the last epoch's network
+    res = mlc.save_trained(model, (1, 8, 8), spec.train, res)
+    d1 = mlc.draw(spec, res.run_id, count=5, seed=3)
+    d2 = mlc.draw(spec, res.run_id, count=5, seed=3)
+    assert [i.label for i in d1.images] == ["new"] * 5 and [i.data for i in d1.images] == [i.data for i in d2.images]
+    assert (d1.images[0].w, d1.images[0].h, d1.images[0].c) == (8, 8, 1)
+    t = mlc.test_run(spec, res.run_id)
+    assert t.task == "reconstruction" and t.same_split is True and t.loss > 0 and t.val_loss is not None, t
+    # without the KL (weight 0) it is a plain autoencoder's loss: no KL term at all
+    spec0 = GraphSpec.model_validate(_tiny_vae(kl_weight=0.0))
+    _m, _b, _e, res0 = _train_events(spec0)
+    assert res0.final_kl == 0.0, res0.final_kl
+    print(f"[stage20] a VAE learns to reconstruct ({epochs[0]['val_loss']:.3f} → {epochs[-1]['val_loss']:.3f}), "
+          "fills the gallery every epoch and draws new pictures, repeatably")
+
+
+def test_diffusion_learns_and_draws():
+    spec = GraphSpec.model_validate(_tiny_diffusion())
+    model, build, events, res = _train_events(spec)
+    epochs = [e for e in events if e["type"] == "epoch"]
+    assert res.task == "diffusion" and len([e for e in events if e["type"] == "samples"]) == 3
+    assert epochs[-1]["val_loss"] < epochs[0]["val_loss"], [e["val_loss"] for e in epochs]
+    assert [g.label for g in res.gallery] == [str(i) for i in range(10)] and res.draw_classes == 10 and res.draw_free
+    assert res.final_val_loss is not None and res.final_val_accuracy is None and res.acc_curve == []
+    assert res.final_loss != epochs[-1]["loss"]  # it draws (and is kept) with its averaged weights
+    from mlconstructor.trainer import _Gen
+
+    class _Spy(torch.nn.Module):
+        def forward(self, *xs):
+            seen.append(xs[2].view(-1).clone())
+            return torch.zeros_like(xs[0])
+
+    g = _Gen(model, model.task_plan, spec.train, torch.device("cpu"))
+    g.model = _Spy()
+    seen: list = []
+    g.loss(g.X, g.y, torch.Generator().manual_seed(0), train=True)
+    dropped = float((seen[0] == 10).float().mean())
+    assert 0.05 < dropped < 0.16 and bool((seen[0][seen[0] != 10] == g.y[seen[0] != 10].float()).all()), dropped
+    seen.clear()
+    g.loss(g.X, g.y, torch.Generator().manual_seed(0), train=False)
+    assert not bool((seen[0] == 10).any())  # measuring never drops a label
+    res = mlc.save_trained(model, (1, 8, 8), spec.train, res)
+    d = mlc.draw(spec, res.run_id, count=4, label=3, steps=8, guidance=3.0, seed=1)
+    assert [i.label for i in d.images] == ["3"] * 4 and d.task == "diffusion"
+    again = mlc.draw(spec, res.run_id, count=4, label=3, steps=8, guidance=3.0, seed=1)
+    other = mlc.draw(spec, res.run_id, count=4, label=7, steps=8, guidance=3.0, seed=1)
+    assert [i.data for i in d.images] == [i.data for i in again.images]
+    assert [i.data for i in d.images] != [i.data for i in other.images]  # the class steers the picture
+    try:
+        mlc.draw(spec, res.run_id, count=2, label=12)
+        raise AssertionError("a class out of range must be refused")
+    except ValueError as exc:
+        assert "between 0 and 9" in str(exc), exc
+    t = mlc.test_run(spec, res.run_id)
+    assert t.task == "diffusion" and t.loss > 0 and t.same_split is True, t
+    # a class embedding without a spare row: no guidance, still trains (labels drawn at random)
+    spec10 = GraphSpec.model_validate(_tiny_diffusion(rows=10))
+    _m, _b, _e, res10 = _train_events(spec10)
+    assert res10.draw_classes == 10 and not res10.draw_free
+    # too few rows for the data's classes: a clear message
+    try:
+        _train_events(GraphSpec.model_validate(_tiny_diffusion(rows=5)))
+        raise AssertionError("5 class rows for 10 classes must be refused")
+    except ValueError as exc:
+        assert "at least 10" in str(exc), exc
+    print(f"[stage20] a diffusion model learns ({epochs[0]['val_loss']:.3f} → {epochs[-1]['val_loss']:.3f}) "
+          "and draws the class it is asked for, repeatably, with guidance")
+
+
+def test_generative_export_trains_like_the_app():
+    import contextlib
+    import io
+    import re as _re
+
+    for raw in (_tiny_vae(), _tiny_diffusion()):
+        spec = GraphSpec.model_validate(raw)
+        _model, _build, events, _res = _train_events(spec)
+        app = [(round(e["loss"], 4), round(e["val_loss"], 4)) for e in events if e["type"] == "epoch"]
+        code = mlc.generate_pytorch(spec)
+        assert "mlconstructor" not in code and "TASK = " in code and "def draw(" in code
+        ns: dict = {"__name__": "exported"}
+        exec(compile(code, "exported", "exec"), ns)
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chdir(tmp)
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf):
+                    model = ns["main"]()
+                png = os.path.getsize("samples.png")
+            finally:
+                os.chdir(cwd)
+        out = buf.getvalue()
+        exported = list(zip([float(v) for v in _re.findall(r"loss ([0-9.]+)  new", out)],
+                            [float(v) for v in _re.findall(r"new data ([0-9.]+)", out)]))
+        assert exported == app, (raw["nodes"][1]["type"], exported, app)
+        assert png > 100 and "final test on" in out
+        assert sum(p.numel() for p in model.parameters()) == sum(p.numel() for p in _model.parameters())
+    unit = _tiny_diffusion()
+    g = torch.Generator().manual_seed(5)
+    unit["train"].update(dataset="custom", custom_rows=[[round(float(v), 4) for v in torch.rand(64, generator=g)]
+                                                        + [i % 10] for i in range(120)])
+    spec = GraphSpec.model_validate(unit)
+    _model, _build, events, _res = _train_events(spec)
+    app = [(round(e["loss"], 4), round(e["val_loss"], 4)) for e in events if e["type"] == "epoch"]
+    code = mlc.generate_pytorch(spec)
+    assert "CUSTOM_ROWS = " in code
+    ns = {"__name__": "exported"}
+    exec(compile(code, "exported", "exec"), ns)
+    cwd = os.getcwd()
+    with tempfile.TemporaryDirectory() as tmp:
+        os.chdir(tmp)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                ns["main"]()
+        finally:
+            os.chdir(cwd)
+    out = buf.getvalue()
+    exported = list(zip([float(v) for v in _re.findall(r"loss ([0-9.]+)  new", out)],
+                        [float(v) for v in _re.findall(r"new data ([0-9.]+)", out)]))
+    assert exported == app, (exported, app)
+    print("[stage20] the export trains a VAE and a diffusion model exactly like the app (same losses every "
+          "epoch, on noise-like and on 0…1 pictures, your own rows too), then draws samples.png")
+
+
+def test_mnist_export_reads_the_same_digits():
+    from mlconstructor.datasets import _CACHE
+
+    images = os.path.join(_CACHE, "mnist", "train-images-idx3-ubyte.gz")
+    if not os.path.exists(images):
+        print("[stage20] (skipped: MNIST is not cached here — the export would download it)")
+        return
+    spec = get_architecture("digit_vae")
+    code = mlc.generate_pytorch(spec)
+    ns: dict = {"__name__": "exported"}
+    exec(compile(code, "exported", "exec"), ns)
+    ns["_download"] = lambda url, dest: os.path.join(_CACHE, "mnist", os.path.basename(dest))
+    X, y = ns["make_data"](500, (1, 28, 28), 10, seed=4)
+    t = spec.train.model_copy(update={"samples": 500, "seed": 4})
+    Xa, ya, _g = mlc.make_rows("mnist", (1, 28, 28), 10, t, torch.device("cpu"))
+    assert torch.equal(X, Xa) and torch.equal(y, ya)
+    print("[stage20] an exported MNIST model reads the very digits the app trains on")
+
+
+def test_stage20_http():
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] == mlc.API_LEVEL >= 20, health
+    st, lib = _asgi("GET", "/architectures")
+    ids = {a["id"] for a in lib}
+    assert {"digit_vae", "digit_diffusion"} <= ids, ids
+    spec = _tiny_vae()
+    st, body = _post_raw_stream("/train/stream", spec)
+    assert st == 200, body
+    kinds = [json.loads(line)["type"] for line in body.splitlines() if line.strip()]
+    assert kinds.count("samples") == 3 and kinds[-1] == "done", kinds
+    done = json.loads(body.splitlines()[-1])["result"]
+    assert done["task"] == "reconstruction" and done["run_id"] and len(done["gallery"]) == 24, done.keys()
+    st, d = _post("/generate/images", {"spec": spec, "run_id": done["run_id"], "count": 3, "seed": 2})
+    assert st == 200 and [i["label"] for i in d["images"]] == ["new"] * 3, d
+    st, d = _post("/generate/images", {"spec": spec, "run_id": "0123456789abcdef", "count": 3})
+    assert st == 404, d
+    st, d = _post("/generate/images", {"spec": get_architecture("mlp").model_dump(), "run_id": done["run_id"]})
+    assert st == 422, d
+    st, t = _post("/test", {"spec": spec, "run_id": done["run_id"]})
+    assert st == 200 and t["task"] == "reconstruction" and t["loss"] > 0, t
+    print("[stage20] HTTP: /health api 20; the library has the digit VAE and diffusion; /train/stream sends the "
+          "gallery every epoch; /generate/images draws; /test measures the error")
+
 
 if __name__ == "__main__":
     test_layer_catalog()
@@ -3101,8 +3458,15 @@ if __name__ == "__main__":
     test_generative_blocks_behave()
     test_vit_mini_trains()
     test_stage19_http()
+    test_task_is_chosen_from_the_graph()
+    test_generative_math()
+    test_vae_learns_and_draws()
+    test_diffusion_learns_and_draws()
+    test_generative_export_trains_like_the_app()
+    test_mnist_export_reads_the_same_digits()
+    test_stage20_http()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "
-        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18 + Stage 19)"
+        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18 + Stage 19 + Stage 20)"
     )

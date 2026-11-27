@@ -388,6 +388,13 @@
             @if (datasetInfo(dataset())?.input_shape; as sh) {
               <ion-note class="help">needs Input [{{ sh.join('×') }}]</ion-note>
             }
+            @if (isGenerative(taskName())) {
+              <ion-note class="help task-note">
+                {{ taskName() === 'diffusion'
+                  ? 'Learns to see the noise in noisy pictures — then draws new ones from pure noise.'
+                  : 'Learns to give back its input' + (analysis()?.layers?.some(isSampler) ? ', through random codes — then draws new pictures.' : '.') }}
+              </ion-note>
+            }
           </ion-item>
         }
         @if (stage8() && cudaAvailable()) {
@@ -589,9 +596,35 @@
             </svg>
           }
           <ion-note class="muted">training live · {{ curveLoss().length }} steps</ion-note>
+          @if (liveGallery().length) {
+            <div class="gallery">
+              <div class="gal-h">After epoch {{ liveGalleryEpoch() }}</div>
+              <div class="gal-grid">
+                @for (g of liveGallery(); track $index) {
+                  <figure><img [src]="imgUrl(g)" [alt]="g.label" /><figcaption>{{ g.label }}</figcaption></figure>
+                }
+              </div>
+            </div>
+          }
         }
         @if (trainResult(); as t) {
-          @if (t.final_val_accuracy != null) {
+          @if (isGenerative(t.task)) {
+            <div class="kv kv-main" [class.kv-good]="t.fit === 'generalises'" [class.kv-bad]="t.fit === 'overfits'"
+              [title]="t.loss_name ?? ''">
+              <span>Error on new pictures</span><b>{{ (t.final_val_loss ?? t.final_loss) | number: '1.4-4' }}</b>
+            </div>
+            <div class="kv"><span>On training pictures</span><b>{{ t.final_loss | number: '1.4-4' }}</b></div>
+            @if (t.final_kl) {
+              <div class="kv" title="The reconstruction error, and how far the codes are from N(0, I) (per number)">
+                <span>Reconstruction · KL</span><b>{{ t.final_recon | number: '1.4-4' }} · {{ t.final_kl | number: '1.4-4' }}</b>
+              </div>
+            }
+            <div class="kv"><span>Error measured</span><b class="kv-small">{{ t.loss_name }}</b></div>
+            <div class="kv" title="Pictures trained on / judged after every epoch / kept for the final test">
+              <span>Pictures · train / check / test</span>
+              <b>{{ t.train_samples }} / {{ t.val_samples }} / {{ t.test_samples }}</b>
+            </div>
+          } @else if (t.final_val_accuracy != null) {
             <div
               class="kv kv-main"
               [class.kv-good]="t.fit === 'generalises'"
@@ -638,6 +671,62 @@
                 </ion-button>
               }
             </div>
+          }
+          @if (isGenerative(t.task)) {
+            <div class="gallery">
+              <div class="gal-h">
+                {{ drawResult() ? 'Drawn · ' + drawResult()!.ms + ' ms'
+                  : t.task === 'diffusion' ? 'Drawn by the trained network'
+                  : 'Originals, reconstructions' + (t.draw_free ? ' and new pictures' : '') }}
+              </div>
+              <div class="gal-grid">
+                @for (g of drawResult()?.images ?? t.gallery ?? []; track $index) {
+                  <figure><img [src]="imgUrl(g)" [alt]="g.label" /><figcaption>{{ g.label }}</figcaption></figure>
+                }
+              </div>
+              @if (drawResult()?.note; as note) {
+                <ion-note class="block">{{ note }}</ion-note>
+              }
+            </div>
+            @if (t.run_id) {
+              <div class="gen-box">
+                <div class="ft-h">Draw with your model</div>
+                <div class="gen-controls">
+                  @if (t.draw_classes) {
+                    <label>Class
+                      <select (change)="drawLabel.set($any($event).target.value)">
+                        <option value="" [selected]="drawLabel() === ''">one of each</option>
+                        @for (c of drawClassOptions(); track c) {
+                          <option [value]="c" [selected]="drawLabel() === '' + c">{{ c }}</option>
+                        }
+                      </select>
+                    </label>
+                  }
+                  <label>How many <input type="number" min="1" max="64" [value]="drawCount()"
+                    (input)="drawCount.set(+$any($event).target.value || 10)" /></label>
+                  @if (t.task === 'diffusion') {
+                    <label title="More steps: cleaner pictures, slower">Steps <input type="number" min="1" max="1000"
+                      [value]="drawSteps()" (input)="drawSteps.set(+$any($event).target.value || 50)" /></label>
+                    @if (t.draw_classes && t.draw_free) {
+                      <label title="How strongly the class steers the picture (1 = no extra push)">Guidance
+                        <select (change)="drawGuidance.set(+$any($event).target.value)">
+                          <option value="1" [selected]="drawGuidance() === 1">1 · off</option>
+                          <option value="2" [selected]="drawGuidance() === 2">2</option>
+                          <option value="3" [selected]="drawGuidance() === 3">3</option>
+                          <option value="5" [selected]="drawGuidance() === 5">5 · strong</option>
+                        </select>
+                      </label>
+                    }
+                  }
+                  <ion-button size="small" fill="solid" [disabled]="drawBusy()" (click)="onDraw()">
+                    {{ drawBusy() ? 'Drawing…' : 'Draw' }}
+                  </ion-button>
+                </div>
+                @if (drawError()) {
+                  <ion-note color="danger" class="block">{{ drawError() }}</ion-note>
+                }
+              </div>
+            }
           }
           @if (dataset() === 'text' && t.run_id) {
             <div class="gen-box">
@@ -703,13 +792,22 @@
         @if (shownTest(); as ft) {
           <div class="final-test">
             <div class="ft-h">Final test · {{ ft.samples }} rows used for nothing else</div>
-            <div class="kv kv-main" [class.kv-good]="ft.same_split === true && !ft.warnings?.length">
-              <span>On test rows</span><b>{{ ft.accuracy | number: '1.3-3' }}</b>
-            </div>
-            @if (ft.val_accuracy != null) {
-              <div class="kv"><span>On validation rows</span><b>{{ ft.val_accuracy | number: '1.3-3' }}</b></div>
+            @if (isGenerative(ft.task)) {
+              <div class="kv kv-main" [class.kv-good]="ft.same_split === true && !ft.warnings?.length">
+                <span>Error on test pictures</span><b>{{ ft.loss | number: '1.4-4' }}</b>
+              </div>
+              @if (ft.val_loss != null) {
+                <div class="kv"><span>On validation pictures</span><b>{{ ft.val_loss | number: '1.4-4' }}</b></div>
+              }
+            } @else {
+              <div class="kv kv-main" [class.kv-good]="ft.same_split === true && !ft.warnings?.length">
+                <span>On test rows</span><b>{{ ft.accuracy | number: '1.3-3' }}</b>
+              </div>
+              @if (ft.val_accuracy != null) {
+                <div class="kv"><span>On validation rows</span><b>{{ ft.val_accuracy | number: '1.3-3' }}</b></div>
+              }
+              <div class="kv"><span>Test loss</span><b>{{ ft.loss | number: '1.4-4' }}</b></div>
             }
-            <div class="kv"><span>Test loss</span><b>{{ ft.loss | number: '1.4-4' }}</b></div>
             @if (ft.note) {
               <div class="fit" [class.fit-good]="ft.note.startsWith('Confirmed')">{{ ft.note }}</div>
             }

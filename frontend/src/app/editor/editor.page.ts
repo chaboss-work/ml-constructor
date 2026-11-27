@@ -27,9 +27,11 @@ import {
   DataPreview,
   DataSampleRow,
   DatasetInfo,
+  DrawResult,
   EdgeSummary,
   EditorEdge,
   EditorNode,
+  GalleryImage,
   GenerateResult,
   GraphErrorInfo,
   GraphSpec,
@@ -67,9 +69,9 @@ const NODE_H = 78;
 const AUTOSAVE_DELAY_MS = 700;
 const ANALYSIS_DELAY_MS = 450;
 /** The backend API this page needs: Stage 14 (smart connections, structured errors). */
-const REQUIRED_API = 19;
+const REQUIRED_API = 20;
 const OUTDATED_MSG =
-  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights, the flagship models, Your text, Run once and models with several inputs need a restart of the backend.';
+  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights, the flagship models, Your text, Run once, models with several inputs and generative training (Draw) need a restart of the backend.';
 /** Stage 18 — the longest text Your text takes (characters). */
 const MAX_TEXT_CHARS = 1_000_000;
 
@@ -994,6 +996,77 @@ export class EditorPage {
   trainNote = computed(() => this.analysis()?.train_note ?? null);
   /** Stage 19 — small enough to run once here (a real-size flagship is not). */
   runnable = computed(() => this.analysis()?.runnable !== false);
+  /** Stage 20 — what training will teach this graph (from the live build). */
+  taskName = computed(() => this.analysis()?.task ?? null);
+  /** Stage 20 — the gallery while training: the pictures after the latest epoch. */
+  liveGallery = signal<GalleryImage[]>([]);
+  liveGalleryEpoch = signal(0);
+  /** Stage 20 — pictures drawn with the trained weights, and the Draw controls. */
+  drawResult = signal<DrawResult | null>(null);
+  drawBusy = signal(false);
+  drawError = signal<string | null>(null);
+  drawLabel = signal('');
+  drawCount = signal(10);
+  drawSteps = signal(50);
+  drawGuidance = signal(1);
+  private drawSeed = 0;
+  private imgCache = new Map<string, string>();
+  drawClassOptions = computed(() => Array.from({ length: this.trainResult()?.draw_classes ?? 0 }, (_, i) => i));
+
+  /** Stage 20 — the VAE sampling layer (it lets a reconstruction network draw new pictures). */
+  isSampler = (l: { type: string }): boolean => l.type === 'Reparameterize';
+
+  isGenerative(task: string | null | undefined): boolean {
+    return task === 'reconstruction' || task === 'diffusion';
+  }
+
+  /** A gallery picture as a data URL (painted once on a canvas, then cached). */
+  imgUrl(g: GalleryImage): string {
+    const hit = this.imgCache.get(g.data);
+    if (hit) return hit;
+    const bytes = Uint8Array.from(atob(g.data), (ch) => ch.charCodeAt(0));
+    const canvas = document.createElement('canvas');
+    canvas.width = g.w;
+    canvas.height = g.h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    const img = ctx.createImageData(g.w, g.h);
+    for (let i = 0; i < g.w * g.h; i++) {
+      const r = bytes[i * g.c];
+      img.data[i * 4] = r;
+      img.data[i * 4 + 1] = g.c === 3 ? bytes[i * 3 + 1] : r;
+      img.data[i * 4 + 2] = g.c === 3 ? bytes[i * 3 + 2] : r;
+      img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    const url = canvas.toDataURL('image/png');
+    if (this.imgCache.size > 600) this.imgCache.clear();
+    this.imgCache.set(g.data, url);
+    return url;
+  }
+
+  /** Stage 20 — draw new pictures with the trained weights. */
+  onDraw(): void {
+    const runId = this.currentRunId();
+    if (!runId) return;
+    this.drawBusy.set(true);
+    this.drawError.set(null);
+    this.drawSeed += 1;
+    const label = this.drawLabel() === '' ? null : Number(this.drawLabel());
+    this.api
+      .draw(this.toSpec(), runId, this.drawCount(), label, this.drawSteps(), this.drawGuidance(), this.drawSeed)
+      .subscribe({
+        next: (r) => {
+          this.drawResult.set(r);
+          this.drawBusy.set(false);
+        },
+        error: (err) => {
+          this.drawError.set(err?.status === 405 ? OUTDATED_MSG : this.errMsg(err));
+          this.drawBusy.set(false);
+        },
+      });
+  }
+
   /** Stage 19 — the last forward pass on random inputs. */
   onceResult = signal<RunResult | null>(null);
   onceBusy = signal(false);
@@ -1166,6 +1239,9 @@ export class EditorPage {
     this.liveLoss.set([]);
     this.liveAcc.set([]);
     this.liveValAcc.set([]);
+    this.liveGallery.set([]);
+    this.drawResult.set(null);
+    this.drawError.set(null);
     const spec = this.toSpec();
     this.api
       .trainStream(spec, (e) => {
@@ -1178,6 +1254,9 @@ export class EditorPage {
         } else if (e.type === 'epoch' && e.acc != null) {
           this.liveAcc.update((a) => [...a, e.acc as number]);
           if (e.val_acc != null) this.liveValAcc.update((a) => [...a, e.val_acc as number]);
+        } else if (e.type === 'samples' && e.images) {
+          this.liveGallery.set(e.images); // Stage 20: the pictures after this epoch
+          this.liveGalleryEpoch.set(e.epoch ?? 0);
         } else if (e.type === 'done' && e.result) {
           this.trainResult.set(e.result);
           if (e.result.run_id) this.loadedWeights.set(null); // the loaded weights went into this run

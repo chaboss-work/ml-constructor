@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from ..registry import register
 from ..schema import ParamDef
+from .. import fixes as fx
 from ..shapes import Shape, ShapeError
 from .base import LayerNode
 
@@ -38,9 +39,18 @@ class InputNode(LayerNode):
 
     def out_shape(self, in_shape: Shape | None) -> Shape:
         shape = self.p("shape", [1, 28, 28])
-        if not shape or any(int(d) <= 0 for d in shape):
-            raise ShapeError(f"Input node {self.id!r} needs a positive 'shape', got {shape!r}")
-        return tuple(int(d) for d in shape)
+        try:
+            dims = [int(d) for d in (shape or [])]
+        except (TypeError, ValueError):
+            dims = []
+        if not dims or any(d <= 0 for d in dims):
+            good = [d for d in dims if d > 0] or [1, 28, 28]
+            raise ShapeError(
+                f"the Input “{self.id}” needs a shape of positive whole numbers (e.g. 784, or 1, 28, 28), got {shape!r}",
+                code="input_shape", param="shape",
+                fixes=[fx.set_param(self.id, "shape", good, f"Set the shape to {', '.join(map(str, good))}")],
+            )
+        return tuple(dims)
 
     def build(self, in_shape: Shape | None) -> Optional[nn.Module]:
         return None  # a source contributes no module

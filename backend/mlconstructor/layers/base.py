@@ -18,7 +18,7 @@ from typing import ClassVar, Optional
 import torch.nn as nn
 
 from ..schema import ParamDef
-from ..shapes import Shape, ShapeError
+from ..shapes import RANK_WORDS, Shape, ShapeError, describe_shape
 
 
 class LayerNode(ABC):
@@ -55,13 +55,16 @@ class LayerNode(ABC):
         """Validate the incoming shape, raising :class:`ShapeError` with node
         context on mismatch (clear message instead of a deep torch crash)."""
         if in_shape is None:
-            raise ShapeError(f"node {self.id!r} ({self.type_name}) expects an input but has none", node_id=self.id)
+            raise ShapeError(f"{self.type_name} “{self.id}” expects an input but has none", node_id=self.id,
+                             code="no_connection")
         if ndim is not None and len(in_shape) != ndim:
             extra = f" {what}" if what else ""
             raise ShapeError(
-                f"node {self.id!r} ({self.type_name}) expects a {ndim}-D input{extra}, "
-                f"got shape {tuple(in_shape)}",
+                f"{self.type_name} “{self.id}” reads {RANK_WORDS.get(ndim, f'data with {ndim} axes')}{extra}, "
+                f"but receives {describe_shape(in_shape)}",
                 node_id=self.id,
+                code="wrong_rank",
+                facts={"want_rank": ndim, "got": list(in_shape)},
             )
         return in_shape
 

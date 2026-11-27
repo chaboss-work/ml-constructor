@@ -14,7 +14,8 @@ import torch
 
 from ..registry import register
 from ..schema import ParamDef
-from ..shapes import Shape, ShapeError
+from .. import fixes as fx
+from ..shapes import Shape, ShapeError, fmt
 from .base import LayerNode
 
 
@@ -25,7 +26,8 @@ class _Merge(LayerNode):
     # The single-input methods are never used for merge nodes, but LayerNode is
     # abstract, so provide them. The builder dispatches on ``is_merge``.
     def out_shape(self, in_shape: Shape | None) -> Shape:
-        raise ShapeError(f"{self.type_name} {self.id!r} is a merge node — wire several inputs into it")
+        raise ShapeError(f"{self.type_name} {self.id!r} is a merge node — wire several inputs into it",
+                         code="merge_needs_two")
 
     def build(self, in_shape: Shape | None):
         return None
@@ -47,13 +49,14 @@ class AddNode(_Merge):
 
     def out_shape_merge(self, in_shapes: list[Shape]) -> Shape:
         if len(in_shapes) < 2:
-            raise ShapeError(f"Add {self.id!r} needs >= 2 inputs, got {len(in_shapes)}")
+            raise ShapeError(f"Add {self.id!r} needs at least 2 inputs, got {len(in_shapes)}", code="merge_needs_two")
         first = tuple(in_shapes[0])
         for s in in_shapes[1:]:
             if tuple(s) != first:
                 raise ShapeError(
-                    f"Add {self.id!r}: all inputs must have the SAME shape; got "
-                    f"{[tuple(x) for x in in_shapes]}"
+                    f"Add {self.id!r} sums its inputs number by number, so they must have the same shape; got "
+                    f"{', '.join(fmt(x) for x in in_shapes)}",
+                    code="merge_shapes",
                 )
         return first
 
@@ -89,19 +92,30 @@ class ConcatNode(_Merge):
 
     def out_shape_merge(self, in_shapes: list[Shape]) -> Shape:
         if len(in_shapes) < 2:
-            raise ShapeError(f"Concat {self.id!r} needs >= 2 inputs, got {len(in_shapes)}")
+            raise ShapeError(f"Concat {self.id!r} needs at least 2 inputs, got {len(in_shapes)}",
+                             code="merge_needs_two")
         dim = int(self.p("dim", 0))
         shapes = [tuple(s) for s in in_shapes]
         rank = len(shapes[0])
+        same_rank = all(len(s) == rank for s in shapes)
+        # the axes Concat could join along: every other axis matches
+        joinable = [ax for ax in range(rank) if same_rank and all(
+            s[o] == shapes[0][o] for s in shapes for o in range(rank) if o != ax)]
+        dim_fixes = [fx.set_param(self.id, "dim", ax, f"Join along axis {ax} (dim = {ax})") for ax in joinable if ax != dim]
         if not (0 <= dim < rank):
-            raise ShapeError(f"Concat {self.id!r}: dim {dim} out of range for {rank}-D inputs")
+            raise ShapeError(f"Concat {self.id!r}: axis {dim} does not exist — its inputs have {rank} axes "
+                             f"(0 to {rank - 1})", code="param_range", param="dim",
+                             fixes=dim_fixes or [fx.set_param(self.id, "dim", 0, "Join along axis 0 (dim = 0)")])
+        if not same_rank:
+            raise ShapeError(f"Concat {self.id!r}: its inputs must have the same number of axes; got "
+                             f"{', '.join(fmt(s) for s in shapes)}", code="merge_shapes")
         for s in shapes:
-            if len(s) != rank:
-                raise ShapeError(f"Concat {self.id!r}: inputs must share rank; got {shapes}")
             for ax in range(rank):
                 if ax != dim and s[ax] != shapes[0][ax]:
                     raise ShapeError(
-                        f"Concat {self.id!r}: inputs must match on all axes except dim {dim}; got {shapes}"
+                        f"Concat {self.id!r} joins along axis {dim}, so every other axis must match; got "
+                        f"{', '.join(fmt(x) for x in shapes)}",
+                        code="merge_shapes", param="dim", fixes=dim_fixes,
                     )
         out = list(shapes[0])
         out[dim] = sum(s[dim] for s in shapes)

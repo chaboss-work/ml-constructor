@@ -18,6 +18,7 @@ import torch.nn as nn
 
 from ..registry import register
 from ..schema import ParamDef
+from .. import fixes as fx
 from ..shapes import Shape, ShapeError
 from .base import LayerNode
 
@@ -146,7 +147,10 @@ class RNNNode(_RecurrentNode):
     def _make_rnn(self, input_size: int, hidden: int, num_layers: int) -> nn.Module:
         nl = str(self.p("nonlinearity", "tanh"))
         if nl not in ("tanh", "relu"):
-            raise ShapeError(f"RNN {self.id!r}: nonlinearity must be 'tanh' or 'relu', got {nl!r}")
+            raise ShapeError(f"RNN {self.id!r}: nonlinearity must be 'tanh' or 'relu', got {nl!r}",
+                             code="param_choice", param="nonlinearity",
+                             fixes=[fx.set_param(self.id, "nonlinearity", "tanh"),
+                                    fx.set_param(self.id, "nonlinearity", "relu")])
         return nn.RNN(input_size, hidden, num_layers, batch_first=True, nonlinearity=nl)
 
 

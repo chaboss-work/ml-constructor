@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import torch.nn as nn
 
+from .. import fixes as fx
 from ..blocks import Block
 from ..registry import get_layer_cls, register
 from ..schema import ParamDef
@@ -40,25 +41,64 @@ class RepeatNode(LayerNode):
     def _repeat(self) -> int:
         reps = int(self.p("repeat", 2))
         if reps < 1:
-            raise ShapeError(f"Block {self.id!r}: repeat must be >= 1, got {reps}")
+            raise ShapeError(f"Block {self.id!r}: repeat must be at least 1, got {reps}", code="param_range",
+                             param="repeat", node_id=self.id, fixes=[fx.set_param(self.id, "repeat", 1)])
         return reps
+
+    def _rehome(self, exc: ShapeError, i: int) -> ShapeError:
+        """Stage 21 — an error of the i-th inner layer points at this block (the editor
+        has no node for an inner layer), and its fixes edit that inner layer."""
+        inner_id = f"{self.id}__inner{i}"
+        if exc.node_id not in (None, inner_id):
+            return exc
+        exc.node_id, exc.inner = self.id, i
+        exc.args = (str(exc).replace(f"“{inner_id}”", f"(layer {i + 1} inside the block “{self.id}”)")
+                    .replace(repr(inner_id), f"(layer {i + 1} inside the block “{self.id}”)"),)
+        moved = []
+        for f in exc.fixes:
+            ops = []
+            for o in f.get("ops") or []:
+                if o.get("op") == "set_param" and o.get("node") == inner_id:
+                    ops.append(fx.op_set_inner_param(self.id, i, o["name"], o["value"]))
+                elif inner_id in (o.get("node"), o.get("source"), o.get("target")):
+                    ops = None  # an edit of the inner layer's connections: not possible inside a block
+                    break
+                else:
+                    ops.append(o)
+            if ops:
+                moved.append({"label": f"{f['label']} (layer {i + 1} of the block)", "ops": ops})
+        exc.fixes = moved
+        return exc
+
+    def _inner_out(self, i: int, node: LayerNode, sh, extra: dict | None = None):
+        try:
+            ports = node.input_ports()
+            if extra is not None and ports:
+                return node.out_shape_ports([sh] + [extra[n] for n in ports[1:]])
+            return node.out_shape(sh)
+        except ShapeError as exc:
+            raise self._rehome(exc, i) from None
 
     def _make_inner_nodes(self) -> list[LayerNode]:
         """A fresh set of inner LayerNode instances (one repetition's worth)."""
         specs = self.p("layers", []) or []
         if not specs:
-            raise ShapeError(f"Block {self.id!r} is empty — add at least one inner layer")
+            raise ShapeError(f"Block {self.id!r} is empty — add at least one inner layer", code="block_empty",
+                             node_id=self.id)
         nodes: list[LayerNode] = []
         for i, spec in enumerate(specs):
+            remove = fx.fix(f"Remove layer {i + 1} from the block", fx.op_remove_inner(self.id, i))
             try:
                 cls = get_layer_cls(spec["type"])
             except (KeyError, TypeError) as exc:
-                raise ShapeError(f"Block {self.id!r}: bad inner layer #{i + 1}: {exc}") from None
+                raise ShapeError(f"Block {self.id!r}: inner layer #{i + 1} is of an unknown type: {exc}",
+                                 code="unknown_layer", node_id=self.id, fixes=[remove]) from None
             node = cls(f"{self.id}__inner{i}", spec.get("params", {}))
             if not node.needs_input or node.is_merge or node.type_name in ("Input", "Output"):
                 raise ShapeError(
                     f"Block {self.id!r}: inner layer {node.type_name!r} is not allowed inside a block "
-                    f"(a block is a linear chain — no Input/Output/merge)"
+                    f"(a block is a linear chain — no Input/Output/merge)",
+                    code="block_bad_inner", node_id=self.id, fixes=[remove],
                 )
             nodes.append(node)
         return nodes
@@ -69,12 +109,13 @@ class RepeatNode(LayerNode):
             raise ShapeError(
                 f"Block {self.id!r} also needs {names} — connect it as a second input of the block",
                 node_id=self.id,
+                code="block_needs_input",
                 hint="The layers inside read another input: wire the main data first, then that input.",
             )
         sh = self._require_shape(in_shape)
         for _ in range(self._repeat()):
-            for node in self._make_inner_nodes():
-                sh = node.out_shape(sh)
+            for i, node in enumerate(self._make_inner_nodes()):
+                sh = self._inner_out(i, node, sh)
         return sh
 
     def build(self, in_shape: Shape | None) -> nn.Module:
@@ -102,19 +143,21 @@ class RepeatNode(LayerNode):
         if index == 0:
             return tuple(shape)
         name = self.input_ports()[index]
-        for node in self._make_inner_nodes():
+        for i, node in enumerate(self._make_inner_nodes()):
             ports = node.input_ports()
             if name in ports[1:]:
-                node.check_port(ports.index(name), shape)
+                try:
+                    node.check_port(ports.index(name), shape)
+                except ShapeError as exc:
+                    raise self._rehome(exc, i) from None
         return tuple(shape)
 
     def out_shape_ports(self, shapes: list[Shape]) -> Shape:
         extra = dict(zip(self.input_ports()[1:], shapes[1:]))
         sh = self._require_shape(shapes[0])
         for _ in range(self._repeat()):
-            for node in self._make_inner_nodes():
-                ports = node.input_ports()
-                sh = node.out_shape_ports([sh] + [extra[n] for n in ports[1:]]) if ports else node.out_shape(sh)
+            for i, node in enumerate(self._make_inner_nodes()):
+                sh = self._inner_out(i, node, sh, extra)
         return sh
 
     def build_ports(self, shapes: list[Shape]) -> nn.Module:

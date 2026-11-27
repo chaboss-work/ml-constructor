@@ -6,7 +6,8 @@ import torch.nn as nn
 
 from ..registry import register
 from ..schema import ParamDef
-from ..shapes import Shape, ShapeError
+from .. import fixes as fx
+from ..shapes import Shape, ShapeError, describe_shape
 from .base import LayerNode
 
 
@@ -35,7 +36,8 @@ class BatchNorm1dNode(LayerNode):
     def _channels(self, in_shape: Shape | None) -> int:
         sh = self._require_shape(in_shape)
         if len(sh) not in (1, 2):
-            raise ShapeError(f"BatchNorm1d {self.id!r} expects (features,) or (C,L), got {tuple(sh)}")
+            raise ShapeError(f"BatchNorm1d “{self.id}” reads a vector or a sequence, but receives {describe_shape(sh)}",
+                             code="wrong_rank", node_id=self.id, facts={"want_rank": 1, "got": list(sh)})
         return sh[0]
 
     def out_shape(self, in_shape: Shape | None) -> Shape:
@@ -88,7 +90,9 @@ class GroupNormNode(LayerNode):
         c = in_shape[0]
         g = int(self.p("num_groups", 8))
         if c % g != 0:
-            raise ShapeError(f"GroupNorm {self.id!r}: channels {c} not divisible by num_groups {g}")
+            raise ShapeError(f"GroupNorm “{self.id}”: {c} channels do not split into {g} equal groups",
+                             code="not_divisible", param="num_groups",
+                             fixes=fx.divisor_fixes(self.id, "num_groups", c, g, " channels per group"))
         return c, g
 
     def out_shape(self, in_shape: Shape | None) -> Shape:

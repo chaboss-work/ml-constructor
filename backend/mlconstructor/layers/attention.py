@@ -18,6 +18,7 @@ import torch.nn as nn
 
 from ..registry import register
 from ..schema import ParamDef
+from .. import fixes as fx
 from ..shapes import Shape, ShapeError
 from .base import LayerNode
 
@@ -55,7 +56,10 @@ class MultiheadAttentionNode(LayerNode):
         heads = int(self.p("num_heads", 4))
         if embed % heads != 0:
             raise ShapeError(
-                f"MultiheadAttention {self.id!r}: embed_dim {embed} not divisible by num_heads {heads}"
+                f"MultiheadAttention “{self.id}”: its vectors of {embed} numbers (embed_dim) do not split into "
+                f"{heads} equal heads (num_heads)",
+                code="not_divisible", param="num_heads",
+                fixes=fx.divisor_fixes(self.id, "num_heads", embed, heads, " numbers per head"),
             )
         return int(length), int(embed), heads
 
@@ -91,12 +95,17 @@ class TransformerEncoderLayerNode(LayerNode):
         heads = int(self.p("nhead", 4))
         if dmodel % heads != 0:
             raise ShapeError(
-                f"TransformerEncoderLayer {self.id!r}: d_model {dmodel} not divisible by nhead {heads}"
+                f"TransformerEncoderLayer “{self.id}”: its vectors of {dmodel} numbers (d_model) do not split into "
+                f"{heads} equal heads (nhead)",
+                code="not_divisible", param="nhead",
+                fixes=fx.divisor_fixes(self.id, "nhead", dmodel, heads, " numbers per head"),
             )
         act = str(self.p("activation", "relu"))
         if act not in ("relu", "gelu"):
             raise ShapeError(
-                f"TransformerEncoderLayer {self.id!r}: activation must be 'relu' or 'gelu', got {act!r}"
+                f"TransformerEncoderLayer {self.id!r}: activation must be 'relu' or 'gelu', got {act!r}",
+                code="param_choice", param="activation",
+                fixes=[fx.set_param(self.id, "activation", "relu"), fx.set_param(self.id, "activation", "gelu")],
             )
         return int(length), int(dmodel), heads, act
 

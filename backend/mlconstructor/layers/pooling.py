@@ -7,6 +7,7 @@ import torch.nn as nn
 from ..registry import register
 from ..schema import ParamDef
 from ..shapes import Shape, ShapeError
+from .conv import window_fixes
 from .base import LayerNode
 
 
@@ -30,7 +31,11 @@ class _Pool2d(LayerNode):
         ho = (h + 2 * p - k) // s + 1
         wo = (w + 2 * p - k) // s + 1
         if ho <= 0 or wo <= 0:
-            raise ShapeError(f"{self.type_name} {self.id!r}: non-positive output ({ho}x{wo})")
+            raise ShapeError(
+                f"{self.type_name} “{self.id}”: a {k}×{k} window does not fit in the {h}×{w} picture arriving — "
+                f"nothing would be left", code="too_small", param="kernel_size",
+                fixes=window_fixes(self.id, h, w, k, s, p),
+            )
         return (c, ho, wo)
 
 

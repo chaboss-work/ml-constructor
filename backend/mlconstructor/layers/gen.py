@@ -19,6 +19,7 @@ import math
 
 import torch.nn as nn
 
+from .. import fixes as fx
 from .. import gen_modules as G
 from ..registry import register
 from ..schema import ParamDef
@@ -38,24 +39,30 @@ _EPS6 = ParamDef(name="eps", type="float", default=1e-6, min=0.0, label="Norm ep
 class _Gen(LayerNode):
     """Helpers shared by the Stage 19 layers."""
 
-    def _fail(self, msg: str, hint: str | None = None):
+    def _fail(self, msg: str, hint: str | None = None, *, code: str = "settings_conflict", param: str | None = None,
+              fixes: list | None = None):
         """The layer's own settings clash: no connection transform can help."""
-        raise ShapeError(f"{self.label} ({_where(self.id)}): {msg}", node_id=self.id, hint=hint, settings=True)
+        raise ShapeError(f"{self.label} ({_where(self.id)}): {msg}", node_id=self.id, hint=hint, settings=True,
+                         code=code, param=param, fixes=fixes)
 
-    def _bad(self, msg: str, hint: str | None = None):
+    def _bad(self, msg: str, hint: str | None = None, *, code: str = "wrong_shape", param: str | None = None,
+             fixes: list | None = None):
         """What arrives does not fit (a connection transform might make it fit)."""
-        raise ShapeError(f"{self.label} ({_where(self.id)}): {msg}", node_id=self.id, hint=hint)
+        raise ShapeError(f"{self.label} ({_where(self.id)}): {msg}", node_id=self.id, hint=hint, code=code,
+                         param=param, fixes=fixes)
 
     def _int(self, name: str, default: int, low: int = 1) -> int:
         v = int(self.p(name, default))
         if v < low:
-            self._fail(f"{name} must be at least {low}, got {v}")
+            self._fail(f"{name} must be at least {low}, got {v}", code="param_range", param=name,
+                       fixes=[fx.set_param(self.id, name, low)])
         return v
 
     def _choice(self, name: str, default: str, choices: tuple[str, ...]) -> str:
         v = str(self.p(name, default))
         if v not in choices:
-            self._fail(f"{name} must be one of {', '.join(choices)}, got {v!r}")
+            self._fail(f"{name} must be one of {', '.join(choices)}, got {v!r}", code="param_choice", param=name,
+                       fixes=[fx.set_param(self.id, name, c) for c in choices[:3]])
         return v
 
     def _ints(self, name: str, default: list[int]) -> list[int]:
@@ -63,9 +70,11 @@ class _Gen(LayerNode):
         try:
             vals = [int(v) for v in raw]
         except (TypeError, ValueError):
-            self._fail(f"{name} must be a list of whole numbers, got {raw!r}")
+            self._fail(f"{name} must be a list of whole numbers, got {raw!r}", code="param_list", param=name,
+                       fixes=[fx.set_param(self.id, name, list(default), f"Set {name} back to {', '.join(map(str, default))}")])
         if not vals:
-            self._fail(f"{name} must not be empty")
+            self._fail(f"{name} must not be empty", code="param_list", param=name,
+                       fixes=[fx.set_param(self.id, name, list(default), f"Set {name} back to {', '.join(map(str, default))}")])
         return vals
 
 
@@ -77,6 +86,7 @@ class _Ported(_Gen):
         raise ShapeError(
             f"{self.label} ({_where(self.id)}) takes {len(ports)} inputs: {', '.join(ports)}",
             node_id=self.id,
+            code="ports_count",
             hint=f"Connect them in this order: {' → '.join(ports)}.",
         )
 
@@ -88,12 +98,13 @@ class _Ported(_Gen):
 
     def _rank(self, index: int, shape: Shape, ndim: int, what: str) -> Shape:
         if len(shape) != ndim:
-            self._bad(f"its input “{self.input_ports()[index]}” must be {what}, got {_fmt(shape)}")
+            self._bad(f"its input “{self.input_ports()[index]}” must be {what}, got {_fmt(shape)}", code="wrong_rank")
         return tuple(int(d) for d in shape)
 
     def _one_number(self, index: int, shape: Shape) -> Shape:
         if math.prod(int(d) for d in shape) != 1:
-            self._bad(f"its input “{self.input_ports()[index]}” is one number per example (Input [1]), got {_fmt(shape)}")
+            self._bad(f"its input “{self.input_ports()[index]}” is one number per example (Input [1]), got {_fmt(shape)}",
+                      code="wrong_rank")
         return tuple(int(d) for d in shape)
 
 
@@ -128,11 +139,14 @@ class PatchEmbedNode(_Gen):
         p = self._int("patch_size", 16)
         if h % p or w % p:
             self._bad(f"the image {h}×{w} does not split into {p}×{p} patches",
-                      hint="Pick a patch size that divides the image's height and width.")
+                      hint="Pick a patch size that divides the image's height and width.", code="not_divisible",
+                      param="patch_size",
+                      fixes=fx.divisor_fixes(self.id, "patch_size", h, p, " patches a side", also=w))
         gh, gw = h // p, w // p
         pos = self._choice("position", "learned", ("learned", "sincos", "none"))
         if pos != "none" and gh != gw:
-            self._bad(f"a position table needs a square grid of patches, got {gh}×{gw}")
+            self._bad(f"a position table needs a square grid of patches, got {gh}×{gw}", param="position",
+                      fixes=[fx.set_param(self.id, "position", "none", "Use no position table (position: none)")])
         return int(c), p, gh, gw, pos, int(self.p("pos_grid", 0) or 0)
 
     def out_shape(self, in_shape: Shape | None) -> Shape:
@@ -198,7 +212,9 @@ class PositionEmbeddingNode(_Gen):
         n = int(self.p("length", 0) or 0)
         if n and n < length:
             self._fail(f"the table has {n} positions, but the sequence is {length} long",
-                       hint="Make the table at least as long as the sequence (0 = the same length).")
+                       hint="Make the table at least as long as the sequence (0 = the same length).", param="length",
+                       fixes=[fx.set_param(self.id, "length", 0, "Set the table length to 0 (the sequence's length)"),
+                              fx.set_param(self.id, "length", int(length), f"Set the table length to {length}")])
         return int(length), int(dim), n or int(length), self._choice("kind", "learned", ("learned", "sinusoidal"))
 
     def out_shape(self, in_shape: Shape | None) -> Shape:
@@ -500,7 +516,10 @@ def _levels(node: _Gen, name: str, default: list[int], groups: int) -> list[int]
     for ch in chans:
         if ch < 1 or ch % groups:
             node._fail(f"every level's channels must divide by the {groups} norm groups, got {chans}",
-                       hint="Use multiples of the group count (e.g. 32: 128, 256, 512).")
+                       hint="Use multiples of the group count (e.g. 32: 128, 256, 512).", code="not_divisible",
+                       param="groups",
+                       fixes=fx.divisor_fixes(node.id, "groups", min(c for c in chans if c >= 1) if any(
+                           c >= 1 for c in chans) else 1, groups, " channels a group at the narrowest level"))
     return chans
 
 
@@ -543,12 +562,21 @@ class UNet2DNode(_Ported):
         chans = _levels(self, "block_channels", [320, 640, 1280, 1280], groups)
         attn = self._ints("attention_levels", [1, 1, 1, 0])
         if len(attn) != len(chans):
+            even = (attn + [attn[-1] if attn else 0] * len(chans))[:len(chans)]
             self._fail(f"{len(chans)} levels but {len(attn)} cross-attention flags",
-                       hint="Give one 0/1 flag per level.")
+                       hint="Give one 0/1 flag per level.", param="attention_levels",
+                       fixes=[fx.set_param(self.id, "attention_levels", even,
+                                           f"Use one flag per level: {', '.join(map(str, even))}")])
         heads = self._int("heads", 8)
         for ch in chans:
             if ch % heads:
-                self._fail(f"channels {ch} do not split into {heads} heads", hint="Use a head count that divides every level.")
+                common = chans[0]
+                for other in chans[1:]:
+                    from math import gcd
+                    common = gcd(common, other)
+                self._fail(f"channels {ch} do not split into {heads} heads", hint="Use a head count that divides every level.",
+                           code="not_divisible", param="heads",
+                           fixes=fx.divisor_fixes(self.id, "heads", common, heads, " channels a head at the narrowest level"))
         factor = 2 ** (len(chans) - 1)
         if lat[1] % factor or lat[2] % factor:
             self._bad(f"the latent {lat[1]}×{lat[2]} must divide by {factor} (it is halved {len(chans) - 1} times)",
@@ -767,7 +795,8 @@ class TriplaneTransformerNode(_Ported):
         x, ctx = (self.check_port(i, s) for i, s in enumerate(shapes))
         groups = self._int("groups", 32)
         if x[1] % groups:
-            self._fail(f"token size {x[1]} does not divide by the {groups} norm groups")
+            self._fail(f"token size {x[1]} does not divide by the {groups} norm groups", code="not_divisible",
+                       param="groups", fixes=fx.divisor_fixes(self.id, "groups", x[1], groups, " numbers a group"))
         return dict(dim=x[1], context_dim=ctx[1], layers=self._int("layers", 16), heads=self._int("heads", 16),
                     head_dim=self._int("head_dim", 64), groups=groups)
 
@@ -880,7 +909,10 @@ class SliceTokensNode(_Gen):
         end = start + length if length else n
         if start >= n or end > n:
             self._bad(f"tokens {start}…{end - 1} do not fit in a sequence of {n}",
-                      hint="Pick a start and a length inside the sequence.")
+                      hint="Pick a start and a length inside the sequence.", code="param_range", param="start",
+                      fixes=[fx.fix(f"Take tokens {min(start, n - 1)}…{n - 1}",
+                                    fx.op_set_param(self.id, "start", min(start, n - 1)),
+                                    fx.op_set_param(self.id, "length", 0))])
         return (end - start, *[int(d) for d in sh[1:]])
 
     def build(self, in_shape: Shape | None) -> nn.Module:
@@ -913,7 +945,12 @@ class _ConvND(_Gen):
         k, s, p = self._int("kernel_size", 3), self._int("stride", 1), self._int("padding", 1, low=0)
         sizes = [_conv_len(int(n), k, s, p) for n in sh[1:]]
         if min(sizes) < 1:
-            self._bad(f"a {k}-wide kernel does not fit in {_fmt(sh[1:])}", hint="Use a smaller kernel or more padding.")
+            self._bad(f"a {k}-wide kernel does not fit in {_fmt(sh[1:])}", hint="Use a smaller kernel or more padding.",
+                      code="too_small", param="kernel_size",
+                      fixes=[fx.set_param(self.id, "padding", k // 2, f"Add padding {k // 2}")] +
+                            ([fx.set_param(self.id, "kernel_size", min(int(n) for n in sh[1:]) + 2 * p,
+                                           f"Use a {min(int(n) for n in sh[1:]) + 2 * p}-wide kernel")]
+                             if min(int(n) for n in sh[1:]) + 2 * p >= 1 else []))
         return (self._int("out_channels", 64), *sizes)
 
     def build(self, in_shape: Shape | None) -> nn.Module:

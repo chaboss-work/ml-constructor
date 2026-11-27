@@ -5,6 +5,8 @@ import { Observable } from 'rxjs';
 import {
   ArchitectureInfo,
   BuildResult,
+  Diagnosis,
+  GraphErrorInfo,
   ConnectionOptions,
   DataPreview,
   DatasetInfo,
@@ -48,6 +50,11 @@ export class ApiService {
 
   build(spec: GraphSpec): Observable<BuildResult> {
     return this.http.post<BuildResult>(`${API_BASE}/build`, spec);
+  }
+
+  /** Stage 21 — the live check: every problem and warning, explained, with one-click fixes. */
+  diagnose(spec: GraphSpec): Observable<Diagnosis> {
+    return this.http.post<Diagnosis>(`${API_BASE}/diagnose`, spec);
   }
 
   train(spec: GraphSpec): Observable<TrainResult> {
@@ -174,7 +181,7 @@ export class ApiService {
   }
 
   /** Live training (Stage 11): POST the graph and stream NDJSON progress events,
-   * invoking `onEvent` for each. Rejects with `{status, fallback, detail}` — set
+   * invoking `onEvent` for each. Rejects with `{status, fallback, detail, error}` — set
    * `fallback` when the backend has no streaming endpoint (404), so the caller can
    * fall back to the plain `train()`. */
   async trainStream(spec: GraphSpec, onEvent: (e: TrainEvent) => void): Promise<void> {
@@ -185,12 +192,15 @@ export class ApiService {
     });
     if (!resp.ok || !resp.body) {
       let detail = '';
+      let error: GraphErrorInfo | undefined;
       try {
-        detail = (await resp.json())?.detail ?? '';
+        const body = await resp.json();
+        detail = body?.detail ?? '';
+        error = body?.error ?? undefined; // Stage 21: the problem explained, with fixes
       } catch {
         /* no JSON body */
       }
-      throw { status: resp.status, fallback: resp.status === 404, detail };
+      throw { status: resp.status, fallback: resp.status === 404 && !error, detail, error };
     }
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();

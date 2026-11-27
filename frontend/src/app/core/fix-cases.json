@@ -1,0 +1,8325 @@
+[
+ {
+  "name": "no_input: Add an Input (784) before “fc”",
+  "before": {
+   "nodes": [
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_node",
+    "id": "input_1",
+    "type": "Input",
+    "params": {
+     "shape": [
+      784
+     ]
+    },
+    "near": "fc"
+   },
+   {
+    "op": "add_edge",
+    "source": "input_1",
+    "target": "fc"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "input_1",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    }
+   ],
+   "edges": [
+    [
+     "fc",
+     "out"
+    ],
+    [
+     "input_1",
+     "fc"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "several_outputs: Remove the branch ending at “out2” (2 nodes)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "out2",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "a",
+     "out"
+    ],
+    [
+     "in",
+     "b"
+    ],
+    [
+     "b",
+     "out2"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_node",
+    "node": "b",
+    "bridge": false
+   },
+   {
+    "op": "remove_node",
+    "node": "out2",
+    "bridge": false
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "a",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "several_outputs: Remove the branch ending at “out” (2 nodes)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "out2",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "a",
+     "out"
+    ],
+    [
+     "in",
+     "b"
+    ],
+    [
+     "b",
+     "out2"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_node",
+    "node": "a",
+    "bridge": false
+   },
+   {
+    "op": "remove_node",
+    "node": "out",
+    "bridge": false
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out2",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "b"
+    ],
+    [
+     "b",
+     "out2"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "input_has_input: Remove the connection into the Input",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "in2",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in2",
+     "in"
+    ],
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_edge",
+    "source": "in2",
+    "target": "in"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "in2",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "no_connection: Connect “act” → “fc2”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc1",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "fc2",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc1"
+    ],
+    [
+     "fc1",
+     "act"
+    ],
+    [
+     "fc2",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_edge",
+    "source": "act",
+    "target": "fc2"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc1",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "fc2",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc1"
+    ],
+    [
+     "fc1",
+     "act"
+    ],
+    [
+     "fc2",
+     "out"
+    ],
+    [
+     "act",
+     "fc2"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "no_connection: Connect “in” → “fc2”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc1",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "fc2",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc1"
+    ],
+    [
+     "fc1",
+     "act"
+    ],
+    [
+     "fc2",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_edge",
+    "source": "in",
+    "target": "fc2"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc1",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "fc2",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc1"
+    ],
+    [
+     "fc1",
+     "act"
+    ],
+    [
+     "fc2",
+     "out"
+    ],
+    [
+     "in",
+     "fc2"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "too_many_inputs: Join them with Add (sum them), then into “c”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "c",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "in",
+     "b"
+    ],
+    [
+     "a",
+     "c"
+    ],
+    [
+     "b",
+     "c"
+    ],
+    [
+     "c",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_node",
+    "id": "add_1",
+    "type": "Add",
+    "params": {},
+    "near": "c"
+   },
+   {
+    "op": "remove_edge",
+    "source": "a",
+    "target": "c"
+   },
+   {
+    "op": "add_edge",
+    "source": "a",
+    "target": "add_1"
+   },
+   {
+    "op": "remove_edge",
+    "source": "b",
+    "target": "c"
+   },
+   {
+    "op": "add_edge",
+    "source": "b",
+    "target": "add_1"
+   },
+   {
+    "op": "add_edge",
+    "source": "add_1",
+    "target": "c"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "c",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "add_1",
+     "type": "Add",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "in",
+     "b"
+    ],
+    [
+     "c",
+     "out"
+    ],
+    [
+     "a",
+     "add_1"
+    ],
+    [
+     "b",
+     "add_1"
+    ],
+    [
+     "add_1",
+     "c"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "too_many_inputs: Join them with Concat (put them side by side), then into “c”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "c",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "in",
+     "b"
+    ],
+    [
+     "a",
+     "c"
+    ],
+    [
+     "b",
+     "c"
+    ],
+    [
+     "c",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_node",
+    "id": "concat_1",
+    "type": "Concat",
+    "params": {},
+    "near": "c"
+   },
+   {
+    "op": "remove_edge",
+    "source": "a",
+    "target": "c"
+   },
+   {
+    "op": "add_edge",
+    "source": "a",
+    "target": "concat_1"
+   },
+   {
+    "op": "remove_edge",
+    "source": "b",
+    "target": "c"
+   },
+   {
+    "op": "add_edge",
+    "source": "b",
+    "target": "concat_1"
+   },
+   {
+    "op": "add_edge",
+    "source": "concat_1",
+    "target": "c"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "c",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "concat_1",
+     "type": "Concat",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "in",
+     "b"
+    ],
+    [
+     "c",
+     "out"
+    ],
+    [
+     "a",
+     "concat_1"
+    ],
+    [
+     "b",
+     "concat_1"
+    ],
+    [
+     "concat_1",
+     "c"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "merge_needs_two: Connect “fc” into “sum” too (a skip connection around “act”)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 784
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "sum",
+     "type": "Add",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "sum"
+    ],
+    [
+     "sum",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_edge",
+    "source": "fc",
+    "target": "sum"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 784
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "sum",
+     "type": "Add",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "sum"
+    ],
+    [
+     "sum",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ],
+    [
+     "fc",
+     "sum"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "merge_needs_two: Remove “sum” and connect “act” straight on",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 784
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "sum",
+     "type": "Add",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "sum"
+    ],
+    [
+     "sum",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_node",
+    "node": "sum",
+    "bridge": true
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 784
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "ports_count: Connect “txt” as “context”",
+  "before": {
+   "nodes": [
+    {
+     "id": "lat",
+     "type": "Input",
+     "params": {
+      "shape": [
+       4,
+       8,
+       8
+      ],
+      "name": "latent"
+     }
+    },
+    {
+     "id": "t",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ],
+      "name": "timestep"
+     }
+    },
+    {
+     "id": "txt",
+     "type": "Input",
+     "params": {
+      "shape": [
+       7,
+       32
+      ],
+      "name": "text"
+     }
+    },
+    {
+     "id": "unet",
+     "type": "UNet2D",
+     "params": {
+      "block_channels": [
+       32,
+       64
+      ],
+      "layers_per_block": 1,
+      "attention_levels": [
+       0,
+       1
+      ],
+      "heads": 4,
+      "groups": 8,
+      "out_channels": 4
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "any_shape": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "lat",
+     "unet"
+    ],
+    [
+     "t",
+     "unet"
+    ],
+    [
+     "unet",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_edge",
+    "source": "txt",
+    "target": "unet"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "lat",
+     "type": "Input",
+     "params": {
+      "shape": [
+       4,
+       8,
+       8
+      ],
+      "name": "latent"
+     }
+    },
+    {
+     "id": "t",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ],
+      "name": "timestep"
+     }
+    },
+    {
+     "id": "txt",
+     "type": "Input",
+     "params": {
+      "shape": [
+       7,
+       32
+      ],
+      "name": "text"
+     }
+    },
+    {
+     "id": "unet",
+     "type": "UNet2D",
+     "params": {
+      "block_channels": [
+       32,
+       64
+      ],
+      "layers_per_block": 1,
+      "attention_levels": [
+       0,
+       1
+      ],
+      "heads": 4,
+      "groups": 8,
+      "out_channels": 4
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "any_shape": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "lat",
+     "unet"
+    ],
+    [
+     "t",
+     "unet"
+    ],
+    [
+     "unet",
+     "out"
+    ],
+    [
+     "txt",
+     "unet"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "port_order: Reconnect its inputs in this order: lat as “latent” → t as “timestep” → txt as “context”",
+  "before": {
+   "nodes": [
+    {
+     "id": "lat",
+     "type": "Input",
+     "params": {
+      "shape": [
+       4,
+       8,
+       8
+      ],
+      "name": "latent"
+     }
+    },
+    {
+     "id": "t",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ],
+      "name": "timestep"
+     }
+    },
+    {
+     "id": "txt",
+     "type": "Input",
+     "params": {
+      "shape": [
+       7,
+       32
+      ],
+      "name": "text"
+     }
+    },
+    {
+     "id": "unet",
+     "type": "UNet2D",
+     "params": {
+      "block_channels": [
+       32,
+       64
+      ],
+      "layers_per_block": 1,
+      "attention_levels": [
+       0,
+       1
+      ],
+      "heads": 4,
+      "groups": 8,
+      "out_channels": 4
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "any_shape": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "t",
+     "unet"
+    ],
+    [
+     "lat",
+     "unet"
+    ],
+    [
+     "txt",
+     "unet"
+    ],
+    [
+     "unet",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "reorder_inputs",
+    "node": "unet",
+    "sources": [
+     "lat",
+     "t",
+     "txt"
+    ]
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "lat",
+     "type": "Input",
+     "params": {
+      "shape": [
+       4,
+       8,
+       8
+      ],
+      "name": "latent"
+     }
+    },
+    {
+     "id": "t",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ],
+      "name": "timestep"
+     }
+    },
+    {
+     "id": "txt",
+     "type": "Input",
+     "params": {
+      "shape": [
+       7,
+       32
+      ],
+      "name": "text"
+     }
+    },
+    {
+     "id": "unet",
+     "type": "UNet2D",
+     "params": {
+      "block_channels": [
+       32,
+       64
+      ],
+      "layers_per_block": 1,
+      "attention_levels": [
+       0,
+       1
+      ],
+      "heads": 4,
+      "groups": 8,
+      "out_channels": 4
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "any_shape": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "lat",
+     "unet"
+    ],
+    [
+     "t",
+     "unet"
+    ],
+    [
+     "txt",
+     "unet"
+    ],
+    [
+     "unet",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "cycle: Remove the connection b → a",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "a",
+     "b"
+    ],
+    [
+     "b",
+     "a"
+    ],
+    [
+     "b",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_edge",
+    "source": "b",
+    "target": "a"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 32
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "a",
+     "b"
+    ],
+    [
+     "b",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "duplicate_id: Rename the second “fc” to “relu_1”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "fc",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "rename_node",
+    "node": "fc",
+    "occurrence": 1,
+    "new_id": "relu_1"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "relu_1",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "unknown_node: Remove the connection fc → ghost",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ],
+    [
+     "fc",
+     "ghost"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_edge",
+    "source": "fc",
+    "target": "ghost"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "pinned_transform: Set the connection in → fc back to Auto",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [
+    {
+     "source": "in",
+     "target": "fc",
+     "transform": "none",
+     "params": {}
+    }
+   ]
+  },
+  "ops": [
+   {
+    "op": "set_transform",
+    "source": "in",
+    "target": "fc",
+    "transform": "auto",
+    "params": {}
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "pinned_transform: Set the connection in → fc to “Flatten to a vector”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [
+    {
+     "source": "in",
+     "target": "fc",
+     "transform": "none",
+     "params": {}
+    }
+   ]
+  },
+  "ops": [
+   {
+    "op": "set_transform",
+    "source": "in",
+    "target": "fc",
+    "transform": "flatten",
+    "params": {}
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [
+    {
+     "source": "in",
+     "target": "fc",
+     "transform": "flatten",
+     "params": {}
+    }
+   ],
+   "train": {}
+  }
+ },
+ {
+  "name": "bad_transform: Set the connection in → fc back to Auto",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [
+    {
+     "source": "in",
+     "target": "fc",
+     "transform": "teleport",
+     "params": {}
+    }
+   ]
+  },
+  "ops": [
+   {
+    "op": "set_transform",
+    "source": "in",
+    "target": "fc",
+    "transform": "auto",
+    "params": {}
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "no_auto_transform: Add padding 4 (the picture keeps its size)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       5
+      ]
+     }
+    },
+    {
+     "id": "c",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 4,
+      "kernel_size": 9
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "c"
+    ],
+    [
+     "c",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "c",
+    "name": "padding",
+    "value": 4
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       5
+      ]
+     }
+    },
+    {
+     "id": "c",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 4,
+      "kernel_size": 9,
+      "padding": 4
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "c"
+    ],
+    [
+     "c",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "no_auto_transform: Use a 1×1 kernel",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       5
+      ]
+     }
+    },
+    {
+     "id": "c",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 4,
+      "kernel_size": 9
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "c"
+    ],
+    [
+     "c",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "c",
+    "name": "kernel_size",
+    "value": 1
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       5
+      ]
+     }
+    },
+    {
+     "id": "c",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 4,
+      "kernel_size": 1
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "c"
+    ],
+    [
+     "c",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "merge_shapes: Use a Concat instead of “sum” (put the branches side by side)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 2000
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 3000
+     }
+    },
+    {
+     "id": "sum",
+     "type": "Add",
+     "params": {}
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "in",
+     "b"
+    ],
+    [
+     "a",
+     "sum"
+    ],
+    [
+     "b",
+     "sum"
+    ],
+    [
+     "sum",
+     "act"
+    ],
+    [
+     "act",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_node",
+    "id": "concat_1",
+    "type": "Concat",
+    "params": {},
+    "near": "sum"
+   },
+   {
+    "op": "add_edge",
+    "source": "a",
+    "target": "concat_1"
+   },
+   {
+    "op": "add_edge",
+    "source": "b",
+    "target": "concat_1"
+   },
+   {
+    "op": "add_edge",
+    "source": "concat_1",
+    "target": "act"
+   },
+   {
+    "op": "remove_node",
+    "node": "sum",
+    "bridge": false
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 2000
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 3000
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "concat_1",
+     "type": "Concat",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "in",
+     "b"
+    ],
+    [
+     "act",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ],
+    [
+     "a",
+     "concat_1"
+    ],
+    [
+     "b",
+     "concat_1"
+    ],
+    [
+     "concat_1",
+     "act"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "too_small: Add padding 1 (the picture keeps its size)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       8,
+       8
+      ]
+     }
+    },
+    {
+     "id": "c1",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 8,
+      "kernel_size": 5
+     }
+    },
+    {
+     "id": "p1",
+     "type": "MaxPool2d",
+     "params": {}
+    },
+    {
+     "id": "c2",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 8,
+      "kernel_size": 3
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "c1"
+    ],
+    [
+     "c1",
+     "p1"
+    ],
+    [
+     "p1",
+     "c2"
+    ],
+    [
+     "c2",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "c2",
+    "name": "padding",
+    "value": 1
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       8,
+       8
+      ]
+     }
+    },
+    {
+     "id": "c1",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 8,
+      "kernel_size": 5
+     }
+    },
+    {
+     "id": "p1",
+     "type": "MaxPool2d",
+     "params": {}
+    },
+    {
+     "id": "c2",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 8,
+      "kernel_size": 3,
+      "padding": 1
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "c1"
+    ],
+    [
+     "c1",
+     "p1"
+    ],
+    [
+     "p1",
+     "c2"
+    ],
+    [
+     "c2",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "too_small: Use a 2×2 kernel",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       8,
+       8
+      ]
+     }
+    },
+    {
+     "id": "c1",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 8,
+      "kernel_size": 5
+     }
+    },
+    {
+     "id": "p1",
+     "type": "MaxPool2d",
+     "params": {}
+    },
+    {
+     "id": "c2",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 8,
+      "kernel_size": 3
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "c1"
+    ],
+    [
+     "c1",
+     "p1"
+    ],
+    [
+     "p1",
+     "c2"
+    ],
+    [
+     "c2",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "c2",
+    "name": "kernel_size",
+    "value": 2
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       8,
+       8
+      ]
+     }
+    },
+    {
+     "id": "c1",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 8,
+      "kernel_size": 5
+     }
+    },
+    {
+     "id": "p1",
+     "type": "MaxPool2d",
+     "params": {}
+    },
+    {
+     "id": "c2",
+     "type": "Conv2d",
+     "params": {
+      "out_channels": 8,
+      "kernel_size": 2
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "c1"
+    ],
+    [
+     "c1",
+     "p1"
+    ],
+    [
+     "p1",
+     "c2"
+    ],
+    [
+     "c2",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "wrong_shape: Use no position table (position: none)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       3,
+       28,
+       56
+      ]
+     }
+    },
+    {
+     "id": "pe",
+     "type": "PatchEmbed",
+     "params": {
+      "patch_size": 4,
+      "dim": 32
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "pe"
+    ],
+    [
+     "pe",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "pe",
+    "name": "position",
+    "value": "none"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       3,
+       28,
+       56
+      ]
+     }
+    },
+    {
+     "id": "pe",
+     "type": "PatchEmbed",
+     "params": {
+      "patch_size": 4,
+      "dim": 32,
+      "position": "none"
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "pe"
+    ],
+    [
+     "pe",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "wrong_shape: Set the connection in → pe to “Fold into an image (C×H×W)” (6×28×28)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       3,
+       28,
+       56
+      ]
+     }
+    },
+    {
+     "id": "pe",
+     "type": "PatchEmbed",
+     "params": {
+      "patch_size": 4,
+      "dim": 32
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "pe"
+    ],
+    [
+     "pe",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_transform",
+    "source": "in",
+    "target": "pe",
+    "transform": "to_image",
+    "params": {
+     "channels": 6,
+     "height": 28,
+     "width": 28
+    }
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       3,
+       28,
+       56
+      ]
+     }
+    },
+    {
+     "id": "pe",
+     "type": "PatchEmbed",
+     "params": {
+      "patch_size": 4,
+      "dim": 32
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "pe"
+    ],
+    [
+     "pe",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [
+    {
+     "source": "in",
+     "target": "pe",
+     "transform": "to_image",
+     "params": {
+      "channels": 6,
+      "height": 28,
+      "width": 28
+     }
+    }
+   ],
+   "train": {}
+  }
+ },
+ {
+  "name": "not_divisible: Set num_heads to 5 (30 ÷ 5 = 6 numbers per head)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       10,
+       30
+      ]
+     }
+    },
+    {
+     "id": "att",
+     "type": "MultiheadAttention",
+     "params": {
+      "num_heads": 4
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "att"
+    ],
+    [
+     "att",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "num_heads",
+    "value": 5
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       10,
+       30
+      ]
+     }
+    },
+    {
+     "id": "att",
+     "type": "MultiheadAttention",
+     "params": {
+      "num_heads": 5
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "att"
+    ],
+    [
+     "att",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "not_divisible: Set num_heads to 3 (30 ÷ 3 = 10 numbers per head)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       10,
+       30
+      ]
+     }
+    },
+    {
+     "id": "att",
+     "type": "MultiheadAttention",
+     "params": {
+      "num_heads": 4
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "att"
+    ],
+    [
+     "att",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "num_heads",
+    "value": 3
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       10,
+       30
+      ]
+     }
+    },
+    {
+     "id": "att",
+     "type": "MultiheadAttention",
+     "params": {
+      "num_heads": 3
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "att"
+    ],
+    [
+     "att",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "param_range: Set repeat to 1",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 0,
+      "layers": [
+       {
+        "type": "Linear",
+        "params": {
+         "out_features": 784
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "blk",
+    "name": "repeat",
+    "value": 1
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 1,
+      "layers": [
+       {
+        "type": "Linear",
+        "params": {
+         "out_features": 784
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "param_range: Reset “blk” to its default settings",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 0,
+      "layers": [
+       {
+        "type": "Linear",
+        "params": {
+         "out_features": 784
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "blk",
+    "name": "repeat",
+    "value": 2
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": [
+       {
+        "type": "Linear",
+        "params": {
+         "out_features": 784
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "param_choice: Set activation to relu",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       8,
+       32
+      ]
+     }
+    },
+    {
+     "id": "enc",
+     "type": "TransformerEncoderLayer",
+     "params": {
+      "nhead": 4,
+      "activation": "swish"
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "enc"
+    ],
+    [
+     "enc",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "enc",
+    "name": "activation",
+    "value": "relu"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       8,
+       32
+      ]
+     }
+    },
+    {
+     "id": "enc",
+     "type": "TransformerEncoderLayer",
+     "params": {
+      "nhead": 4,
+      "activation": "relu"
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "enc"
+    ],
+    [
+     "enc",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "param_choice: Set activation to gelu",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       8,
+       32
+      ]
+     }
+    },
+    {
+     "id": "enc",
+     "type": "TransformerEncoderLayer",
+     "params": {
+      "nhead": 4,
+      "activation": "swish"
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "enc"
+    ],
+    [
+     "enc",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "enc",
+    "name": "activation",
+    "value": "gelu"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       8,
+       32
+      ]
+     }
+    },
+    {
+     "id": "enc",
+     "type": "TransformerEncoderLayer",
+     "params": {
+      "nhead": 4,
+      "activation": "gelu"
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "enc"
+    ],
+    [
+     "enc",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "param_list: Set block_channels back to 320, 640, 1280, 1280",
+  "before": {
+   "nodes": [
+    {
+     "id": "lat",
+     "type": "Input",
+     "params": {
+      "shape": [
+       4,
+       8,
+       8
+      ]
+     }
+    },
+    {
+     "id": "t",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ]
+     }
+    },
+    {
+     "id": "txt",
+     "type": "Input",
+     "params": {
+      "shape": [
+       7,
+       32
+      ]
+     }
+    },
+    {
+     "id": "unet",
+     "type": "UNet2D",
+     "params": {
+      "block_channels": "wide",
+      "groups": 8
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "any_shape": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "lat",
+     "unet"
+    ],
+    [
+     "t",
+     "unet"
+    ],
+    [
+     "txt",
+     "unet"
+    ],
+    [
+     "unet",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "unet",
+    "name": "block_channels",
+    "value": [
+     320,
+     640,
+     1280,
+     1280
+    ]
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "lat",
+     "type": "Input",
+     "params": {
+      "shape": [
+       4,
+       8,
+       8
+      ]
+     }
+    },
+    {
+     "id": "t",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ]
+     }
+    },
+    {
+     "id": "txt",
+     "type": "Input",
+     "params": {
+      "shape": [
+       7,
+       32
+      ]
+     }
+    },
+    {
+     "id": "unet",
+     "type": "UNet2D",
+     "params": {
+      "block_channels": [
+       320,
+       640,
+       1280,
+       1280
+      ],
+      "groups": 8
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "any_shape": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "lat",
+     "unet"
+    ],
+    [
+     "t",
+     "unet"
+    ],
+    [
+     "txt",
+     "unet"
+    ],
+    [
+     "unet",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "param_list: Reset “unet” to its default settings",
+  "before": {
+   "nodes": [
+    {
+     "id": "lat",
+     "type": "Input",
+     "params": {
+      "shape": [
+       4,
+       8,
+       8
+      ]
+     }
+    },
+    {
+     "id": "t",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ]
+     }
+    },
+    {
+     "id": "txt",
+     "type": "Input",
+     "params": {
+      "shape": [
+       7,
+       32
+      ]
+     }
+    },
+    {
+     "id": "unet",
+     "type": "UNet2D",
+     "params": {
+      "block_channels": "wide",
+      "groups": 8
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "any_shape": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "lat",
+     "unet"
+    ],
+    [
+     "t",
+     "unet"
+    ],
+    [
+     "txt",
+     "unet"
+    ],
+    [
+     "unet",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "unet",
+    "name": "out_channels",
+    "value": 4
+   },
+   {
+    "op": "set_param",
+    "node": "unet",
+    "name": "block_channels",
+    "value": [
+     320,
+     640,
+     1280,
+     1280
+    ]
+   },
+   {
+    "op": "set_param",
+    "node": "unet",
+    "name": "layers_per_block",
+    "value": 2
+   },
+   {
+    "op": "set_param",
+    "node": "unet",
+    "name": "attention_levels",
+    "value": [
+     1,
+     1,
+     1,
+     0
+    ]
+   },
+   {
+    "op": "set_param",
+    "node": "unet",
+    "name": "heads",
+    "value": 8
+   },
+   {
+    "op": "set_param",
+    "node": "unet",
+    "name": "groups",
+    "value": 32
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "lat",
+     "type": "Input",
+     "params": {
+      "shape": [
+       4,
+       8,
+       8
+      ]
+     }
+    },
+    {
+     "id": "t",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ]
+     }
+    },
+    {
+     "id": "txt",
+     "type": "Input",
+     "params": {
+      "shape": [
+       7,
+       32
+      ]
+     }
+    },
+    {
+     "id": "unet",
+     "type": "UNet2D",
+     "params": {
+      "block_channels": [
+       320,
+       640,
+       1280,
+       1280
+      ],
+      "groups": 32,
+      "out_channels": 4,
+      "layers_per_block": 2,
+      "attention_levels": [
+       1,
+       1,
+       1,
+       0
+      ],
+      "heads": 8
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "any_shape": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "lat",
+     "unet"
+    ],
+    [
+     "t",
+     "unet"
+    ],
+    [
+     "txt",
+     "unet"
+    ],
+    [
+     "unet",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "settings_conflict: Set the head size to 8",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "att",
+     "type": "GQAttention",
+     "params": {
+      "heads": 4,
+      "kv_heads": 2,
+      "head_dim": 7
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "att"
+    ],
+    [
+     "att",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "head_dim",
+    "value": 8
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "att",
+     "type": "GQAttention",
+     "params": {
+      "heads": 4,
+      "kv_heads": 2,
+      "head_dim": 8
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "att"
+    ],
+    [
+     "att",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "settings_conflict: Reset “att” to its default settings",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "att",
+     "type": "GQAttention",
+     "params": {
+      "heads": 4,
+      "kv_heads": 2,
+      "head_dim": 7
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "att"
+    ],
+    [
+     "att",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "head_dim",
+    "value": 0
+   },
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "rope_theta",
+    "value": 10000.0
+   },
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "causal",
+    "value": true
+   },
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "sliding_window",
+    "value": 0
+   },
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "qk_norm",
+    "value": false
+   },
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "bias",
+    "value": false
+   },
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "post_norm",
+    "value": false
+   },
+   {
+    "op": "set_param",
+    "node": "att",
+    "name": "eps",
+    "value": 1e-06
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "att",
+     "type": "GQAttention",
+     "params": {
+      "heads": 4,
+      "kv_heads": 2,
+      "head_dim": 0,
+      "rope_theta": 10000.0,
+      "causal": true,
+      "sliding_window": 0,
+      "qk_norm": false,
+      "bias": false,
+      "post_norm": false,
+      "eps": 1e-06
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "att"
+    ],
+    [
+     "att",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "input_shape: Set the shape to 28",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       0,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "in",
+    "name": "shape",
+    "value": [
+     28
+    ]
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "block_empty: Put Linear + ReLU inside the block",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": []
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_inner",
+    "node": "blk",
+    "type": "Linear",
+    "params": {
+     "out_features": 784
+    },
+    "index": null
+   },
+   {
+    "op": "add_inner",
+    "node": "blk",
+    "type": "ReLU",
+    "params": {},
+    "index": null
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": [
+       {
+        "type": "Linear",
+        "params": {
+         "out_features": 784
+        }
+       },
+       {
+        "type": "ReLU",
+        "params": {}
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "block_empty: Delete the block “blk” (connect straight through)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": []
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_node",
+    "node": "blk",
+    "bridge": true
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "block_bad_inner: Remove layer 2 from the block",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": [
+       {
+        "type": "Linear",
+        "params": {
+         "out_features": 784
+        }
+       },
+       {
+        "type": "Output",
+        "params": {}
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_inner",
+    "node": "blk",
+    "index": 1
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": [
+       {
+        "type": "Linear",
+        "params": {
+         "out_features": 784
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "inner_layer: Set num_groups to 4 (4 ÷ 4 = 1 channel per group) (layer 2 of the block)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 1,
+      "layers": [
+       {
+        "type": "Conv2d",
+        "params": {
+         "out_channels": 4,
+         "kernel_size": 3,
+         "padding": 1
+        }
+       },
+       {
+        "type": "GroupNorm",
+        "params": {
+         "num_groups": 3
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_inner_param",
+    "node": "blk",
+    "index": 1,
+    "name": "num_groups",
+    "value": 4
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 1,
+      "layers": [
+       {
+        "type": "Conv2d",
+        "params": {
+         "out_channels": 4,
+         "kernel_size": 3,
+         "padding": 1
+        }
+       },
+       {
+        "type": "GroupNorm",
+        "params": {
+         "num_groups": 4
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "inner_layer: Set num_groups to 2 (4 ÷ 2 = 2 channels per group) (layer 2 of the block)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 1,
+      "layers": [
+       {
+        "type": "Conv2d",
+        "params": {
+         "out_channels": 4,
+         "kernel_size": 3,
+         "padding": 1
+        }
+       },
+       {
+        "type": "GroupNorm",
+        "params": {
+         "num_groups": 3
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_inner_param",
+    "node": "blk",
+    "index": 1,
+    "name": "num_groups",
+    "value": 2
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 1,
+      "layers": [
+       {
+        "type": "Conv2d",
+        "params": {
+         "out_channels": 4,
+         "kernel_size": 3,
+         "padding": 1
+        }
+       },
+       {
+        "type": "GroupNorm",
+        "params": {
+         "num_groups": 2
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "inner_settings: Set the head size to 8 (layer 1 of the block)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": [
+       {
+        "type": "GQAttention",
+        "params": {
+         "heads": 4,
+         "kv_heads": 2,
+         "head_dim": 7
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "blk"
+    ],
+    [
+     "blk",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_inner_param",
+    "node": "blk",
+    "index": 0,
+    "name": "head_dim",
+    "value": 8
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": [
+       {
+        "type": "GQAttention",
+        "params": {
+         "heads": 4,
+         "kv_heads": 2,
+         "head_dim": 8
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "blk"
+    ],
+    [
+     "blk",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "block_needs_input: Connect a new Input for “condition” (1)",
+  "before": {
+   "nodes": [
+    {
+     "id": "tok",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16,
+       32
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": [
+       {
+        "type": "DiTBlock",
+        "params": {
+         "heads": 4
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "tok",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_node",
+    "id": "input_1",
+    "type": "Input",
+    "params": {
+     "shape": [
+      1
+     ],
+     "name": "condition"
+    },
+    "near": "blk"
+   },
+   {
+    "op": "add_edge",
+    "source": "input_1",
+    "target": "blk"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "tok",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16,
+       32
+      ]
+     }
+    },
+    {
+     "id": "blk",
+     "type": "Repeat",
+     "params": {
+      "repeat": 2,
+      "layers": [
+       {
+        "type": "DiTBlock",
+        "params": {
+         "heads": 4
+        }
+       }
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "input_1",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1
+      ],
+      "name": "condition"
+     }
+    }
+   ],
+   "edges": [
+    [
+     "tok",
+     "blk"
+    ],
+    [
+     "blk",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ],
+    [
+     "input_1",
+     "blk"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "unknown_layer: Delete “q” (keep its connections flowing)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "q",
+     "type": "QuantumLayer",
+     "params": {}
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "q"
+    ],
+    [
+     "q",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_node",
+    "node": "q",
+    "bridge": true
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "tie_no_embedding: Switch off “Tie to the Embedding”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16,
+       32
+      ]
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50,
+      "tie_embedding": true
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "head",
+    "name": "tie_embedding",
+    "value": false
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16,
+       32
+      ]
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50,
+      "tie_embedding": false
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "tie_size: Set the head's vocabulary to 50, as the embedding's",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 60,
+      "tie_embedding": true
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "head",
+    "name": "vocab",
+    "value": 50
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50,
+      "tie_embedding": true
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "tie_size: Switch off “Tie to the Embedding”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 60,
+      "tie_embedding": true
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "head",
+    "name": "tie_embedding",
+    "value": false
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 60,
+      "tie_embedding": false
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "dataset_shape: Set the Input to 1×28×28, as MNIST needs",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "in",
+    "name": "shape",
+    "value": [
+     1,
+     28,
+     28
+    ]
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "dataset_shape: Use Gaussian blobs instead (they fit any shape)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_train",
+    "name": "dataset",
+    "value": "blobs"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {
+    "dataset": "blobs"
+   }
+  }
+ },
+ {
+  "name": "dataset_classes: Give “fc” 10 outputs (one per class)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 5
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "fc",
+    "name": "out_features",
+    "value": 10
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "dataset_needs_tokens: Use Gaussian blobs instead (they fit this network)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_train",
+    "name": "dataset",
+    "value": "blobs"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       1,
+       28,
+       28
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {
+    "dataset": "blobs"
+   }
+  }
+ },
+ {
+  "name": "tokens_too_short: Make the Input 16 tokens long",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       2
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 8,
+      "embedding_dim": 8
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 8
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "in",
+    "name": "shape",
+    "value": [
+     16
+    ]
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 8,
+      "embedding_dim": 8
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 8
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "text_too_short: Make the Input 11 characters long",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "in",
+    "name": "shape",
+    "value": [
+     11
+    ]
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       11
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "custom_row_length: Set the Input to 3 features, as your rows have",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       10
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 3
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "in",
+    "name": "shape",
+    "value": [
+     3
+    ]
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       3
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 3
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "custom_label_range: Give “fc” 8 outputs (one per class in your rows)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       3
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 3
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "fc",
+    "name": "out_features",
+    "value": 8
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       3
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 8
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "unknown_dataset: Use Gaussian blobs",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_train",
+    "name": "dataset",
+    "value": "blobs"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {
+    "dataset": "blobs"
+   }
+  }
+ },
+ {
+  "name": "every_position: Switch the Output's “Every position” off",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "out",
+    "name": "per_token",
+    "value": false
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": false
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "every_position: Train on Your text instead",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_train",
+    "name": "dataset",
+    "value": "text"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       16
+      ]
+     }
+    },
+    {
+     "id": "emb",
+     "type": "Embedding",
+     "params": {
+      "num_embeddings": 50,
+      "embedding_dim": 32
+     }
+    },
+    {
+     "id": "head",
+     "type": "LMHead",
+     "params": {
+      "vocab": 50
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {
+      "per_token": true
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "emb"
+    ],
+    [
+     "emb",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {
+    "dataset": "text"
+   }
+  }
+ },
+ {
+  "name": "dropout_high: Set p to 0.5",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "drop",
+     "type": "Dropout",
+     "params": {
+      "p": 0.9
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "drop"
+    ],
+    [
+     "drop",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "drop",
+    "name": "p",
+    "value": 0.5
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "drop",
+     "type": "Dropout",
+     "params": {
+      "p": 0.5
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "drop"
+    ],
+    [
+     "drop",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "dropout_high: Set p to 0.2",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "drop",
+     "type": "Dropout",
+     "params": {
+      "p": 0.9
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "drop"
+    ],
+    [
+     "drop",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "drop",
+    "name": "p",
+    "value": 0.2
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "drop",
+     "type": "Dropout",
+     "params": {
+      "p": 0.2
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "drop"
+    ],
+    [
+     "drop",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "tiny_hidden: Set out_features to 64",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 2
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "fc",
+    "name": "out_features",
+    "value": 64
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "tiny_hidden: Set out_features to 20",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 2
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_param",
+    "node": "fc",
+    "name": "out_features",
+    "value": 20
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 20
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "unused_branch: Remove the unused branch (side, side2)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "side",
+     "type": "Linear",
+     "params": {
+      "out_features": 5
+     }
+    },
+    {
+     "id": "side2",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ],
+    [
+     "in",
+     "side"
+    ],
+    [
+     "side",
+     "side2"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_node",
+    "node": "side",
+    "bridge": false
+   },
+   {
+    "op": "remove_node",
+    "node": "side2",
+    "bridge": false
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "after_output: Move the Output to the end (after “head”)",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "out"
+    ],
+    [
+     "out",
+     "head"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_edge",
+    "source": "out",
+    "target": "head"
+   },
+   {
+    "op": "add_edge",
+    "source": "act",
+    "target": "head"
+   },
+   {
+    "op": "remove_edge",
+    "source": "act",
+    "target": "out"
+   },
+   {
+    "op": "add_edge",
+    "source": "head",
+    "target": "out"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "head"
+    ],
+    [
+     "head",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "after_output: Remove the 1 node after the Output",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "head",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "out"
+    ],
+    [
+     "out",
+     "head"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_node",
+    "node": "head",
+    "bridge": false
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "act",
+     "type": "ReLU",
+     "params": {}
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "act"
+    ],
+    [
+     "act",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "softmax_before_loss: Remove “sm”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "sm",
+     "type": "Softmax",
+     "params": {}
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "sm"
+    ],
+    [
+     "sm",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "remove_node",
+    "node": "sm",
+    "bridge": true
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "linear_linear: Insert a ReLU between “a” and “b”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "a",
+     "b"
+    ],
+    [
+     "b",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "insert_node",
+    "source": "a",
+    "target": "b",
+    "id": "relu_1",
+    "type": "ReLU",
+    "params": {}
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "a",
+     "type": "Linear",
+     "params": {
+      "out_features": 64
+     }
+    },
+    {
+     "id": "b",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    },
+    {
+     "id": "relu_1",
+     "type": "ReLU",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "a"
+    ],
+    [
+     "a",
+     "relu_1"
+    ],
+    [
+     "relu_1",
+     "b"
+    ],
+    [
+     "b",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "no_output_node: Add an Output after “fc”",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "add_node",
+    "id": "output_1",
+    "type": "Output",
+    "params": {},
+    "near": "fc"
+   },
+   {
+    "op": "add_edge",
+    "source": "fc",
+    "target": "output_1"
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "output_1",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "output_1"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {}
+  }
+ },
+ {
+  "name": "lr_extreme: Set the learning rate to 0.001",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_train",
+    "name": "lr",
+    "value": 0.001
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {
+    "lr": 0.001
+   }
+  }
+ },
+ {
+  "name": "batch_too_big: Use batches of 64",
+  "before": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": []
+  },
+  "ops": [
+   {
+    "op": "set_train",
+    "name": "batch_size",
+    "value": 64
+   }
+  ],
+  "after": {
+   "nodes": [
+    {
+     "id": "in",
+     "type": "Input",
+     "params": {
+      "shape": [
+       784
+      ]
+     }
+    },
+    {
+     "id": "fc",
+     "type": "Linear",
+     "params": {
+      "out_features": 10
+     }
+    },
+    {
+     "id": "out",
+     "type": "Output",
+     "params": {}
+    }
+   ],
+   "edges": [
+    [
+     "in",
+     "fc"
+    ],
+    [
+     "fc",
+     "out"
+    ]
+   ],
+   "edge_settings": [],
+   "train": {
+    "batch_size": 64
+   }
+  }
+ }
+]

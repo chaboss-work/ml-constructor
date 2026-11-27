@@ -134,6 +134,57 @@ export interface GraphErrorInfo {
   node_id: string | null;
   edge: string[] | null;
   hint: string | null;
+  /** Stage 21 — the error explained (absent from older backends): its catalogue code, words and fixes. */
+  code?: string;
+  severity?: 'error' | 'warning';
+  category?: string;
+  title?: string;
+  why?: string;
+  todo?: string;
+  terms?: Record<string, string>;
+  inner?: number | null;
+  param?: string | null;
+  fixes?: FixInfo[];
+}
+
+/** Stage 21 — one small graph edit of a fix (see backend mlconstructor/fixes.py for every op). */
+export interface FixOp {
+  op: string;
+  [key: string]: unknown;
+}
+
+/** Stage 21 — a one-click fix: what the button says, and the edits it makes. */
+export interface FixInfo {
+  label: string;
+  ops: FixOp[];
+}
+
+/** Stage 21 — one error or warning, explained, with fixes checked on a copy of the graph. */
+export interface Problem {
+  code: string;
+  severity: 'error' | 'warning';
+  category: string;
+  title: string;
+  message: string;
+  why: string;
+  todo: string;
+  terms: Record<string, string>;
+  node_id: string | null;
+  edge: string[] | null;
+  inner: number | null;
+  param: string | null;
+  fixes: FixInfo[];
+}
+
+/** Stage 21 — POST /diagnose: every problem at once, warnings, the build when there is one. */
+export interface Diagnosis {
+  ok: boolean;
+  problems: Problem[];
+  warnings: Problem[];
+  build: BuildResult | null;
+  train_issue: Problem | null;
+  /** every node's output shape the graph could work out (upstream of a problem too) */
+  shapes: Record<string, number[]>;
 }
 
 export interface TrainCfg {
@@ -198,6 +249,8 @@ export interface TrainEvent {
   num_classes?: number;
   result?: TrainResult;
   detail?: string;
+  /** Stage 21 — a training-time error, explained (with fixes). */
+  error?: GraphErrorInfo;
 }
 
 /** The payload sent to /build and /train. */

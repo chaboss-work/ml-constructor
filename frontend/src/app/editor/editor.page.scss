@@ -5,7 +5,8 @@
 
 .layout {
   display: flex;
-  height: 100%;
+  /* below the header toolbar (Stage 21: the canvas's bottom edge — and the Problems panel on it — stay in the window) */
+  height: calc(100vh - 56px);
   min-height: 0;
 }
 

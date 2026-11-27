@@ -27,16 +27,19 @@ import {
   DataPreview,
   DataSampleRow,
   DatasetInfo,
+  Diagnosis,
   DrawResult,
   EdgeSummary,
   EditorEdge,
   EditorNode,
+  FixInfo,
   GalleryImage,
   GenerateResult,
   GraphErrorInfo,
   GraphSpec,
   LayerInfo,
   ParamDef,
+  Problem,
   ProjectLoadResult,
   ProjectSummary,
   RunResult,
@@ -63,15 +66,18 @@ import {
   readCurrentFormat,
   toProjectFile,
 } from '../core/project';
+import { applyFixOps, textParts } from '../core/fixes';
 
 const NODE_W = 174;
 const NODE_H = 78;
 const AUTOSAVE_DELAY_MS = 700;
 const ANALYSIS_DELAY_MS = 450;
-/** The backend API this page needs: Stage 14 (smart connections, structured errors). */
-const REQUIRED_API = 20;
+/** The backend API this page needs: Stage 21 (every problem explained, with one-click fixes). */
+const REQUIRED_API = 21;
 const OUTDATED_MSG =
-  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights, the flagship models, Your text, Run once, models with several inputs and generative training (Draw) need a restart of the backend.';
+  'The server still runs an older backend: connection settings, automatic adaptation, hints, validation accuracy, the final test, saved weights, the flagship models, Your text, Run once, models with several inputs, generative training (Draw) and errors explained with one-click fixes need a restart of the backend.';
+/** Stage 21 — how many problems the panel shows before "more". */
+const PROBLEMS_SHOWN = 3;
 /** Stage 18 — the longest text Your text takes (characters). */
 const MAX_TEXT_CHARS = 1_000_000;
 
@@ -150,7 +156,7 @@ interface Notice {
     IonSearchbar,
   ],
   templateUrl: './editor.page.html',
-  styleUrls: ['./editor.page.scss', './projects.scss', './connections.scss', './training.scss'],
+  styleUrls: ['./editor.page.scss', './projects.scss', './connections.scss', './training.scss', './problems.scss'],
 })
 export class EditorPage {
   private api = inject(ApiService);
@@ -260,6 +266,20 @@ export class EditorPage {
   runErrorInfo = signal<GraphErrorInfo | null>(null);
   connOptions = signal<ConnectionOptions | null>(null);
   connError = signal<string | null>(null);
+
+  // ---- clear errors with fixes (Stage 21) ----
+  /** the live check after each edit: every problem and warning, explained, with checked fixes */
+  diagnosis = signal<Diagnosis | null>(null);
+  problemsOpen = signal(true);
+  problemsAll = signal(false);
+  /** the problem the canvas points at (pulsing outline) */
+  focusKey = signal<string | null>(null);
+  /** a glossary word opened under a problem */
+  openTerm = signal<{ key: string; term: string } | null>(null);
+  fixNote = signal<string | null>(null);
+  libraryFlash = signal(false);
+  private fixNoteTimer: ReturnType<typeof setTimeout> | null = null;
+  readonly PROBLEMS_SHOWN = PROBLEMS_SHOWN;
   /** The server runs an older backend than this page (a restart updates it). */
   backendOutdated = signal(false);
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
@@ -396,6 +416,8 @@ export class EditorPage {
     const map = new Map<string, number[] | null>();
     const b = this.liveBuild();
     if (b) for (const s of b.layers) map.set(s.id, s.out_shape);
+    // Stage 21: a broken graph still shows the shapes worked out before the problem
+    else for (const [id, sh] of Object.entries(this.diagnosis()?.shapes ?? {})) map.set(id, sh);
     return map;
   });
 
@@ -403,17 +425,65 @@ export class EditorPage {
 
   /** Where the current problem is: the explicit Build's error first, else the live one. */
   private problem = computed(() => this.runErrorInfo() ?? this.analysisError());
-  problemNode = computed(() => this.problem()?.node_id ?? null);
-  problemEdge = computed(() => {
-    const e = this.problem()?.edge;
-    return e && e.length === 2 ? `${e[0]}->${e[1]}` : null;
+
+  // ---- Stage 21: every problem, highlighted where it is ----
+  /** What the Problems panel lists: the explicit Build / Train error first, then the live ones, then warnings. */
+  problemList = computed<Problem[]>(() => {
+    const d = this.diagnosis();
+    const out: Problem[] = [];
+    const run = this.runErrorInfo();
+    if (run?.code) out.push(this.asProblem(run));
+    for (const p of [...(d?.problems ?? []), ...(d?.warnings ?? [])]) {
+      if (!out.some((q) => this.problemKey(q) === this.problemKey(p))) out.push(p);
+    }
+    if (!d && !run?.code) {
+      const soft = this.problem(); // an older backend: its one message, without the catalogue
+      if (soft) out.push(this.asProblem(soft));
+    }
+    return out;
+  });
+  errorCount = computed(() => this.problemList().filter((p) => p.severity !== 'warning').length);
+  warningCount = computed(() => this.problemList().filter((p) => p.severity === 'warning').length);
+  shownProblems = computed(() =>
+    this.problemsAll() ? this.problemList() : this.problemList().slice(0, PROBLEMS_SHOWN),
+  );
+  /** node id -> the worst problem on it (a layer inside a block marks the block) */
+  issueByNode = computed(() => {
+    const m = new Map<string, 'error' | 'warning'>();
+    for (const p of this.problemList()) {
+      const ids = p.node_id ? [p.node_id] : [];
+      if (p.code === 'unused_branch' && p.fixes[0]) {
+        for (const o of p.fixes[0].ops) if (o.op === 'remove_node') ids.push(String(o['node']));
+      }
+      for (const id of ids) if (m.get(id) !== 'error') m.set(id, p.severity === 'warning' ? 'warning' : 'error');
+    }
+    return m;
+  });
+  issueByEdge = computed(() => {
+    const m = new Map<string, 'error' | 'warning'>();
+    for (const p of this.problemList()) {
+      if (p.edge?.length !== 2) continue;
+      const k = `${p.edge[0]}->${p.edge[1]}`;
+      if (m.get(k) !== 'error') m.set(k, p.severity === 'warning' ? 'warning' : 'error');
+    }
+    return m;
+  });
+  private focused = computed(() => this.problemList().find((p) => this.problemKey(p) === this.focusKey()) ?? null);
+  focusNode = computed(() => {
+    const p = this.focused();
+    return p && !(p.edge?.length === 2) ? p.node_id : null;
+  });
+  focusEdge = computed(() => {
+    const e = this.focused()?.edge;
+    return e?.length === 2 ? `${e[0]}->${e[1]}` : null;
   });
 
   edgeViews = computed(() => {
     const byId = new Map(this.nodes().map((n) => [n.id, n]));
     const info = this.edgeInfo();
     const selected = this.selectedEdge();
-    const bad = this.problemEdge();
+    const issues = this.issueByEdge();
+    const focus = this.focusEdge();
     const views: {
       id: string;
       d: string;
@@ -423,6 +493,8 @@ export class EditorPage {
       auto: boolean;
       selected: boolean;
       problem: boolean;
+      warn: boolean;
+      focus: boolean;
       title: string;
     }[] = [];
     for (const e of this.edges()) {
@@ -447,7 +519,9 @@ export class EditorPage {
         label,
         auto: live ? live.auto : !pinned,
         selected: id === selected,
-        problem: id === bad,
+        problem: issues.get(id) === 'error',
+        warn: issues.get(id) === 'warning',
+        focus: id === focus,
         title: `${e.source} → ${e.target}${label ? ' · ' + label : ''}${shapes} — click to set up`,
       });
     }
@@ -487,6 +561,18 @@ export class EditorPage {
       n: this.nodes().map((n) => [n.id, n.type, n.params]),
       e: this.edges().map((e) => [e.source, e.target, e.transform ?? AUTO, e.params ?? {}]),
       i: this.nodes().length,
+      // Stage 21: the live check also asks whether the chosen data and settings would refuse the network
+      t: [
+        this.dataset(),
+        this.lr(),
+        this.batchSize(),
+        this.samples(),
+        this.valFraction(),
+        this.testFraction(),
+        this.customRows().length,
+        JSON.stringify(this.customRows().slice(0, 1)),
+        this.textData().length,
+      ],
     }),
   );
 
@@ -731,9 +817,33 @@ export class EditorPage {
       this.analysisError.set(null);
       return;
     }
-    this.api.build(this.toSpec()).subscribe({
-      next: (r) => {
+    const spec = this.toSpec();
+    this.api.diagnose(spec).subscribe({
+      next: (d) => {
         if (seq !== this.analysisSeq) return; // a newer edit is on its way
+        this.diagnosis.set(d);
+        this.analysis.set(d.build);
+        const first = d.problems[0];
+        this.analysisError.set(first ? { ...first, hint: null } : null);
+      },
+      error: (e) => {
+        if (seq !== this.analysisSeq) return;
+        this.diagnosis.set(null);
+        if (e?.status === 404 || e?.status === 405) {
+          this.buildAnalysis(seq, spec); // an older backend without /diagnose: the Stage 14 live build
+          return;
+        }
+        this.analysis.set(null);
+        this.analysisError.set(e?.status === 0 ? null : this.errInfo(e));
+      },
+    });
+    if (this.selectedEdge()) this.loadConnectionOptions();
+  }
+
+  private buildAnalysis(seq: number, spec: GraphSpec): void {
+    this.api.build(spec).subscribe({
+      next: (r) => {
+        if (seq !== this.analysisSeq) return;
         this.analysis.set(r);
         this.analysisError.set(null);
       },
@@ -743,7 +853,181 @@ export class EditorPage {
         this.analysisError.set(e?.status === 0 ? null : this.errInfo(e));
       },
     });
-    if (this.selectedEdge()) this.loadConnectionOptions();
+  }
+
+  // ------------------------------------------- clear errors with fixes (Stage 21)
+  problemKey(p: Problem): string {
+    return `${p.code}|${p.node_id ?? ''}|${(p.edge ?? []).join('>')}|${p.inner ?? ''}`;
+  }
+
+  /** A 422's `error` as a problem card (an older backend's has no catalogue words). */
+  private asProblem(e: GraphErrorInfo): Problem {
+    return {
+      code: e.code ?? 'other',
+      severity: e.severity ?? 'error',
+      category: e.category ?? '',
+      title: e.title ?? 'The graph does not build yet',
+      message: e.message,
+      why: e.why ?? '',
+      todo: e.todo ?? e.hint ?? '',
+      terms: e.terms ?? {},
+      node_id: e.node_id,
+      edge: e.edge,
+      inner: e.inner ?? null,
+      param: e.param ?? null,
+      fixes: e.fixes ?? [],
+    };
+  }
+
+  /** The "why" / "what to do" text in pieces: glossary words become buttons. */
+  parts(text: string): { text: string; term: string | null }[] {
+    return textParts(text ?? '');
+  }
+
+  toggleTerm(p: Problem, term: string, ev: Event): void {
+    ev.stopPropagation();
+    const key = this.problemKey(p);
+    const open = this.openTerm();
+    this.openTerm.set(open && open.key === key && open.term === term ? null : { key, term });
+  }
+
+  termText(p: Problem): { term: string; text: string } | null {
+    const open = this.openTerm();
+    if (!open || open.key !== this.problemKey(p)) return null;
+    const text = p.terms[open.term];
+    return text ? { term: open.term, text } : null;
+  }
+
+  /** Point the canvas at a problem: select its node or connection and bring it into view. */
+  focusProblem(p: Problem, ev?: Event): void {
+    ev?.stopPropagation();
+    this.focusKey.set(this.problemKey(p));
+    const e = p.edge?.length === 2 ? p.edge : null;
+    const key = e ? `${e[0]}->${e[1]}` : null;
+    if (e && key && this.edges().some((x) => `${x.source}->${x.target}` === key)) {
+      this.selectedEdge.set(key);
+      this.selectedId.set(null);
+      this.connOptions.set(null);
+      this.loadConnectionOptions();
+      const a = this.nodes().find((n) => n.id === e[0]);
+      const b = this.nodes().find((n) => n.id === e[1]);
+      if (a && b) this.centerOn((a.x + b.x) / 2 + NODE_W / 2, (a.y + NODE_H + b.y) / 2);
+      return;
+    }
+    const n = p.node_id ? this.nodes().find((x) => x.id === p.node_id) : null;
+    if (n) {
+      this.select(n.id);
+      if (p.inner != null) this.innerSel.set(p.inner);
+      this.centerOn(n.x + NODE_W / 2, n.y + NODE_H / 2);
+    }
+  }
+
+  /** Pan so that the canvas point (x, y) sits in the upper middle of the visible canvas. */
+  private centerOn(x: number, y: number): void {
+    const wrap = document.querySelector('.canvas-wrap') as HTMLElement | null;
+    const w = wrap?.clientWidth ?? 900;
+    const h = wrap?.clientHeight ?? 600;
+    const z = this.zoom();
+    this.pan.set({ x: Math.round(w / 2 - x * z), y: Math.round(h * 0.38 - y * z) });
+  }
+
+  /** One click: apply a fix's edits to the graph (and do what only the editor can do). */
+  applyFix(f: FixInfo, ev?: Event): void {
+    ev?.stopPropagation();
+    let res;
+    try {
+      res = applyFixOps({ nodes: this.nodes(), edges: this.edges() }, f.ops, { nodeW: NODE_W, nodeH: NODE_H });
+    } catch {
+      this.showFixNote('The graph has changed since — the check runs again.');
+      this.scheduleAnalysis();
+      return;
+    }
+    const graphEdit = f.ops.some((o) => o.op !== 'ui' && o.op !== 'set_train');
+    if (graphEdit) {
+      this.nodes.set(res.nodes);
+      this.edges.set(res.edges);
+      if (this.selectedId() && !res.nodes.some((n) => n.id === this.selectedId())) this.selectedId.set(null);
+      const se = this.selectedEdge();
+      if (se && !res.edges.some((e) => `${e.source}->${e.target}` === se)) {
+        this.selectedEdge.set(null);
+        this.connOptions.set(null);
+      }
+      this.invalidateBuild();
+      this.trainResult.set(null);
+    }
+    for (const [k, v] of Object.entries(res.train)) this.setTrainValue(k, v);
+    this.runError.set(null);
+    this.runErrorInfo.set(null);
+    this.focusKey.set(null);
+    this.openTerm.set(null);
+    this.showFixNote(`✓ ${f.label}`);
+    for (const a of res.ui) this.runUiAction(a);
+    this.scheduleAnalysis();
+  }
+
+  private showFixNote(text: string): void {
+    this.fixNote.set(text);
+    if (this.fixNoteTimer) clearTimeout(this.fixNoteTimer);
+    this.fixNoteTimer = setTimeout(() => this.fixNote.set(null), 3500);
+  }
+
+  /** A training setting a fix changes. */
+  private setTrainValue(name: string, v: unknown): void {
+    switch (name) {
+      case 'dataset':
+        this.setDataset(String(v));
+        break;
+      case 'epochs':
+        this.epochs.set(Number(v));
+        break;
+      case 'lr':
+        this.lr.set(Number(v));
+        break;
+      case 'batch_size':
+        this.batchSize.set(Number(v));
+        break;
+      case 'samples':
+        this.samples.set(Number(v));
+        break;
+      case 'val_fraction':
+        this.valFraction.set(Number(v));
+        break;
+      case 'test_fraction':
+        this.testFraction.set(Number(v));
+        break;
+      case 'device':
+        this.device.set(v as 'cpu' | 'cuda' | 'auto');
+        break;
+      default:
+        this.trainExtra.update((t) => ({ ...t, [name]: v }));
+    }
+  }
+
+  /** What a fix asks of the editor itself. */
+  private runUiAction(a: string): void {
+    switch (a) {
+      case 'open_data':
+        this.openData();
+        break;
+      case 'use_example_text':
+        if (this.dataset() !== 'text') this.setDataset('text');
+        this.useExampleText();
+        break;
+      case 'open_library':
+        document.querySelector('.arch-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        this.libraryFlash.set(true);
+        setTimeout(() => this.libraryFlash.set(false), 1800);
+        break;
+      case 'open_weights':
+        (document.querySelector('.weights-file') as HTMLInputElement | null)?.click();
+        break;
+      case 'train':
+        this.onTrain();
+        break;
+      case 'run_once':
+        this.onRunOnce();
+        break;
+    }
   }
 
   clearGraph(): void {
@@ -1085,6 +1369,8 @@ export class EditorPage {
       error: (err) => {
         this.onceResult.set(null);
         this.onceError.set(err?.status === 404 || err?.status === 405 ? OUTDATED_MSG : this.errMsg(err));
+        const info = this.errInfo(err);
+        if (info.code) this.showRunProblem(info);
         this.onceBusy.set(false);
       },
     });
@@ -1126,6 +1412,8 @@ export class EditorPage {
       },
       error: (err) => {
         this.testError.set(this.errMsg(err));
+        const info = this.errInfo(err);
+        if (info.code) this.showRunProblem(info); // Stage 21: e.g. no test part -> "Set Final test to 10 %"
         this.testBusy.set(false);
       },
     });
@@ -1214,9 +1502,16 @@ export class EditorPage {
       error: (e) => {
         this.buildResult.set(null);
         this.runError.set(this.errMsg(e));
-        this.runErrorInfo.set(this.errInfo(e));
+        const info = this.errInfo(e);
+        this.runErrorInfo.set(info);
         this.busy.set(false);
-        this.fetchSuggestions(spec); // offer a one-click adapter if a shape mismatch is fixable
+        if (info.code) {
+          // Stage 21: the Problems panel explains it, with its fixes; the view jumps to the culprit
+          this.problemsOpen.set(true);
+          this.focusProblem(this.asProblem(info));
+        } else {
+          this.fetchSuggestions(spec); // an older backend: offer a one-click adapter if a shape mismatch is fixable
+        }
       },
     });
   }
@@ -1263,6 +1558,7 @@ export class EditorPage {
           this.busy.set(false);
         } else if (e.type === 'error') {
           this.runError.set(e.detail ?? 'Training failed');
+          if (e.error?.code) this.showRunProblem(e.error);
           this.busy.set(false);
         }
       })
@@ -1284,9 +1580,17 @@ export class EditorPage {
           });
         } else {
           this.runError.set(err?.detail || this.errMsg(err));
+          if (err?.error?.code) this.showRunProblem(err.error);
           this.busy.set(false);
         }
       });
+  }
+
+  /** Stage 21 — an error from Train / Run once / Test, as a card in the Problems panel. */
+  private showRunProblem(info: GraphErrorInfo): void {
+    this.runErrorInfo.set(info);
+    this.problemsOpen.set(true);
+    if (info.node_id || info.edge) this.focusProblem(this.asProblem(info));
   }
 
   // ------------------------------------------------ data & export (Stage 8)

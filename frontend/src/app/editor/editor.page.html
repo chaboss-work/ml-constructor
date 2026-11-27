@@ -33,7 +33,7 @@
     <aside class="panel palette">
       @if (architectures().length) {
         <div class="panel-h">Architectures</div>
-        <ion-list lines="none" class="arch-list">
+        <ion-list lines="none" class="arch-list" [class.flash]="libraryFlash()">
           @for (a of architectures(); track a.id; let i = $index) {
             @if (i === firstFlagship()) {
               <div class="arch-group" title="Each trains here as a mini model; its real size can be inspected">
@@ -104,7 +104,8 @@
       <div class="canvas" [style.transform]="canvasTransform()">
         <svg class="edges" width="4000" height="4000">
           @for (e of edgeViews(); track e.id) {
-            <path class="edge" [class.sel]="e.selected" [class.problem]="e.problem" [attr.d]="e.d"></path>
+            <path class="edge" [class.sel]="e.selected" [class.problem]="e.problem" [class.warn]="e.warn"
+              [class.focus]="e.focus" [attr.d]="e.d"></path>
             <!-- a wide invisible stroke: easy to click -->
             <path class="edge-hit" [attr.d]="e.d" (pointerdown)="selectEdge(e.id, $event)">
               <title>{{ e.title }}</title>
@@ -119,6 +120,7 @@
               [class.auto]="e.auto"
               [class.sel]="e.selected"
               [class.problem]="e.problem"
+              [class.warn]="e.warn"
               [style.left.px]="e.mx"
               [style.top.px]="e.my"
               [title]="e.title"
@@ -133,7 +135,9 @@
           <div
             class="node"
             [class.sel]="n.id === selectedId()"
-            [class.problem]="n.id === problemNode()"
+            [class.problem]="issueByNode().get(n.id) === 'error'"
+            [class.warn]="issueByNode().get(n.id) === 'warning'"
+            [class.focus]="focusNode() === n.id"
             [style.left.px]="n.x"
             [style.top.px]="n.y"
             [style.width.px]="NODE_W"
@@ -146,6 +150,10 @@
             ></div>
 
             <div class="node-h">{{ nodeTitle(n) }}</div>
+            @if (issueByNode().get(n.id); as issue) {
+              <span class="issue-dot" [class.warn]="issue === 'warning'"
+                [title]="issue === 'warning' ? 'A warning — see Problems' : 'A problem — see Problems'">!</span>
+            }
             <div class="node-id">{{ n.id }}</div>
             @if (n.type === 'Repeat') {
               <div class="blk-inner">{{ innerSummary(n) }}</div>
@@ -176,6 +184,79 @@
       }
       @if (dropHover()) {
         <div class="drop-hint">Drop a .mlc.json project file to open it</div>
+      }
+      @if (problemList().length || fixNote()) {
+        <div class="problems" [class.collapsed]="!problemsOpen()" (pointerdown)="$event.stopPropagation()"
+          (wheel)="$event.stopPropagation()">
+          <button type="button" class="problems-h" (click)="problemsOpen.set(!problemsOpen())"
+            [title]="problemsOpen() ? 'Hide the problems' : 'Show the problems'">
+            @if (errorCount()) {
+              <span class="cnt err">⛔ {{ errorCount() }} {{ errorCount() === 1 ? 'problem' : 'problems' }}</span>
+            }
+            @if (warningCount()) {
+              <span class="cnt wrn">⚠ {{ warningCount() }} {{ warningCount() === 1 ? 'warning' : 'warnings' }}</span>
+            }
+            @if (!problemList().length) {
+              <span class="cnt ok">✓ No problems</span>
+            }
+            <span class="chev">{{ problemsOpen() ? '▾' : '▸' }}</span>
+          </button>
+          @if (fixNote(); as fn) {
+            <div class="fix-note">{{ fn }}</div>
+          }
+          @if (problemsOpen()) {
+            <div class="problems-body">
+              @for (p of shownProblems(); track problemKey(p)) {
+                <div class="pcard" [class.warn]="p.severity === 'warning'" [class.focus]="focusKey() === problemKey(p)"
+                  (click)="focusProblem(p)">
+                  <div class="pcard-h">
+                    <span class="picon">{{ p.severity === 'warning' ? '⚠' : '⛔' }}</span>
+                    <b class="ptitle">{{ p.title }}</b>
+                    @if (p.node_id || p.edge) {
+                      <button type="button" class="pshow" (click)="focusProblem(p, $event)"
+                        title="Show it on the canvas">Show</button>
+                    }
+                  </div>
+                  <div class="pmsg">{{ p.message }}</div>
+                  @if (p.why) {
+                    <details class="pwhy" (click)="$event.stopPropagation()">
+                      <summary>Why?</summary>
+                      <span
+                        >@for (seg of parts(p.why); track $index) {@if (seg.term) {<button type="button" class="term"
+                              (click)="toggleTerm(p, seg.term, $event)" title="What does it mean?">{{ seg.text }}</button
+                          >} @else {<span>{{ seg.text }}</span>}}</span
+                      >
+                    </details>
+                  }
+                  @if (p.todo) {
+                    <div class="ptodo">
+                      <b>What to do:</b>&nbsp;@for (seg of parts(p.todo); track $index) {@if (seg.term) {<button
+                            type="button" class="term" (click)="toggleTerm(p, seg.term, $event)"
+                            title="What does it mean?">{{ seg.text }}</button
+                          >} @else {<span>{{ seg.text }}</span>}}
+                    </div>
+                  }
+                  @if (termText(p); as tt) {
+                    <div class="pterm"><b>{{ tt.term }}</b> — {{ tt.text }}</div>
+                  }
+                  @if (p.fixes.length) {
+                    <div class="pfixes">
+                      @for (f of p.fixes; track $index) {
+                        <button type="button" class="pfix" [class.first]="$first" (click)="applyFix(f, $event)"
+                          [title]="'One click: ' + f.label">{{ f.label }}</button>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+              @if (problemList().length > PROBLEMS_SHOWN) {
+                <button type="button" class="pmore" (click)="problemsAll.set(!problemsAll())">
+                  {{ problemsAll() ? 'Show fewer' : 'Show all ' + problemList().length }}
+                </button>
+              }
+            </div>
+          }
+        </div>
       }
       @if (notice(); as nt) {
         <div
@@ -552,18 +633,28 @@
         @if (busy()) {
           <ion-note class="muted">Running…</ion-note>
         }
-        @if (runError()) {
+        @if (runError() && runErrorInfo()?.code) {
+          <div class="soft-problem run-problem">⛔ {{ runErrorInfo()?.title }} — see Problems on the canvas, with fixes.</div>
+        } @else if (runError()) {
           <ion-note color="danger" class="block">{{ runError() }}</ion-note>
           @if (runErrorInfo()?.hint; as h) {
             <ion-note class="block hint-line">→ {{ h }}</ion-note>
           }
-        } @else if (analysisError(); as ae) {
+        } @else if (!diagnosis() && analysisError(); as ae) {
           <div class="soft-problem">
             <div>⚠ The graph does not build yet: {{ ae.message }}</div>
             @if (ae.hint) {
               <div class="hint-line">→ {{ ae.hint }}</div>
             }
           </div>
+        } @else if (diagnosis()?.train_issue; as ti) {
+          @if (ti.fixes.length) {
+            <div class="train-fixes">
+              @for (f of ti.fixes; track $index) {
+                <button type="button" class="pfix" (click)="applyFix(f, $event)">{{ f.label }}</button>
+              }
+            </div>
+          }
         }
         @if (proposals().length) {
           <div class="fixes">

@@ -1,0 +1,204 @@
+/*
+ * ML Constructor design system (Stage 22) — the tokens.
+ * -----------------------------------------------------------------------------
+ * The only file where colours are written down: every other style uses these
+ * variables (a unit test checks it), so both themes cover every screen.
+ *   light — :root (the default)
+ *   dark  — :root.mlc-dark (set on <html> by core/theme.ts and by the tiny
+ *           script in index.html before the app starts, so there is no flash)
+ */
+
+:root {
+  /* type */
+  --font-ui: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  --font-text: Georgia, 'Times New Roman', serif;
+  --fs-2xs: 10.5px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-base: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fw-medium: 500;
+  --fw-semi: 600;
+  --fw-bold: 700;
+  --lh: 1.45;
+
+  /* space: a 4-px grid */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* radius */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 999px;
+
+  /* motion */
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+
+  /* layout */
+  --toolbar-h: 56px;
+}
+
+/* ------------------------------------------------------------------ light */
+:root {
+  color-scheme: light;
+
+  --bg: #f3f5f9;
+  --bg-dot: #c3cad8;
+  --bg-dot-2: #a9b2c4;
+  --surface-1: #ffffff;
+  --surface-2: #ffffff;
+  --surface-3: #f0f2f7;
+  --surface-4: #e3e7ef;
+  --seg-on: #ffffff;
+  --border: #e0e4ec;
+  --border-2: #c9d0dc;
+  --overlay: rgba(12, 16, 26, 0.42);
+
+  --text: #121622;
+  --text-2: #434c61;
+  --text-3: #5d667b;
+
+  --accent: #4f46e5;
+  --accent-2: #6359f0;
+  --on-accent: #ffffff;
+  --grad-a: #6157ff;
+  --grad-b: #2f6fe0;
+  --on-grad: #ffffff;
+  --accent-glow: rgba(79, 70, 229, 0.28);
+  --knob: #ffffff;
+
+  --success: #047857;
+  --warning: #b45309;
+  --danger: #b91c1c;
+  --info: #1d4ed8;
+
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.08);
+  --shadow-2: 0 4px 12px rgba(16, 24, 40, 0.08), 0 2px 4px rgba(16, 24, 40, 0.05);
+  --shadow-3: 0 20px 50px rgba(16, 24, 40, 0.2), 0 4px 12px rgba(16, 24, 40, 0.08);
+  --node-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 3px 10px rgba(16, 24, 40, 0.07);
+  --node-shadow-hover: 0 4px 10px rgba(16, 24, 40, 0.08), 0 10px 26px rgba(16, 24, 40, 0.1);
+
+  /* pictures the network draws (MNIST: white strokes on black) */
+  --img-bg: #000000;
+
+  /* the training wave: forward pass, backward pass (gradients) */
+  --glow-fwd: #0369a1;
+  --glow-bwd: #ea580c;
+
+  /* layer families */
+  --fam-io: #047857;
+  --fam-dense: #4f46e5;
+  --fam-conv: #0369a1;
+  --fam-pool: #0e7490;
+  --fam-activation: #b45309;
+  --fam-norm: #0f766e;
+  --fam-reg: #64748b;
+  --fam-shape: #78716c;
+  --fam-sequence: #be185d;
+  --fam-attention: #6d28d9;
+  --fam-merge: #c2410c;
+  --fam-block: #a16207;
+  --fam-llm: #a21caf;
+  --fam-diffusion: #7e22ce;
+  --fam-vision: #4d7c0f;
+  --fam-3d: #1d4ed8;
+  --fam-other: #64748b;
+}
+
+/* ------------------------------------------------------------------- dark */
+:root.mlc-dark {
+  color-scheme: dark;
+
+  --bg: #0b0e14;
+  --bg-dot: #1f2531;
+  --bg-dot-2: #2c3443;
+  --surface-1: #10141c;
+  --surface-2: #161b25;
+  --surface-3: #1d2330;
+  --surface-4: #273042;
+  --seg-on: #2b3446;
+  --border: #232a37;
+  --border-2: #343d4f;
+  --overlay: rgba(0, 0, 0, 0.6);
+
+  --text: #e7eaf2;
+  --text-2: #a6afc3;
+  --text-3: #8891a7;
+
+  --accent: #8b85ff;
+  --accent-2: #a39eff;
+  --on-accent: #0b0e14;
+  --grad-a: #6157ff;
+  --grad-b: #2f6fe0;
+  --on-grad: #ffffff;
+  --accent-glow: rgba(110, 100, 255, 0.35);
+  --knob: #ffffff;
+
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 24px 60px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --node-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 6px 16px rgba(0, 0, 0, 0.3);
+  --node-shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.5), 0 14px 32px rgba(0, 0, 0, 0.4);
+
+  --img-bg: #000000;
+
+  --glow-fwd: #38bdf8;
+  --glow-bwd: #fb923c;
+
+  --fam-io: #34d399;
+  --fam-dense: #818cf8;
+  --fam-conv: #38bdf8;
+  --fam-pool: #22d3ee;
+  --fam-activation: #fbbf24;
+  --fam-norm: #2dd4bf;
+  --fam-reg: #94a3b8;
+  --fam-shape: #a8a29e;
+  --fam-sequence: #f472b6;
+  --fam-attention: #a78bfa;
+  --fam-merge: #fb923c;
+  --fam-block: #facc15;
+  --fam-llm: #e879f9;
+  --fam-diffusion: #c084fc;
+  --fam-vision: #a3e635;
+  --fam-3d: #60a5fa;
+  --fam-other: #94a3b8;
+}
+
+/* ------------------------------------------- derived (both themes, no literals) */
+:root {
+  --accent-grad: linear-gradient(135deg, var(--grad-a) 0%, var(--grad-b) 100%);
+  --accent-soft: color-mix(in srgb, var(--accent) 13%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 45%, transparent);
+  --success-soft: color-mix(in srgb, var(--success) 12%, transparent);
+  --warning-soft: color-mix(in srgb, var(--warning) 13%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 11%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 11%, transparent);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent);
+
+  /* Ionic follows the design system too */
+  --ion-font-family: var(--font-ui);
+  --ion-background-color: var(--bg);
+  --ion-text-color: var(--text);
+  --ion-color-primary: var(--accent);
+  --ion-color-primary-contrast: var(--on-accent);
+}

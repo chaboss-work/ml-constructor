@@ -26,19 +26,39 @@ original one.
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from collections.abc import Iterator
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .builder import build_model
 from .datasets import canonical_dataset_id, get_dataset, make_rows, split_rows, text_stats
+from .generative import (
+    EMA,
+    UNCOND_PROB,
+    ddim_sample,
+    ema_decay,
+    guide,
+    image_items,
+    input_roles,
+    kl_total,
+    lr_factor,
+    noise_schedule,
+    noisy_batch,
+    recon_loss,
+    resolve_task,
+    set_prior,
+)
 from .gpu import CUDA_HIDDEN, cuda_available, hidden_message
 from .schema import (
     DataPreview,
     DataSampleRow,
+    DrawResult,
+    GalleryImage,
     GenerateResult,
     GraphSpec,
     RunInputInfo,
@@ -86,19 +106,7 @@ def train_block_reason(spec: GraphSpec, build) -> str | None:
     words; None when it can. Training here teaches one score per class (or the next
     token) from one input: a network with several inputs, or one whose output is a
     picture, a latent or points, builds, runs once and exports instead."""
-    inputs = list(getattr(build, "inputs", None) or [])
-    if len(inputs) > 1:
-        names = ", ".join(i.name or i.id for i in inputs)
-        return (f"This network takes {len(inputs)} inputs ({names}). Training a network with several inputs is not "
-                "here yet — it comes with teaching networks to generate. It builds, runs once on random inputs "
-                "(Run once) and exports.")
-    out = next((n for n in spec.nodes if n.type == "Output" and bool(n.params.get("any_shape", False))), None)
-    if out is not None:
-        shape = next((s.out_shape for s in build.layers if s.id == out.id), None)
-        what = "×".join(str(d) for d in shape) if shape else "any shape"
-        return (f"This network's output is {what} — a picture, a latent or points, not one score per class. Training "
-                "it to generate is not here yet. It builds, runs once on random inputs (Run once) and exports.")
-    return None
+    return resolve_task(spec, build).reason
 
 
 def check_trainable(spec: GraphSpec, what: str = "train") -> int:
@@ -273,6 +281,10 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
     just drains this, so the streaming and plain ``/train`` paths share one loop
     (hence one trajectory — with ``checkpoint``/``resume`` off and ``val_fraction = 0``
     it is the original loop, byte for byte)."""
+    plan = getattr(model, "task_plan", None)
+    if plan is not None and plan.task in ("reconstruction", "diffusion"):  # Stage 20
+        yield from _generative_iter(model, plan, spec)
+        return
     torch.manual_seed(spec.seed)
     device = _device(spec.device)
     model = model.to(device)
@@ -439,10 +451,15 @@ def data_preview(spec: GraphSpec, rows: int = 6) -> DataPreview:
     format (Stage 8's data modal). Uses the *same* generator and seed as training,
     so these are exactly the first rows the model will be trained on."""
     model, build = build_model(spec, meta=True)  # only the shapes are needed: no weights made (Stage 17)
-    in_shape = _input_shape(build)
-    # the class count is the Output's last dimension — no forward pass on meta tensors needed
-    out = next((s for s in reversed(build.layers) if s.type == "Output" and s.out_shape), None)
-    num_classes = int(out.out_shape[-1]) if out else _infer_num_classes(build_model(spec)[0], in_shape)
+    plan = model.task_plan
+    if plan.task in ("reconstruction", "diffusion"):  # Stage 20: the pictures it learns from
+        in_shape = plan.in_shapes[plan.image_input]
+        num_classes = int(spec.train.num_classes)
+    else:
+        in_shape = _input_shape(build)
+        # the class count is the Output's last dimension — no forward pass on meta tensors needed
+        out = next((s for s in reversed(build.layers) if s.type == "Output" and s.out_shape), None)
+        num_classes = int(out.out_shape[-1]) if out else _infer_num_classes(build_model(spec)[0], in_shape)
     device = torch.device("cpu")
 
     ds = get_dataset(spec.train.dataset)
@@ -503,7 +520,12 @@ def save_trained(model: nn.Module, in_shape: Shape, spec: TrainSpec, result: Tra
     fails the training — the result says what could not be kept."""
     try:
         model = model.to("cpu")
-        num_classes = _infer_num_classes(model, tuple(int(d) for d in in_shape))
+        plan = getattr(model, "task_plan", None)
+        if plan is not None and plan.task in ("reconstruction", "diffusion"):  # Stage 20: the pictures' rows
+            in_shape = plan.in_shapes[plan.image_input]
+            num_classes = int(spec.num_classes)
+        else:
+            num_classes = _infer_num_classes(model, tuple(int(d) for d in in_shape))
         metrics = {
             "dataset": canonical_dataset_id(spec.dataset),
             "final_accuracy": result.final_accuracy,
@@ -578,6 +600,8 @@ def test_run(spec: GraphSpec, run_id: str) -> TestResult:
     payload = load_run(run_id)  # a stale id is "not found", whatever the graph
     check_trainable(spec, "test")
     model, build = build_model(spec)
+    if model.task_plan.task in ("reconstruction", "diffusion"):  # Stage 20
+        return _generative_test(spec, run_id, payload, model)
     in_shape = _input_shape(build)
     mapped, _how = fit_state_dict(model, payload["state_dict"])
     model.load_state_dict(mapped)
@@ -655,34 +679,387 @@ def adopt_weights(spec: GraphSpec, raw: bytes) -> WeightsInfo:
     )
 
 
-def _input_kinds(spec: GraphSpec, build) -> dict[str, tuple[str, float]]:
-    """Stage 19 — what random values suit each Input, by what it feeds: token ids for
-    an Embedding (below its vocabulary size), diffusion steps for a timestep (0…999,
-    or 0…1 for a flow model such as FLUX), plain random numbers otherwise."""
-    from .registry import get_layer_cls
+#: Stage 19 — what random values suit each Input (moved to mlconstructor.generative in Stage 20)
+_input_kinds = input_roles
 
-    nodes = {n.id: n for n in spec.nodes}
-    kinds: dict[str, tuple[str, float]] = {}
-    for inp in build.inputs:
-        kind: tuple[str, float] = ("noise", 0.0)
-        for src, dst in spec.edges:
-            if src != inp.id or dst not in nodes:
-                continue
-            node = nodes[dst]
-            if node.type == "Embedding":
-                kind = ("tokens", float(int(node.params.get("num_embeddings", 2))))
+
+# --------------------------------------------------------------------------- #
+# Stage 20 — teach it to generate: reconstruction (autoencoder, VAE) and diffusion
+# --------------------------------------------------------------------------- #
+_GEN_EVAL_ROWS = 2048  # rows measured after every epoch (a fixed subset: the same rows each time)
+_GALLERY_STEPS = 25    # sampler steps for the pictures shown while training
+
+
+class _Gen:
+    """Everything a generative run needs to know, in one place: the data, how its
+    pictures map to the network's signal and back, the loss, and drawing."""
+
+    def __init__(self, model: nn.Module, plan, spec: TrainSpec, device: torch.device):
+        self.model, self.plan, self.spec, self.device = model, plan, spec, device
+        self.order = list(model.input_ids)
+        self.diffusion = plan.task == "diffusion"
+        shape = plan.in_shapes[plan.image_input]
+        X, y, self.groups = make_rows(spec.dataset, shape, int(spec.num_classes), spec, device)
+        self.X, self.y = X.float(), y
+        self.unit = bool(self.X.numel()) and float(self.X.min()) >= 0.0 and float(self.X.max()) <= 1.0
+        self.classes = int(self.y.max()) + 1 if self.y.numel() and self.y.dim() == 1 else 0
+        self.null = None
+        if self.diffusion:
+            self.alphas = noise_schedule(int(spec.diffusion_steps)).to(device)
+            if plan.class_input:
+                if plan.class_rows < self.classes:
+                    raise ValueError(
+                        f"the class embedding has {plan.class_rows} rows, but the data has {self.classes} classes: give "
+                        f"it at least {self.classes} (one more, {self.classes + 1}, lets it also draw without a class, "
+                        "which makes the pictures sharper)"
+                    )
+                if plan.class_rows > self.classes:
+                    self.null = plan.class_rows - 1  # the spare row: "no class"
+            self.kind = "mse"
+            self.loss_name = "error in seeing the noise (mean squared)"
+        else:
+            want = spec.recon_loss
+            self.kind = want if want != "auto" else ("bce" if plan.sigmoid_out and self.unit else "mse")
+            self.per_example = max(1, math.prod(plan.out_shape))
+            what = "cross-entropy" if self.kind == "bce" else "mean squared error"
+            self.loss_name = f"reconstruction error ({what})" + (" + KL" if plan.vae else "")
+
+    # -- signal <-> picture
+    def signal(self, x: torch.Tensor) -> torch.Tensor:
+        return x * 2 - 1 if (self.diffusion and self.unit) else x
+
+    def picture(self, x: torch.Tensor) -> torch.Tensor:
+        if self.unit:
+            return ((x + 1) / 2 if self.diffusion else x).clamp(0, 1)
+        flat = x.flatten(1)
+        lo, hi = flat.min(1).values.view(-1, *[1] * (x.dim() - 1)), flat.max(1).values.view(-1, *[1] * (x.dim() - 1))
+        return (x - lo) / (hi - lo + 1e-8)
+
+    # -- the loss of a batch: (total, reconstruction, kl); the last two only for reconstruction
+    def loss(self, xb: torch.Tensor, yb: torch.Tensor, gen: torch.Generator, train: bool):
+        if self.diffusion:
+            t, noise, xt = noisy_batch(self.signal(xb), self.alphas, gen)
+            feeds = {self.plan.image_input: xt, self.plan.timestep_input: t.float().view(-1, 1)}
+            if self.plan.class_input:
+                lab = yb.float().clone()
+                if train and self.null is not None:
+                    drop = (torch.rand(lab.shape[0], generator=gen) < UNCOND_PROB).to(lab.device)
+                    lab[drop] = float(self.null)
+                feeds[self.plan.class_input] = lab.view(-1, 1)
+            return F.mse_loss(self.model(*[feeds[i] for i in self.order]), noise), None, None
+        out = self.model(xb)
+        rec = recon_loss(out, xb, self.kind)
+        kl = kl_total(self.model)
+        kl = kl / self.per_example if torch.is_tensor(kl) else torch.zeros((), device=xb.device)
+        return rec + kl, rec, kl
+
+    def evaluate(self, Xs: torch.Tensor, ys: torch.Tensor) -> tuple[float, float | None, float | None]:
+        """The loss on (at most _GEN_EVAL_ROWS of) a set, in eval mode, with the same
+        noise every time — so epochs compare fairly and training's RNG is untouched."""
+        was = self.model.training
+        self.model.eval()
+        gen = torch.Generator().manual_seed(int(self.spec.seed) + 707)
+        Xs, ys = Xs[:_GEN_EVAL_ROWS], ys[:_GEN_EVAL_ROWS]
+        tot = rec = kl = 0.0
+        with torch.no_grad():
+            for i in range(0, int(Xs.shape[0]), 256):
+                xb, yb = Xs[i:i + 256], ys[i:i + 256]
+                lv, rv, kv = self.loss(xb, yb, gen, train=False)
+                m = int(xb.shape[0])
+                tot += float(lv) * m
+                if rv is not None:
+                    rec += float(rv) * m
+                    kl += float(kv) * m
+        if was:
+            self.model.train()
+        n = max(1, int(Xs.shape[0]))
+        return tot / n, (None if self.diffusion else rec / n), (None if self.diffusion else kl / n)
+
+    # -- drawing
+    def draw(self, count: int, labels: torch.Tensor | None, steps: int, guidance: float,
+             gen: torch.Generator) -> torch.Tensor:
+        """Pictures (count, C, H, W) in 0…1: diffusion samples (for `labels`, or free),
+        or a VAE's decodings of random codes."""
+        was = self.model.training
+        self.model.eval()
+        try:
+            if not self.diffusion:
+                # random codes from this draw's own seed: training's random numbers stay untouched
+                seed = int(torch.randint(0, 2**31 - 1, (1,), generator=gen))
+                devices = [self.device.index or 0] if self.device.type == "cuda" else []
+                with torch.random.fork_rng(devices=devices):
+                    torch.manual_seed(seed)
+                    set_prior(self.model, True)
+                    try:
+                        with torch.no_grad():
+                            shape = (count, *self.plan.in_shapes[self.plan.image_input])
+                            return self.picture(self.model(torch.zeros(shape, device=self.device)))
+                    finally:
+                        set_prior(self.model, False)
+            plan, dev = self.plan, self.device
+            lab = None
+            if plan.class_input:
+                if labels is not None:
+                    lab = labels.float().view(-1, 1).to(dev)
+                elif self.null is None:  # no "no class" row: draw random classes
+                    lab = torch.randint(0, max(self.classes, 1), (count, 1), generator=gen).float().to(dev)
+            free = None if self.null is None else torch.full((count, 1), float(self.null), device=dev)
+
+            def predict(x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+                feeds = {plan.image_input: x, plan.timestep_input: t}
+                if plan.class_input:
+                    feeds[plan.class_input] = lab if lab is not None else free
+                eps = self.model(*[feeds[i] for i in self.order])
+                if plan.class_input and lab is not None and free is not None and guidance != 1.0:
+                    feeds[plan.class_input] = free
+                    plain = self.model(*[feeds[i] for i in self.order])
+                    eps = guide(eps, plain, guidance)
+                return eps
+
+            shape = (count, *plan.in_shapes[plan.image_input])
+            return self.picture(ddim_sample(predict, shape, self.alphas, steps, gen, dev))
+        finally:
+            if was:
+                self.model.train()
+
+    def gallery(self, steps: int, Xv: torch.Tensor | None) -> list[dict]:
+        """What the gallery shows: diffusion — one picture per class (or ten free
+        ones); reconstruction — originals over their reconstructions, and for a VAE
+        new pictures from random codes."""
+        gen = torch.Generator().manual_seed(int(self.spec.seed) + 909)
+        if self.diffusion:
+            if self.plan.class_input and self.classes:
+                labels = torch.arange(10) % self.classes
+                pics = self.draw(10, labels, steps, float(self.spec.guidance), gen)
+                return image_items(pics, [str(int(v)) for v in labels])
+            return image_items(self.draw(10, None, steps, float(self.spec.guidance), gen), ["new"] * 10)
+        src = (Xv if Xv is not None and Xv.shape[0] else self.X)[:8]
+        was = self.model.training
+        self.model.eval()
+        with torch.no_grad():
+            rec = self.model(src)
+        if was:
+            self.model.train()
+        items = image_items(self.picture(src), ["original"] * len(src)) + \
+            image_items(self.picture(rec), ["reconstruction"] * len(src))
+        if self.plan.vae:
+            items += image_items(self.draw(8, None, steps, 1.0, gen), ["new"] * 8)
+        return items
+
+
+def _gen_fit(train_loss: float, val_loss: float | None, n_val: int) -> tuple[str, str | None]:
+    """Stage 20 — a verdict for a generative run: its error on new pictures vs on the
+    training ones."""
+    if val_loss is None or n_val < _SMALL_VAL:
+        return "unknown", None
+    gap = (val_loss - train_loss) / max(abs(train_loss), 1e-8)
+    if gap > 0.15:
+        return "overfits", (f"Its error on new pictures ({val_loss:.4f}) is {gap:.0%} higher than on the training ones "
+                            f"({train_loss:.4f}): it is starting to learn them by heart.")
+    return "generalises", (f"Its error on new pictures ({val_loss:.4f}) is about the same as on the training ones "
+                           f"({train_loss:.4f}): it learned what such pictures look like, not the pictures themselves.")
+
+
+def _generative_iter(model: nn.Module, plan, spec: TrainSpec) -> Iterator[dict]:
+    """Stage 20 — the training loop for reconstruction and diffusion. The same events
+    as classification (start / step / epoch / done; the epoch carries losses, no
+    accuracy) plus ``{"type": "samples", "epoch", "images"}`` — the gallery after
+    every epoch."""
+    torch.manual_seed(spec.seed)
+    device = _device(spec.device)
+    model = model.to(device)
+    g = _Gen(model, plan, spec, device)
+    X, y = g.X, g.y
+    tr_idx, va_idx, te_idx = split_rows(y, g.groups, spec.val_fraction, spec.test_fraction, spec.seed)
+    n_rows, n_val, n_test = int(X.shape[0]), int(va_idx.numel()), int(te_idx.numel())
+    warnings = _split_warnings(spec, n_rows, n_val, n_test, y)
+    Xv = yv = None
+    if n_val or n_test:
+        if n_val:
+            Xv, yv = X[va_idx.to(X.device)], y[va_idx.to(y.device)]
+        X, y = X[tr_idx.to(X.device)], y[tr_idx.to(y.device)]
+    g.X, g.y = X, y
+
+    resumed = False
+    if spec.resume and os.path.exists(_checkpoint_path(model)):
+        try:
+            model.load_state_dict(torch.load(_checkpoint_path(model), map_location=device))
+            resumed = True
+        except Exception:
+            resumed = False
+
+    n = int(X.shape[0])
+    bs = min(spec.batch_size, n)
+    opt = (torch.optim.Adam(model.parameters(), lr=spec.lr) if spec.optimizer == "adam"
+           else torch.optim.SGD(model.parameters(), lr=spec.lr))
+    total_params = int(sum(p.numel() for p in model.parameters()))
+    gen = torch.Generator().manual_seed(int(spec.seed) + 303)  # timesteps, noise, dropped labels: per seed
+    # the learning rate falls along a cosine to a tenth; a diffusion model draws with its averaged weights
+    total_steps = spec.epochs * math.ceil(n / bs)
+    if spec.steps:
+        total_steps = min(total_steps, int(spec.steps))
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: lr_factor(s, total_steps))
+    ema = EMA(model, ema_decay(total_steps)) if plan.task == "diffusion" else None
+    yield {
+        "type": "start", "device": str(device), "resumed": resumed, "task": plan.task, "num_classes": g.classes,
+        "samples": n_rows, "total_params": total_params, "train_samples": n, "val_samples": n_val,
+        "test_samples": n_test,
+    }
+
+    def _save() -> str:
+        os.makedirs(_CKPT_DIR, exist_ok=True)
+        torch.save(model.state_dict(), _checkpoint_path(model))
+        return _checkpoint_key(model)
+
+    loss_curve: list[float] = []
+    val_loss_curve: list[float] = []
+    step = 0
+    stop = False
+    best = math.inf
+    ckpt_key: str | None = None
+    model.train()
+    for epoch in range(spec.epochs):
+        perm = torch.randperm(n)
+        for i in range(0, n, bs):
+            idx = perm[i:i + bs]
+            opt.zero_grad()
+            loss, _rec, _kl = g.loss(X[idx], y[idx], gen, train=True)
+            loss.backward()
+            opt.step()
+            sched.step()
+            if ema is not None:
+                ema.update(model)
+            lv = float(loss.detach())
+            loss_curve.append(lv)
+            step += 1
+            yield {"type": "step", "step": step, "loss": lv}
+            if spec.steps and step >= spec.steps:
+                stop = True
                 break
-            if node.type == "TimestepEmbedding":
-                kind = ("timestep", 1.0 if float(node.params.get("time_factor", 1.0)) >= 100 else 1000.0)
-                break
-            layer = get_layer_cls(node.type)(node.id, node.params)
-            ports = layer.input_ports()
-            preds = [s for s, d in spec.edges if d == dst]
-            if ports and len(preds) == len(ports) and ports[preds.index(src)] == "timestep":
-                kind = ("timestep", float(int(node.params.get("steps", 1000))))
-                break
-        kinds[inp.id] = kind
-    return kinds
+        if not stop:
+            tr_loss, tr_rec, tr_kl = g.evaluate(X, y)
+            val_loss = val_rec = val_kl = None
+            if Xv is not None:
+                val_loss, val_rec, val_kl = g.evaluate(Xv, yv)
+                val_loss_curve.append(val_loss)
+            yield {"type": "epoch", "epoch": epoch + 1, "acc": None, "loss": tr_loss, "val_acc": None,
+                   "val_loss": val_loss, "recon": val_rec if val_rec is not None else tr_rec,
+                   "kl": val_kl if val_kl is not None else tr_kl}
+            if ema is not None:
+                ema.swap(model)  # the gallery draws with the averaged weights
+            images = g.gallery(min(_GALLERY_STEPS, spec.sample_steps), Xv)
+            if ema is not None:
+                ema.swap(model)
+            yield {"type": "samples", "epoch": epoch + 1, "images": images}
+            score = tr_loss if val_loss is None else val_loss
+            if spec.checkpoint and score < best:
+                best = score
+                ckpt_key = _save()
+        if stop:
+            break
+
+    if ema is not None:
+        ema.swap(model)  # from here on the network is its averaged weights: measured, drawn with and kept
+    model.eval()
+    final_loss, final_rec, final_kl = g.evaluate(X, y)
+    final_val = val_rec = val_kl = None
+    if Xv is not None:
+        final_val, val_rec, val_kl = g.evaluate(Xv, yv)
+        if not val_loss_curve:
+            val_loss_curve.append(final_val)
+    if spec.checkpoint and ckpt_key is None:
+        ckpt_key = _save()
+    gallery = g.gallery(int(spec.sample_steps), Xv)
+    fit, fit_note = _gen_fit(final_loss, final_val, n_val)
+    draw_classes = g.classes if (plan.task == "diffusion" and plan.class_input) else 0
+    result = TrainResult(
+        ok=True, loss_curve=loss_curve, acc_curve=[], final_loss=final_loss, final_accuracy=0.0, steps=step,
+        device=str(device), total_params=total_params, checkpoint=ckpt_key, best_accuracy=None, resumed=resumed,
+        val_acc_curve=[], val_loss_curve=val_loss_curve, final_val_accuracy=None, final_val_loss=final_val,
+        train_samples=n, val_samples=n_val, fit=fit, fit_note=fit_note, warnings=warnings, test_samples=n_test,
+        task=plan.task, loss_name=g.loss_name,
+        final_recon=val_rec if val_rec is not None else final_rec, final_kl=val_kl if val_kl is not None else final_kl,
+        gallery=[GalleryImage(**it) for it in gallery], draw_classes=draw_classes,
+        draw_free=(plan.task == "diffusion" and (not plan.class_input or g.null is not None)) or bool(plan.vae),
+    )
+    if device.type == "cuda":
+        model.to("cpu")
+        del X, y, Xv, yv
+        g.X = g.y = None
+        torch.cuda.empty_cache()
+    yield {"type": "done", "result": result}
+
+
+def _generative_test(spec: GraphSpec, run_id: str, payload: dict, model: nn.Module) -> TestResult:
+    """Stage 20 — the final test of a generative run: its error on the test pictures
+    (and, to compare, on the validation and training ones)."""
+    mapped, _how = fit_state_dict(model, payload["state_dict"])
+    model.load_state_dict(mapped)
+    model.eval()
+    t = spec.train
+    g = _Gen(model, model.task_plan, t, torch.device("cpu"))
+    tr, va, te = split_rows(g.y, g.groups, t.val_fraction, t.test_fraction, t.seed)
+    if not te.numel():
+        raise ValueError(
+            "there is no test part to measure: set Final test to 10 % or more and train again (the test rows have to be "
+            "kept out of training), then press Test"
+        )
+    test_loss = g.evaluate(g.X[te], g.y[te])[0]
+    val_loss = g.evaluate(g.X[va], g.y[va])[0] if va.numel() else None
+    train_loss = g.evaluate(g.X[tr], g.y[tr])[0] if tr.numel() else None
+    shape = model.task_plan.in_shapes[model.task_plan.image_input]
+    same = None if payload["data"] is None else payload["data"] == data_key(t, shape, int(t.num_classes))
+    note = (f"Error on pictures it never saw: {test_loss:.4f}"
+            + (f" (new data while training: {val_loss:.4f})" if val_loss is not None else "") + ".")
+    warnings = [] if same is not False else [
+        "These weights were trained on other data or another split: some test pictures may have been trained on."]
+    return TestResult(run_id=run_id, accuracy=0.0, loss=test_loss, samples=int(te.numel()), val_accuracy=None,
+                      train_accuracy=None, val_samples=int(va.numel()), train_samples=int(tr.numel()), same_split=same,
+                      note=note, warnings=warnings, task=model.task_plan.task, val_loss=val_loss, train_loss=train_loss)
+
+
+def draw(spec: GraphSpec, run_id: str, count: int = 10, label: int | None = None, steps: int = 50,
+         guidance: float = 1.0, seed: int = 0) -> DrawResult:
+    """Stage 20 — draw pictures with a run's weights: diffusion removes noise step by
+    step (for one class, or one of each); a VAE decodes random codes; a plain
+    autoencoder can only reconstruct, so it shows originals and reconstructions."""
+    payload = load_run(run_id)
+    check_trainable(spec, "run")
+    model, _build = build_model(spec)
+    plan = model.task_plan
+    if plan.task not in ("reconstruction", "diffusion"):
+        raise ValueError("Draw needs a network that learned to generate: a VAE (reconstruction) or a diffusion model")
+    mapped, _how = fit_state_dict(model, payload["state_dict"])
+    model.load_state_dict(mapped)
+    g = _Gen(model, plan, spec.train, torch.device("cpu"))
+    gen = torch.Generator().manual_seed(int(seed))
+    start = time.perf_counter()
+    note = None
+    if plan.task == "diffusion":
+        labels = None
+        if plan.class_input and g.classes:
+            if label is not None:
+                if not 0 <= int(label) < g.classes:
+                    raise ValueError(f"the class must be between 0 and {g.classes - 1}")
+                labels = torch.full((count,), int(label))
+            else:
+                labels = torch.arange(count) % g.classes
+        pics = g.draw(count, labels, steps, guidance, gen)
+        names = [str(int(v)) for v in labels] if labels is not None else ["new"] * count
+        items = image_items(pics, names)
+    elif plan.vae:
+        items = image_items(g.draw(count, None, steps, 1.0, gen), ["new"] * count)
+    else:
+        idx = torch.randperm(int(g.X.shape[0]), generator=gen)[:count]
+        src = g.X[idx]
+        model.eval()
+        with torch.no_grad():
+            rec = model(src)
+        items = image_items(g.picture(src), ["original"] * len(src)) + image_items(g.picture(rec), ["reconstruction"] * len(src))
+        note = ("A plain autoencoder only gives back what it is shown: add a VAE sampling layer between its encoder and "
+                "decoder to draw new pictures from noise.")
+    return DrawResult(run_id=run_id, task=plan.task, images=[GalleryImage(**it) for it in items],
+                      ms=round((time.perf_counter() - start) * 1000.0, 1), note=note)
 
 
 def run_once(spec: GraphSpec) -> RunResult:

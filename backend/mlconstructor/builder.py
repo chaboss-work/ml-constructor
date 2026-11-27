@@ -27,6 +27,7 @@ from torch.utils._device import _device_constructors
 
 from .blocks import GraphModule
 from .connections import AUTO, Resolved, resolve_merge, resolve_single
+from .generative import resolve_task
 from .layers.base import LayerNode
 from .registry import get_layer_cls
 from .schema import BuildResult, EdgeSummary, GraphSpec, InputSummary, LayerSummary, NodeSpec
@@ -388,8 +389,10 @@ def _build_model(spec: GraphSpec) -> tuple[GraphModule, BuildResult]:
         InputSummary(id=i, name=str(plan.nodes[i].p("name", "") or ""), shape=list(plan.out_shapes[i]))
         for i in plan.input_ids
     ]
-    return model, BuildResult(ok=True, order=plan.order, layers=summaries, total_params=total, edges=edge_summaries,
-                              inputs=inputs)
+    result = BuildResult(ok=True, order=plan.order, layers=summaries, total_params=total, edges=edge_summaries,
+                         inputs=inputs)
+    model.task_plan = resolve_task(spec, result)  # Stage 20: what training does with this graph (or why it cannot)
+    return model, result
 
 
 # --------------------------------------------------------------------------- #

@@ -509,17 +509,20 @@ class UNet2DCondition(nn.Module):
     (the text encoder's output) it predicts the noise. Levels of ResNet blocks
     halve the size on the way down and double it on the way up; skip connections
     carry every down-level output across; transformers with cross-attention read
-    the text at the levels marked in attention_levels and in the middle."""
+    the text at the levels marked in attention_levels and in the middle. A context
+    given as one vector (a class: class_dim > 0) is also added to the timestep's
+    embedding, so every ResNet block, at every level, knows what to draw."""
 
     def __init__(self, in_channels=4, out_channels=4, block_channels=(320, 640, 1280, 1280), layers_per_block=2,
-                 attention_levels=(1, 1, 1, 0), heads=8, context_dim=768, groups=32, eps=1e-5):
+                 attention_levels=(1, 1, 1, 0), heads=8, context_dim=768, groups=32, eps=1e-5, class_dim=0):
         super().__init__()
         self.config = dict(in_channels=in_channels, out_channels=out_channels, block_channels=list(block_channels),
                            layers_per_block=layers_per_block, attention_levels=list(attention_levels), heads=heads,
-                           context_dim=context_dim, groups=groups, eps=eps)
+                           context_dim=context_dim, groups=groups, eps=eps, class_dim=class_dim)
         c0, n = block_channels[0], len(block_channels)
         tdim = 4 * c0
         self.time_embedding = TimestepEmbedding(tdim, freq_dim=c0)
+        self.class_proj = nn.Linear(class_dim, tdim) if class_dim else None
         self.conv_in = nn.Conv2d(in_channels, c0, 3, padding=1)
         self.down = nn.ModuleList()
         skips, ch = [c0], c0
@@ -557,6 +560,10 @@ class UNet2DCondition(nn.Module):
 
     def forward(self, sample, timestep, context):
         temb = self.time_embedding(timestep)
+        if context.dim() == 2:  # one vector per example (a class): into every block, and one token to attend to
+            if self.class_proj is not None:
+                temb = temb + self.class_proj(context)
+            context = context.unsqueeze(1)
         h = self.conv_in(sample)
         skips = [h]
         for level in self.down:
@@ -809,6 +816,32 @@ class TriplaneSample(nn.Module):
         feats = F.grid_sample(planes.reshape(b * n_planes, c, h, w), coords.reshape(b * n_planes, 1, -1, 2),
                               mode="bilinear", padding_mode="zeros", align_corners=False)
         return feats.reshape(b, n_planes, c, -1).permute(0, 3, 1, 2).reshape(b, -1, n_planes * c)
+
+
+class Reparameterize(nn.Module):
+    """A VAE's sampling step. The input holds a mean and a log-variance (the first
+    and the second half of its first axis). Training: a sample, mean + exp(logvar / 2)
+    * noise; otherwise the mean itself; when drawing new pictures (from_prior), noise
+    from N(0, I) instead of the input. Each call records kl: how far the codes are
+    from N(0, I) (the KL divergence per example, times kl_weight), which training adds
+    to the loss — it keeps the codes where new samples will come from."""
+
+    def __init__(self, kl_weight=1.0):
+        super().__init__()
+        self.config = dict(kl_weight=kl_weight)
+        self.kl_weight = float(kl_weight)
+        self.from_prior = False
+        self.kl = None
+
+    def forward(self, x):
+        mu, logvar = x.chunk(2, dim=1)
+        logvar = logvar.clamp(-30.0, 20.0)
+        self.kl = self.kl_weight * (-0.5 * (1 + logvar - mu.pow(2) - logvar.exp())).flatten(1).sum(1).mean()
+        if self.from_prior:
+            return torch.randn_like(mu)
+        if self.training:
+            return mu + (0.5 * logvar).exp() * torch.randn_like(mu)
+        return mu
 
 
 class Transpose(nn.Module):

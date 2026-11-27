@@ -205,6 +205,75 @@ def _your_gpt() -> Spec:
 
 
 # --------------------------------------------------------------------------- #
+# Stage 20 — teach it to generate: a VAE and a diffusion model that draw digits
+# --------------------------------------------------------------------------- #
+def _digit_vae() -> Spec:
+    """A small convolutional VAE: the picture is squeezed into a code of 16 numbers
+    (a mean and a log-variance, then a sample) and drawn back from it. Trained to give
+    back its input (reconstruction + KL); then random codes become new digits."""
+    ids = ["image", "enc1", "act1", "enc2", "act2", "to_code", "sample", "from_code", "act3", "dec1",
+           "act4", "dec2", "squash", "out"]
+    return {
+        "nodes": [
+            {"id": "image", "type": "Input", "params": {"shape": [1, 28, 28], "name": "image"}},
+            {"id": "enc1", "type": "Conv2d", "params": {"out_channels": 32, "kernel_size": 4, "stride": 2, "padding": 1}},
+            {"id": "act1", "type": "SiLU", "params": {}},
+            {"id": "enc2", "type": "Conv2d", "params": {"out_channels": 64, "kernel_size": 4, "stride": 2, "padding": 1}},
+            {"id": "act2", "type": "SiLU", "params": {}},
+            {"id": "to_code", "type": "Linear", "params": {"out_features": 32}},
+            {"id": "sample", "type": "Reparameterize", "params": {"kl_weight": 1.0}},
+            {"id": "from_code", "type": "Linear", "params": {"out_features": 64 * 7 * 7}},
+            {"id": "act3", "type": "SiLU", "params": {}},
+            {"id": "dec1", "type": "ConvTranspose2d",
+             "params": {"out_channels": 32, "kernel_size": 4, "stride": 2, "padding": 1}},
+            {"id": "act4", "type": "SiLU", "params": {}},
+            {"id": "dec2", "type": "ConvTranspose2d",
+             "params": {"out_channels": 1, "kernel_size": 4, "stride": 2, "padding": 1}},
+            {"id": "squash", "type": "Sigmoid", "params": {}},
+            {"id": "out", "type": "Output", "params": {"any_shape": True}},
+        ],
+        "edges": [[a, b] for a, b in zip(ids, ids[1:])],
+        # the code (3136 numbers) is folded back into a 64×7×7 picture before the decoder
+        "edge_settings": [{"source": "act3", "target": "dec1", "transform": "to_image",
+                           "params": {"channels": 64, "height": 7, "width": 7}}],
+        # ~2 minutes on a laptop CPU: reconstructions close to the originals, new digits mostly readable
+        "train": {"dataset": "mnist", "epochs": 20, "lr": 0.001, "batch_size": 128, "samples": 20000, "seed": 0},
+    }
+
+
+#: Stage 20 — the digit diffusion model's U-Net (cheap enough to learn digits on a laptop CPU)
+_DIFFUSION_UNET = {"out_channels": 1, "block_channels": [16, 32, 32], "layers_per_block": 1,
+                   "attention_levels": [0, 0, 1], "heads": 4, "groups": 8}
+# ~16 minutes on a laptop CPU (about a minute an epoch): digits you can recognize; 8 epochs give rougher ones
+_DIFFUSION_TRAIN = {"dataset": "mnist", "epochs": 16, "lr": 0.002, "batch_size": 64, "samples": 20000,
+                    "seed": 0, "sample_steps": 50, "guidance": 1.0}
+
+
+def _digit_diffusion() -> Spec:
+    """A small diffusion model: a U-Net learns to see the noise in a noisy digit,
+    given the step and the digit; the sampler then turns pure noise into the digit you
+    ask for. The digit's embedding has a spare 11th row, "no digit": trained on it too,
+    the network can also draw freely, and the two together sharpen the pictures
+    (classifier-free guidance)."""
+    return {
+        "nodes": [
+            {"id": "noisy", "type": "Input", "params": {"shape": [1, 28, 28], "name": "noisy image"}},
+            {"id": "timestep", "type": "Input", "params": {"shape": [1], "name": "timestep"}},
+            {"id": "digit", "type": "Input", "params": {"shape": [1], "name": "digit"}},
+            {"id": "digit_emb", "type": "Embedding", "params": {"num_embeddings": 11, "embedding_dim": 64}},
+            {"id": "unet", "type": "UNet2D", "params": dict(_DIFFUSION_UNET)},
+            {"id": "out", "type": "Output", "params": {"any_shape": True}},
+        ],
+        # the U-Net's inputs, in this order: the noisy picture, the step, the digit (its context)
+        "edges": [["digit", "digit_emb"], ["noisy", "unet"], ["timestep", "unet"], ["digit_emb", "unet"],
+                  ["unet", "out"]],
+        # the digit as one vector: added to the step's embedding, it reaches every block of the U-Net
+        "edge_settings": [{"source": "digit_emb", "target": "unet", "transform": "flatten", "params": {}}],
+        "train": dict(_DIFFUSION_TRAIN),
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Registry
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
@@ -235,6 +304,12 @@ _ARCHITECTURES: list[_Arch] = [
     _Arch("your_gpt", "Your GPT (your text)", "A small GPT you teach your own text: put it in Data (Your text), "
           "train, then let it write. One character = one token; it comes with an example text.", "language",
           ("llm", "gpt", "text", "generate", "gqa", "rope", "swiglu"), _your_gpt),
+    _Arch("digit_vae", "Digit VAE (draws digits)", "A small VAE that learns MNIST digits by giving them back through a "
+          "code of 16 numbers; then random codes become new digits. Train, then Draw.", "generation",
+          ("vae", "autoencoder", "generate", "mnist"), _digit_vae),
+    _Arch("digit_diffusion", "Digit diffusion (draws digits)", "A small diffusion model: a U-Net learns to see the noise "
+          "in noisy MNIST digits; then it turns pure noise into the digit you ask for. Train, then Draw.", "generation",
+          ("diffusion", "u-net", "generate", "mnist", "guidance"), _digit_diffusion),
 ]
 
 

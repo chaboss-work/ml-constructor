@@ -33,7 +33,10 @@ class TrainSpec(BaseModel):
     """How to train the assembled model. v1 uses a tiny synthetic task."""
 
     dataset: str = "synthetic"
-    task: Literal["classification"] = "classification"
+    #: Stage 20 — what to learn: "auto" (from the graph's shape), "classification"
+    #: (scores per class / the next token), "reconstruction" (give back the input: an
+    #: autoencoder or a VAE) or "diffusion" (see the noise in a noisy picture).
+    task: Literal["auto", "classification", "reconstruction", "diffusion"] = "auto"
     epochs: int = Field(default=1, ge=1, le=100)
     steps: int | None = Field(default=None, description="hard cap on optimizer steps")
     lr: float = Field(default=1e-2, gt=0)
@@ -65,6 +68,14 @@ class TrainSpec(BaseModel):
     #: Stage 18 — the text for the "text" dataset ("Your text"): a language model
     #: learns to continue it, one character at a time.
     text: str | None = Field(default=None, max_length=1_000_000)
+    #: Stage 20 — diffusion: steps in the noise schedule, steps the sampler takes to
+    #: draw a picture, and how strongly a class steers it (classifier-free guidance;
+    #: 1 = no extra push). Reconstruction: how its error is measured ("auto": cross-
+    #: entropy for pictures in 0…1 made by a Sigmoid, squared error otherwise).
+    diffusion_steps: int = Field(default=1000, ge=10, le=4000)
+    sample_steps: int = Field(default=50, ge=1, le=1000)
+    guidance: float = Field(default=1.0, ge=0.0, le=20.0)
+    recon_loss: Literal["auto", "mse", "bce"] = "auto"
 
     @model_validator(mode="after")
     def _leave_rows_to_train(self) -> "TrainSpec":
@@ -189,6 +200,8 @@ class BuildResult(BaseModel):
     runnable: bool = True
     #: Stage 19 — why this network cannot be trained here yet (several inputs, a picture as output…)
     train_note: str | None = None
+    #: Stage 20 — what training will teach it: "classification", "reconstruction" or "diffusion" (None: nothing)
+    task: str | None = None
 
 
 class ConnectionOption(BaseModel):
@@ -233,6 +246,17 @@ class ConnectionOptions(BaseModel):
     options: list[ConnectionOption] = Field(default_factory=list)
 
 
+class GalleryImage(BaseModel):
+    """Stage 20 — one picture for the gallery: its pixels as base64 bytes (channels
+    last, 0–255), drawn by the editor on a canvas."""
+
+    label: str = ""
+    w: int
+    h: int
+    c: int
+    data: str
+
+
 class TrainResult(BaseModel):
     ok: bool
     loss_curve: list[float]
@@ -274,6 +298,19 @@ class TrainResult(BaseModel):
     #: on the server (download: ``GET /runs/{run_id}/weights``; None if not kept).
     test_samples: int = 0
     run_id: str | None = None
+    #: Stage 20 — what was learned ("classification", "reconstruction" or "diffusion");
+    #: for the last two the accuracy fields stay empty and the loss tells the story:
+    #: ``loss_name`` says what it measures; a VAE's loss is reconstruction + KL.
+    task: str = "classification"
+    loss_name: str | None = None
+    final_recon: float | None = None
+    final_kl: float | None = None
+    #: pictures drawn / reconstructed by the trained network
+    gallery: list[GalleryImage] = Field(default_factory=list)
+    #: diffusion with a class: how many classes it can draw, and whether it can also
+    #: draw without one (it learned "no class" too); a VAE can draw from noise
+    draw_classes: int = 0
+    draw_free: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -306,6 +343,10 @@ class TestResult(BaseModel):
     same_split: bool | None = None
     note: str | None = None
     warnings: list[str] = Field(default_factory=list)
+    #: Stage 20 — a generative network is tested by its error (loss), not accuracy
+    task: str = "classification"
+    val_loss: float | None = None
+    train_loss: float | None = None
 
 
 class GenerateRequest(BaseModel):
@@ -317,6 +358,29 @@ class GenerateRequest(BaseModel):
     length: int = Field(default=200, ge=1, le=2000)
     temperature: float = Field(default=0.8, ge=0.0, le=5.0)
     seed: int = 0
+
+
+class DrawRequest(BaseModel):
+    """Stage 20 — draw pictures with a run's weights: a diffusion model removes noise
+    step by step (optionally for one class); a VAE decodes random codes."""
+
+    spec: GraphSpec
+    run_id: str
+    count: int = Field(default=10, ge=1, le=64)
+    #: the class to draw (diffusion with a class); None = one of each / any
+    label: int | None = None
+    steps: int = Field(default=50, ge=1, le=1000)
+    guidance: float = Field(default=1.0, ge=0.0, le=20.0)
+    seed: int = 0
+
+
+class DrawResult(BaseModel):
+    ok: bool = True
+    run_id: str
+    task: str
+    images: list[GalleryImage]
+    ms: float
+    note: str | None = None
 
 
 class RunInputInfo(BaseModel):

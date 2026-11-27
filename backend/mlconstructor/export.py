@@ -16,12 +16,14 @@ same parameters and the same output shape as the one trained in the app.
 from __future__ import annotations
 
 import inspect
+import math
 import keyword
 import re
 
 import torch.nn as nn
 
 from . import gen_modules as GEN
+from . import generative as GENERATIVE
 from . import llm_modules as LLM
 from .blocks import Block
 from .builder import build_model
@@ -162,12 +164,19 @@ _GEN_CLASSES = (
     GEN.CrossAttentionBlock, GEN.MLPBlock, GEN.AdaLayerNorm, GEN.DiTBlock, GEN.DoubleStreamBlock,
     GEN.SingleStreamBlock, GEN.UNet2DCondition, GEN.VAEEncoder, GEN.VAEDecoder, GEN.AddNoise, GEN.Similarity,
     GEN.TriplaneTokens, GEN.TriplaneTransformer, GEN.TriplaneUpsample, GEN.TriplaneSample, GEN.Transpose,
-    GEN.SliceTokens,
+    GEN.SliceTokens, GEN.Reparameterize,
 )
 
 
 def _gen_source() -> str:
     src = inspect.getsource(GEN)
+    marker = "# --- export: begin ---"
+    return src[src.index(marker) + len(marker):].strip("\n")
+
+
+def _generative_source() -> str:
+    """Stage 20 — the generative core (schedule, sampler, losses), exactly as in the app."""
+    src = inspect.getsource(GENERATIVE)
     marker = "# --- export: begin ---"
     return src[src.index(marker) + len(marker):].strip("\n")
 
@@ -285,6 +294,43 @@ def make_data(n, in_shape, num_classes, seed=0):
 }
 
 # Custom data is embedded as a CUSTOM_ROWS literal above this snippet.
+_DATA_SRC["mnist"] = '''
+MNIST_URL = "https://ossci-datasets.s3.amazonaws.com/mnist/"
+
+
+def _download(url, dest):
+    import os
+    import urllib.request
+
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if not os.path.exists(dest):
+        print("downloading", url)
+        urllib.request.urlretrieve(url, dest)
+    return dest
+
+
+def make_data(n, in_shape, num_classes, seed=0):
+    \"\"\"MNIST as the app uses it: the same reproducible random subset of n digits,
+    pixels in 0…1 (downloaded once into data/mnist next to this file).\"\"\"
+    import gzip
+    import struct
+
+    import numpy as np
+
+    images = _download(MNIST_URL + "train-images-idx3-ubyte.gz", "data/mnist/train-images-idx3-ubyte.gz")
+    labels = _download(MNIST_URL + "train-labels-idx1-ubyte.gz", "data/mnist/train-labels-idx1-ubyte.gz")
+    with gzip.open(images, "rb") as f:
+        _magic, count, rows, cols = struct.unpack(">IIII", f.read(16))
+        imgs = np.frombuffer(f.read(), dtype=np.uint8).reshape(count, rows, cols)
+    with gzip.open(labels, "rb") as f:
+        f.read(8)
+        lbls = np.frombuffer(f.read(), dtype=np.uint8)
+    g = torch.Generator().manual_seed(seed)
+    sel = torch.randperm(imgs.shape[0], generator=g)[:min(n, imgs.shape[0])].numpy()
+    X = torch.from_numpy(imgs[sel].astype(np.float32) / 255.0).unsqueeze(1)
+    return X, torch.from_numpy(lbls[sel].astype(np.int64))
+'''
+
 _CUSTOM_DATA_SRC = '''
 def make_data(n, in_shape, num_classes, seed=0):
     feats = [row[:-1] for row in CUSTOM_ROWS]
@@ -416,6 +462,141 @@ if __name__ == "__main__":
 _MAX_EMBEDDED_TEXT = 100_000
 
 
+_GEN_MAIN = r'''
+def batch_loss(model, xb, yb, alphas, gen, unit, null, train=True):
+    """The app's loss: diffusion -- the error in seeing the noise that was added;
+    reconstruction -- how far the copy is from the original (+ KL for a VAE)."""
+    if TASK == "diffusion":
+        t, noise, xt = noisy_batch(xb * 2 - 1 if unit else xb, alphas, gen)
+        feeds = [None] * len(INPUTS)
+        feeds[IMAGE], feeds[TIMESTEP] = xt, t.float().view(-1, 1)
+        if CLASS is not None:
+            lab = yb.float().clone()
+            if train and null is not None:
+                lab[torch.rand(lab.shape[0], generator=gen) < UNCOND_PROB] = float(null)
+            feeds[CLASS] = lab.view(-1, 1)
+        return F.mse_loss(model(*feeds), noise)
+    out = model(xb)
+    kl = kl_total(model)
+    kind = RECON if RECON != "auto" else ("bce" if SIGMOID_OUT and unit else "mse")
+    return recon_loss(out, xb, kind) + (kl / PER_EXAMPLE if torch.is_tensor(kl) else 0.0)
+
+
+def evaluate(model, X, y, alphas, unit, null):
+    """The loss on (at most 2048 of) a set, with the same noise every time."""
+    was = model.training
+    model.eval()
+    gen = torch.Generator().manual_seed(SEED + 707)
+    X, y = X[:2048], y[:2048]
+    total = 0.0
+    with torch.no_grad():
+        for i in range(0, len(X), 256):
+            total += float(batch_loss(model, X[i:i + 256], y[i:i + 256], alphas, gen, unit, null, train=False)) \
+                * len(X[i:i + 256])
+    if was:
+        model.train()
+    return total / max(1, len(X))
+
+
+def draw(model, count=10, label=None, classes=10, unit=True, null=None, steps=SAMPLE_STEPS, guidance=GUIDANCE, seed=0):
+    """New pictures (count, C, H, W), as Draw does in the app: diffusion turns noise
+    into pictures (of one class, or one of each); a VAE decodes random codes."""
+    model.eval()
+    gen = torch.Generator().manual_seed(seed)
+    if TASK != "diffusion":
+        set_prior(model, True)
+        with torch.no_grad():
+            out = model(torch.zeros(count, *IN_SHAPE))
+        set_prior(model, False)
+        return out
+    lab = None
+    if CLASS is not None:
+        lab = (torch.full((count,), label) if label is not None else torch.arange(count) % classes).float().view(-1, 1)
+    free = None if null is None else torch.full((count, 1), float(null))
+
+    def predict(x, t):
+        feeds = [None] * len(INPUTS)
+        feeds[IMAGE], feeds[TIMESTEP] = x, t
+        if CLASS is not None:
+            feeds[CLASS] = lab
+        eps = model(*feeds)
+        if CLASS is not None and free is not None and guidance != 1.0:
+            feeds[CLASS] = free
+            plain = model(*feeds)
+            eps = guide(eps, plain, guidance)
+        return eps
+
+    x = ddim_sample(predict, (count, *IN_SHAPE), noise_schedule(DIFFUSION_STEPS), steps, gen)
+    return (x + 1) / 2 if unit else x
+
+
+def save_png(pictures, path="samples.png"):
+    """The pictures side by side, as a grayscale PNG (first channel; no extra packages)."""
+    import struct
+    import zlib
+
+    p = pictures[:, 0].clamp(0, 1).mul(255).round().to(torch.uint8)
+    row = torch.cat(list(p), dim=1)
+    h, w = row.shape
+    raw = b"".join(b"\x00" + bytes(row[r].tolist()) for r in range(h))
+
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    with open(path, "wb") as f:
+        f.write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def main():
+    torch.manual_seed(SEED)
+    model = Model()
+    torch.manual_seed(SEED)  # the app builds the weights apart: training's own random draws start here
+    X, y = make_data(SAMPLES, IN_SHAPE, NUM_CLASSES, seed=SEED)[:2]
+    X = X.float()
+    unit = bool(X.min() >= 0 and X.max() <= 1)
+    classes = int(y.max()) + 1
+    null = CLASS_ROWS - 1 if (CLASS is not None and CLASS_ROWS > classes) else None
+    train_idx, val_idx, test_idx = split_rows(y, None, VAL_FRACTION, TEST_FRACTION, SEED)
+    Xv, yv, Xt, yt = X[val_idx], y[val_idx], X[test_idx], y[test_idx]
+    X, y = X[train_idx], y[train_idx]
+    alphas = noise_schedule(DIFFUSION_STEPS)
+    opt = OPTIMIZER(model.parameters(), lr=LR)
+    gen = torch.Generator().manual_seed(SEED + 303)
+    n = X.shape[0]
+    bs = min(BATCH_SIZE, n)
+    total = EPOCHS * math.ceil(n / bs)
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: lr_factor(s, total))
+    ema = EMA(model, ema_decay(total)) if TASK == "diffusion" else None
+    model.train()
+    for epoch in range(EPOCHS):
+        perm = torch.randperm(n)
+        for i in range(0, n, bs):
+            idx = perm[i:i + bs]
+            opt.zero_grad()
+            loss = batch_loss(model, X[idx], y[idx], alphas, gen, unit, null)
+            loss.backward()
+            opt.step()
+            sched.step()
+            if ema is not None:
+                ema.update(model)
+        val = f"  new data {evaluate(model, Xv, yv, alphas, unit, null):.4f}" if len(Xv) else ""
+        print(f"epoch {epoch + 1}/{EPOCHS}  loss {evaluate(model, X, y, alphas, unit, null):.4f}{val}")
+    if ema is not None:
+        ema.swap(model)  # draw (and keep) the averaged weights, as the app does
+    if len(Xt):
+        print(f"final test on {len(Xt)} pictures used for nothing else: loss "
+              f"{evaluate(model, Xt, yt, alphas, unit, null):.4f}")
+    save_png(draw(model, classes=classes, unit=unit, null=null))
+    print("drew new pictures -> samples.png")
+    return model
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 _RUN_MAIN = '''
 def random_inputs(batch=2, seed=0):
     """Random values that suit each input: token ids, diffusion steps or plain noise."""
@@ -470,6 +651,8 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     input_args = dict(zip(model.input_ids, _arg_names([i.name for i in build.inputs])))
     port_ids = model.port_ids
     can_train = train_block_reason(spec, build) is None
+    plan = model.task_plan
+    generative = include_training and plan.task in ("reconstruction", "diffusion")  # Stage 20
     merge_ids = model.merge_ids
     mods = model._mods
     node_by_id = {n.id: n for n in spec.nodes}
@@ -532,11 +715,11 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
     out.append("")
     out.append("import torch")
     out.append("import torch.nn as nn")
-    if "LLM" in needs or "GEN" in needs:
+    if "LLM" in needs or "GEN" in needs or generative:
         out.append("import torch.nn.functional as F")
     if include_training and spec.train.dataset == "text" and (spec.train.text or "").strip():
         out.insert(out.index("import torch"), "from collections import Counter\n")
-    if "PositionalEncoding" in needs or "GEN" in needs:
+    if "PositionalEncoding" in needs or "GEN" in needs or generative:
         out.append("import math")
     out.append("")
     for name in ("TokenEmbedding", "Recurrent", "SelfAttention", "PositionalEncoding", "SeqPool", "ImageToSeq"):
@@ -577,6 +760,58 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
         out.append("")
         out.append("")
         out.append(_RUN_MAIN.strip("\n"))
+    elif generative:  # Stage 20: learn to reconstruct or to remove noise, then draw
+        ds = get_dataset(spec.train.dataset)
+        t = spec.train
+        index = {nid: i for i, nid in enumerate(model.input_ids)}
+        opt = "torch.optim.Adam" if t.optimizer == "adam" else "torch.optim.SGD"
+        consts = [
+            "",
+            "",
+            f"# ---- teaching it to generate: {plan.task}, on {ds.id} (the app's own loop, schedule and sampler) ----",
+            f"TASK = {plan.task!r}",
+            f"INPUTS = {[i.name or i.id for i in build.inputs]!r}  # the order forward() takes them",
+            f"IMAGE = {index[plan.image_input]}  # which input gets the pictures",
+            f"TIMESTEP = {index[plan.timestep_input] if plan.timestep_input else None!r}",
+            f"CLASS = {index[plan.class_input] if plan.class_input else None!r}  # the class to draw (None: none)",
+            f"CLASS_ROWS = {int(plan.class_rows)}  # rows of the class embedding (a spare one = \"no class\")",
+            f"IN_SHAPE = {tuple(plan.in_shapes[plan.image_input])!r}",
+            f"PER_EXAMPLE = {math.prod(plan.out_shape)}",
+            f"SIGMOID_OUT = {bool(plan.sigmoid_out)!r}",
+            f"RECON = {t.recon_loss!r}",
+            f"UNCOND_PROB = {GENERATIVE.UNCOND_PROB}",
+            f"SEED = {int(t.seed)}",
+            f"SAMPLES = {int(t.samples)}",
+            f"NUM_CLASSES = {int(t.num_classes)}",
+            f"EPOCHS = {int(t.epochs)}",
+            f"LR = {float(t.lr)}",
+            f"BATCH_SIZE = {int(t.batch_size)}",
+            f"OPTIMIZER = {opt}",
+            f"VAL_FRACTION = {float(t.val_fraction)}",
+            f"TEST_FRACTION = {float(t.test_fraction)}",
+            f"DIFFUSION_STEPS = {int(t.diffusion_steps)}",
+            f"SAMPLE_STEPS = {int(t.sample_steps)}",
+            f"GUIDANCE = {float(t.guidance)}",
+            "",
+            "",
+        ]
+        out.extend(consts)
+        if ds.id == "custom" and t.custom_rows:  # your own rows: embedded, as for classification
+            out.append("CUSTOM_ROWS = " + repr(t.custom_rows) + "\n\n\n" + _CUSTOM_DATA_SRC.strip("\n"))
+        else:
+            out.append(_DATA_SRC.get(ds.id, _DATA_SRC["blobs"]).strip("\n"))
+        out.append("")
+        out.append("")
+        out.append(_generative_source())
+        out.append("")
+        out.append("")
+        out.append(inspect.getsource(split_parts).strip("\n"))
+        out.append("")
+        out.append("")
+        out.append(inspect.getsource(split_rows).strip("\n"))
+        out.append("")
+        out.append("")
+        out.append(_GEN_MAIN.strip("\n"))
     elif include_training:
         ds = get_dataset(spec.train.dataset)
         opt = "torch.optim.Adam" if spec.train.optimizer == "adam" else "torch.optim.SGD"
@@ -596,9 +831,13 @@ def generate_pytorch(spec: GraphSpec, include_training: bool = True) -> str:
         elif ds.id == "custom":
             comment = "# ---- no custom rows provided; using synthetic 'blobs' as a placeholder ----"
             data_block = _DATA_SRC["blobs"].strip("\n")
+        elif ds.id in _DATA_SRC:
+            what = "the same digits" if ds.id == "mnist" else "the same synthetic task"
+            comment = f"# ---- training on {what} the app used ({ds.id}) ----"
+            data_block = _DATA_SRC[ds.id].strip("\n")
         else:
-            comment = f"# ---- training on the same synthetic task the app used ({ds.id}) ----"
-            data_block = _DATA_SRC.get(ds.id, _DATA_SRC["blobs"]).strip("\n")
+            comment = f"# ---- {ds.id} is not built into the export: synthetic 'blobs' as a placeholder ----"
+            data_block = _DATA_SRC["blobs"].strip("\n")
         consts = [
             "",
             "",

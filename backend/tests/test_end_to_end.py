@@ -1665,7 +1665,7 @@ def test_connection_options_for_the_inspector():
     by = {o.transform: o for o in opts.options}
     assert "flatten" not in by and "image_to_sequence" not in by  # they need an image / a 2-D input
     assert by["to_image"].fits and by["to_image"].presets[0] == {"channels": 2, "height": 8, "width": 8}
-    assert not by["none"].fits and "3-D" in by["none"].note  # Direct: Conv2d needs C×H×W
+    assert not by["none"].fits and "picture (C×H×W" in by["none"].note  # Direct: Conv2d needs C×H×W
     assert not by["to_sequence"].fits and by["project"].learnable
     assert by["project"].presets[0] == {"shape": [2, 8, 8]}  # offered with auto's shape
     # into a merge node: Concat with the other input as it is
@@ -1674,7 +1674,7 @@ def test_connection_options_for_the_inspector():
     # a connection pinned to a bad transform reports the problem, and the options still come
     bad = GraphSpec.model_validate(_pinned(SCREENSHOT_GRAPH, "drop", "conv2d_12"))
     opts = mlc.connection_options(bad, "drop", "conv2d_12")
-    assert opts.current == "none" and opts.problem and "3-D" in opts.problem and opts.options
+    assert opts.current == "none" and opts.problem and "picture (C×H×W" in opts.problem and opts.options
     try:
         mlc.connection_options(spec, "in", "out")
         raise AssertionError("expected an error for a connection that does not exist")
@@ -2576,7 +2576,7 @@ def test_meta_builds_take_turns():
     seen = []
     real = B._build_model
 
-    def probe(spec):
+    def probe(spec, plan=None):
         free = []
 
         def try_lock():  # from another thread: is the lock free right now?
@@ -2589,7 +2589,7 @@ def test_meta_builds_take_turns():
         t.start()
         t.join()
         seen.append(free[0])
-        return real(spec)
+        return real(spec, plan)
 
     B._build_model = probe
     try:
@@ -3349,6 +3349,514 @@ def test_stage20_http():
           "gallery every epoch; /generate/images draws; /test measures the error")
 
 
+# =========================================================================== #
+# Stage 21 — clear errors with fixes
+# =========================================================================== #
+import ast  # noqa: E402
+import pickle  # noqa: E402
+
+from mlconstructor import error_codes as CAT  # noqa: E402
+from mlconstructor import diagnostics as DG  # noqa: E402
+from mlconstructor import fixes as FX  # noqa: E402
+from mlconstructor.shapes import GraphError  # noqa: E402
+
+
+def _g(nodes, edges, train=None, settings=None) -> GraphSpec:
+    return GraphSpec.model_validate({
+        "nodes": [{"id": i, "type": t, "params": p} for i, t, p in nodes],
+        "edges": edges, "train": train or {}, "edge_settings": settings or []})
+
+
+_I784 = ("in", "Input", {"shape": [784]})
+_IMG = ("in", "Input", {"shape": [1, 28, 28]})
+_OUT = ("out", "Output", {})
+_LM = [("in", "Input", {"shape": [16]}), ("emb", "Embedding", {"num_embeddings": 50, "embedding_dim": 32})]
+
+#: The test set of broken graphs (Stage 21's "done when"): name -> (graph, the code it must report, where:
+#: the node and/or the connection). A newcomer must repair every one with the offered buttons alone.
+BROKEN_GRAPHS = {
+    "no_input": (_g([("fc", "Linear", {"out_features": 10}), _OUT], [["fc", "out"]]), "no_input", None, None),
+    "several_outputs": (_g([_I784, ("a", "Linear", {"out_features": 10}), ("b", "Linear", {"out_features": 10}),
+                            _OUT, ("out2", "Output", {})], [["in", "a"], ["a", "out"], ["in", "b"], ["b", "out2"]]),
+                        "several_outputs", None, None),
+    "input_has_input": (_g([_I784, ("in2", "Input", {"shape": [784]}), ("fc", "Linear", {"out_features": 10}), _OUT],
+                           [["in2", "in"], ["in", "fc"], ["fc", "out"]]), "input_has_input", "in", None),
+    "no_connection": (_g([_I784, ("fc1", "Linear", {"out_features": 64}), ("act", "ReLU", {}),
+                          ("fc2", "Linear", {"out_features": 10}), _OUT],
+                         [["in", "fc1"], ["fc1", "act"], ["fc2", "out"]]), "no_connection", "fc2", None),
+    "too_many_inputs": (_g([_I784, ("a", "Linear", {"out_features": 32}), ("b", "Linear", {"out_features": 32}),
+                            ("c", "Linear", {"out_features": 10}), _OUT],
+                           [["in", "a"], ["in", "b"], ["a", "c"], ["b", "c"], ["c", "out"]]), "too_many_inputs", "c", None),
+    "merge_needs_two": (_g([_I784, ("fc", "Linear", {"out_features": 784}), ("act", "ReLU", {}), ("sum", "Add", {}),
+                            ("head", "Linear", {"out_features": 10}), _OUT],
+                           [["in", "fc"], ["fc", "act"], ["act", "sum"], ["sum", "head"], ["head", "out"]]),
+                        "merge_needs_two", "sum", None),
+    "ports_count": (_g([("lat", "Input", {"shape": [4, 8, 8], "name": "latent"}),
+                        ("t", "Input", {"shape": [1], "name": "timestep"}),
+                        ("txt", "Input", {"shape": [7, 32], "name": "text"}),
+                        ("unet", "UNet2D", {"block_channels": [32, 64], "layers_per_block": 1, "attention_levels": [0, 1],
+                                            "heads": 4, "groups": 8, "out_channels": 4}),
+                        ("out", "Output", {"any_shape": True})],
+                       [["lat", "unet"], ["t", "unet"], ["unet", "out"]]), "ports_count", "unet", None),
+    "port_order": (_g([("lat", "Input", {"shape": [4, 8, 8], "name": "latent"}),
+                       ("t", "Input", {"shape": [1], "name": "timestep"}),
+                       ("txt", "Input", {"shape": [7, 32], "name": "text"}),
+                       ("unet", "UNet2D", {"block_channels": [32, 64], "layers_per_block": 1, "attention_levels": [0, 1],
+                                           "heads": 4, "groups": 8, "out_channels": 4}),
+                       ("out", "Output", {"any_shape": True})],
+                      [["t", "unet"], ["lat", "unet"], ["txt", "unet"], ["unet", "out"]]), None, "unet", None),
+    "cycle": (_g([_I784, ("a", "Linear", {"out_features": 32}), ("b", "Linear", {"out_features": 32}), _OUT],
+                 [["in", "a"], ["a", "b"], ["b", "a"], ["b", "out"]]), "cycle", "a", ("b", "a")),
+    "duplicate_id": (_g([_I784, ("fc", "Linear", {"out_features": 10}), ("fc", "ReLU", {}), _OUT],
+                        [["in", "fc"], ["fc", "out"]]), "duplicate_id", "fc", None),
+    "unknown_node": (_g([_I784, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"], ["fc", "ghost"]]),
+                     "unknown_node", None, ("fc", "ghost")),
+    "pinned_transform": (_g([_IMG, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]],
+                            settings=[{"source": "in", "target": "fc", "transform": "none"}]),
+                         "pinned_transform", "fc", ("in", "fc")),
+    "bad_transform": (_g([_IMG, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]],
+                         settings=[{"source": "in", "target": "fc", "transform": "teleport"}]),
+                      "bad_transform", "fc", ("in", "fc")),
+    "no_auto_transform": (_g([("in", "Input", {"shape": [5]}), ("c", "Conv2d", {"out_channels": 4, "kernel_size": 9}),
+                              _OUT], [["in", "c"], ["c", "out"]]), "no_auto_transform", "c", ("in", "c")),
+    "merge_shapes": (_g([_I784, ("a", "Linear", {"out_features": 2000}), ("b", "Linear", {"out_features": 3000}),
+                         ("sum", "Add", {}), ("act", "ReLU", {}), ("fc", "Linear", {"out_features": 10}), _OUT],
+                        [["in", "a"], ["in", "b"], ["a", "sum"], ["b", "sum"], ["sum", "act"], ["act", "fc"],
+                         ["fc", "out"]]),
+                     "merge_shapes", "sum", None),  # a learned 3000 -> 2000 projection would be 6 million weights
+    "too_small": (_g([("in", "Input", {"shape": [1, 8, 8]}), ("c1", "Conv2d", {"out_channels": 8, "kernel_size": 5}),
+                      ("p1", "MaxPool2d", {}), ("c2", "Conv2d", {"out_channels": 8, "kernel_size": 3}),
+                      ("fc", "Linear", {"out_features": 10}), _OUT],
+                     [["in", "c1"], ["c1", "p1"], ["p1", "c2"], ["c2", "fc"], ["fc", "out"]]), "too_small", "c2", None),
+    "wrong_shape": (_g([("in", "Input", {"shape": [3, 28, 56]}), ("pe", "PatchEmbed", {"patch_size": 4, "dim": 32}),
+                        ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "pe"], ["pe", "fc"], ["fc", "out"]]),
+                    "wrong_shape", "pe", None),
+    "not_divisible": (_g([("in", "Input", {"shape": [10, 30]}), ("att", "MultiheadAttention", {"num_heads": 4}),
+                          ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "att"], ["att", "fc"], ["fc", "out"]]),
+                      "not_divisible", "att", None),
+    "param_range": (_g([_I784, ("blk", "Repeat", {"repeat": 0, "layers": [{"type": "Linear", "params": {"out_features": 784}}]}),
+                        ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "blk"], ["blk", "fc"], ["fc", "out"]]),
+                    "param_range", "blk", None),
+    "param_choice": (_g([("in", "Input", {"shape": [8, 32]}), ("enc", "TransformerEncoderLayer", {"nhead": 4, "activation": "swish"}),
+                         ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "enc"], ["enc", "fc"], ["fc", "out"]]),
+                     "param_choice", "enc", None),
+    "param_list": (_g([("lat", "Input", {"shape": [4, 8, 8]}), ("t", "Input", {"shape": [1]}), ("txt", "Input", {"shape": [7, 32]}),
+                       ("unet", "UNet2D", {"block_channels": "wide", "groups": 8}), ("out", "Output", {"any_shape": True})],
+                      [["lat", "unet"], ["t", "unet"], ["txt", "unet"], ["unet", "out"]]), "param_list", "unet", None),
+    "settings_conflict": (_g(_LM + [("att", "GQAttention", {"heads": 4, "kv_heads": 2, "head_dim": 7}), ("head", "LMHead", {"vocab": 50}),
+                                    ("out", "Output", {"per_token": True})],
+                             [["in", "emb"], ["emb", "att"], ["att", "head"], ["head", "out"]],
+                             train={"dataset": "text", "text": "abc " * 400}),
+                          "settings_conflict", "att", None),
+    "input_shape": (_g([("in", "Input", {"shape": [0, 28]}), ("fc", "Linear", {"out_features": 10}), _OUT],
+                       [["in", "fc"], ["fc", "out"]]), "input_shape", "in", None),
+    "block_empty": (_g([_I784, ("blk", "Repeat", {"repeat": 2, "layers": []}), ("fc", "Linear", {"out_features": 10}), _OUT],
+                       [["in", "blk"], ["blk", "fc"], ["fc", "out"]]), "block_empty", "blk", None),
+    "block_bad_inner": (_g([_I784, ("blk", "Repeat", {"repeat": 2, "layers": [
+        {"type": "Linear", "params": {"out_features": 784}}, {"type": "Output", "params": {}}]}),
+        ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "blk"], ["blk", "fc"], ["fc", "out"]]),
+        "block_bad_inner", "blk", None),
+    "inner_layer": (_g([_IMG, ("blk", "Repeat", {"repeat": 1, "layers": [
+        {"type": "Conv2d", "params": {"out_channels": 4, "kernel_size": 3, "padding": 1}},
+        {"type": "GroupNorm", "params": {"num_groups": 3}}]}),
+        ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "blk"], ["blk", "fc"], ["fc", "out"]]),
+        "not_divisible", "blk", None),
+    "inner_settings": (_g(_LM + [("blk", "Repeat", {"repeat": 2, "layers": [
+        {"type": "GQAttention", "params": {"heads": 4, "kv_heads": 2, "head_dim": 7}}]}),
+        ("head", "LMHead", {"vocab": 50}), ("out", "Output", {"per_token": True})],
+        [["in", "emb"], ["emb", "blk"], ["blk", "head"], ["head", "out"]], train={"dataset": "text", "text": "abc " * 400}),
+        "settings_conflict", "blk", None),
+    "block_needs_input": (_g([("tok", "Input", {"shape": [16, 32]}), ("blk", "Repeat", {"repeat": 2, "layers": [
+        {"type": "DiTBlock", "params": {"heads": 4}}]}), ("fc", "Linear", {"out_features": 10}), _OUT],
+        [["tok", "blk"], ["blk", "fc"], ["fc", "out"]]), "block_needs_input", "blk", None),
+    "unknown_layer": (_g([_I784, ("q", "QuantumLayer", {}), ("fc", "Linear", {"out_features": 10}), _OUT],
+                         [["in", "q"], ["q", "fc"], ["fc", "out"]]), "unknown_layer", "q", None),
+    "tie_no_embedding": (_g([("in", "Input", {"shape": [16, 32]}), ("head", "LMHead", {"vocab": 50, "tie_embedding": True}),
+                             ("out", "Output", {"per_token": True})], [["in", "head"], ["head", "out"]]),
+                         "tie_no_embedding", "head", None),
+    "tie_size": (_g(_LM + [("head", "LMHead", {"vocab": 60, "tie_embedding": True}), ("out", "Output", {"per_token": True})],
+                    [["in", "emb"], ["emb", "head"], ["head", "out"]], train={"dataset": "text", "text": "abc " * 400}),
+                 "tie_size", "head", None),
+    # the data would refuse the network
+    "dataset_shape": (_g([_I784, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]],
+                         train={"dataset": "mnist"}), "dataset_shape", "in", None),
+    "dataset_classes": (_g([_IMG, ("fc", "Linear", {"out_features": 5}), _OUT], [["in", "fc"], ["fc", "out"]],
+                           train={"dataset": "mnist"}), "dataset_classes", "fc", None),
+    "dataset_needs_tokens": (_g([_IMG, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]],
+                                train={"dataset": "tokens"}), "dataset_needs_tokens", "in", None),
+    "tokens_too_short": (_g([("in", "Input", {"shape": [2]}), ("emb", "Embedding", {"num_embeddings": 8, "embedding_dim": 8}),
+                             ("fc", "Linear", {"out_features": 8}), _OUT], [["in", "emb"], ["emb", "fc"], ["fc", "out"]],
+                            train={"dataset": "tokens"}), "tokens_too_short", "in", None),
+    "text_too_short": (_g(_LM + [("head", "LMHead", {"vocab": 50}), ("out", "Output", {"per_token": True})],
+                          [["in", "emb"], ["emb", "head"], ["head", "out"]], train={"dataset": "text", "text": "hello world " * 8}),
+                       "text_too_short", "in", None),
+    "custom_row_length": (_g([("in", "Input", {"shape": [10]}), ("fc", "Linear", {"out_features": 3}), _OUT],
+                             [["in", "fc"], ["fc", "out"]],
+                             train={"dataset": "custom", "custom_rows": [[0.1, 0.2, 0.3, 0], [0.5, 0.1, 0.9, 1]] * 20}),
+                          "custom_row_length", "in", None),
+    "custom_label_range": (_g([("in", "Input", {"shape": [3]}), ("fc", "Linear", {"out_features": 3}), _OUT],
+                              [["in", "fc"], ["fc", "out"]],
+                              train={"dataset": "custom", "custom_rows": [[0.1, 0.2, 0.3, 0], [0.5, 0.1, 0.9, 7]] * 20}),
+                           "custom_label_range", "fc", None),
+    "unknown_dataset": (_g([_I784, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]],
+                           train={"dataset": "imagenet-22k"}), "unknown_dataset", None, None),
+    "every_position": (_g(_LM + [("head", "LMHead", {"vocab": 50}), ("out", "Output", {"per_token": True})],
+                          [["in", "emb"], ["emb", "head"], ["head", "out"]]), "every_position", "out", None),
+    "class_rows": (None, "class_rows", "emb", None),  # Digit diffusion with too few class rows (made below)
+    # warnings: it builds, but is probably not what was meant
+    "dropout_high": (_g([_I784, ("fc", "Linear", {"out_features": 64}), ("drop", "Dropout", {"p": 0.9}),
+                         ("act", "ReLU", {}), ("head", "Linear", {"out_features": 10}), _OUT],
+                        [["in", "fc"], ["fc", "drop"], ["drop", "act"], ["act", "head"], ["head", "out"]]),
+                     "dropout_high", "drop", None),
+    "tiny_hidden": (_g([_I784, ("fc", "Linear", {"out_features": 2}), ("act", "ReLU", {}),
+                        ("head", "Linear", {"out_features": 10}), _OUT],
+                       [["in", "fc"], ["fc", "act"], ["act", "head"], ["head", "out"]]), "tiny_hidden", "fc", None),
+    "unused_branch": (_g([_I784, ("fc", "Linear", {"out_features": 10}), ("side", "Linear", {"out_features": 5}),
+                          ("side2", "ReLU", {}), _OUT], [["in", "fc"], ["fc", "out"], ["in", "side"], ["side", "side2"]]),
+                      "unused_branch", "side", None),
+    "after_output": (_g([_I784, ("fc", "Linear", {"out_features": 64}), ("act", "ReLU", {}), _OUT,
+                         ("head", "Linear", {"out_features": 10})],
+                        [["in", "fc"], ["fc", "act"], ["act", "out"], ["out", "head"]]), "after_output", "out", None),
+    "softmax_before_loss": (_g([_I784, ("fc", "Linear", {"out_features": 10}), ("sm", "Softmax", {}), _OUT],
+                               [["in", "fc"], ["fc", "sm"], ["sm", "out"]]), "softmax_before_loss", "sm", None),
+    "linear_linear": (_g([_I784, ("a", "Linear", {"out_features": 64}), ("b", "Linear", {"out_features": 10}), _OUT],
+                         [["in", "a"], ["a", "b"], ["b", "out"]]), "linear_linear", "b", ("a", "b")),
+    "no_output_node": (_g([_I784, ("fc", "Linear", {"out_features": 10})], [["in", "fc"]]), "no_output_node", "fc", None),
+    "lr_extreme": (_g([_I784, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]],
+                      train={"lr": 5.0}), "lr_extreme", None, None),
+    "batch_too_big": (_g([_I784, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]],
+                         train={"batch_size": 2048, "samples": 512}), "batch_too_big", None, None),
+}
+
+
+def _broken(name: str) -> GraphSpec:
+    spec = BROKEN_GRAPHS[name][0]
+    if spec is None and name == "class_rows":
+        spec = get_architecture("digit_diffusion")
+        for n in spec.nodes:
+            if n.type == "Embedding":
+                n.params["num_embeddings"] = 5  # MNIST has 10 classes
+    return spec
+
+
+def _class_rows_node() -> str:
+    spec = get_architecture("digit_diffusion")
+    return next(n.id for n in spec.nodes if n.type == "Embedding")
+
+
+def _graph_only(f) -> bool:
+    return all(o["op"] != "ui" for o in (f["ops"] if isinstance(f, dict) else [o for o in f.ops]))
+
+
+def _novice(spec: GraphSpec, clicks: int = 4):
+    """A newcomer who reads nothing but the buttons: press the first button that changes
+    the graph, on the first problem that has one, until nothing is left."""
+    pressed = []
+    for _ in range(clicks):
+        d = mlc.diagnose(spec)
+        items = d.problems + d.warnings
+        if not items:
+            return spec, pressed, d
+        target = next((p for p in items if any(_graph_only(f.model_dump()) for f in p.fixes)), None)
+        assert target is not None, ("no button to press", [(p.code, [f.label for f in p.fixes]) for p in items])
+        fix = next(f for f in target.fixes if _graph_only(f.model_dump()))
+        pressed.append(f"{target.code}: {fix.label}")
+        spec = mlc.apply_fix(spec, fix.model_dump())
+    return spec, pressed, mlc.diagnose(spec)
+
+
+def test_every_broken_graph_is_explained_and_repaired():
+    """Stage 21's "done when": each graph of the test set reports what is wrong where it
+    is, in plain words, with fixes — and a newcomer repairs it with the buttons alone."""
+    for name, (_spec, code, node, edge) in BROKEN_GRAPHS.items():
+        spec = _broken(name)
+        d = mlc.diagnose(spec)
+        items = d.problems + d.warnings
+        if code is not None:
+            if name == "class_rows":
+                node = _class_rows_node()
+            hit = [p for p in items if p.code == code]
+            assert hit, (name, [(p.code, p.message) for p in items])
+            p = hit[0]
+            assert (p.node_id == node or node is None) and (edge is None or tuple(p.edge or ()) == edge), (name, p)
+            assert p.title and p.why and p.todo and p.message, (name, p)
+            assert p.title == CAT.CATALOG[code].title and p.severity == CAT.CATALOG[code].severity, (name, p)
+            assert p.fixes, (name, "no fix offered", p)
+            for term in CAT.terms_in(p.why + " " + p.todo):
+                assert term in p.terms, (name, term)
+            if name.startswith("inner_"):  # a layer inside a block: the block is pointed at, its fixes edit that layer
+                assert p.inner is not None and "__inner" not in p.message and "__inner" not in json.dumps(
+                    [f.model_dump() for f in p.fixes]), (name, p)
+                assert all(o["node"] == "blk" for f in p.fixes for o in f.ops), (name, p.fixes)
+        fixed, pressed, final = _novice(spec)
+        assert not final.problems and not final.warnings and final.build is not None, (name, pressed, final.problems)
+        assert len(pressed) <= 3, (name, pressed)
+        print(f"[stage21] {name}: {code} -> {' | '.join(pressed)}")
+    # "port_order": a several-input layer wired out of order is reconnected in the right order on one click
+    d = mlc.diagnose(_broken("port_order"))
+    fix = d.problems[0].fixes[0]
+    assert fix.ops[0]["op"] == "reorder_inputs" and fix.ops[0]["sources"] == ["lat", "t", "txt"], fix
+    print(f"[stage21] {len(BROKEN_GRAPHS)} broken graphs explained and repaired with the buttons alone")
+
+
+def test_every_code_is_explained_with_a_fix():
+    """Every code of the catalogue has a title, why and what to do in plain words, its
+    glossary words defined, and at least one fix — offered for a real case."""
+    for e in CAT.CATALOG.values():
+        assert e.title and e.why and e.todo and e.category in CAT.CATEGORIES and e.severity in ("error", "warning"), e
+        assert len(e.title) <= 80 and "Error" not in e.title.split()[0], e.title
+        for term in CAT.terms_in(e.why + " " + e.todo):
+            assert term in CAT.GLOSSARY, (e.code, term)
+    fixes: dict[str, list] = {}
+    for name in BROKEN_GRAPHS:
+        d = mlc.diagnose(_broken(name))
+        for p in d.problems + d.warnings + ([d.train_issue] if d.train_issue else []):
+            fixes.setdefault(p.code, []).extend(p.fixes)
+    # codes met at training, testing, drawing or loading weights: raised for real where it is cheap
+    mlp = get_architecture("mlp")
+    clip = get_architecture("clip")
+    raised = []
+    for call in (
+        lambda: mlc.check_trainable(get_architecture("qwen3_real")),           # too_big
+        lambda: mlc.check_trainable(clip),                                      # task_inputs
+        lambda: mlc.read_weights(b"not a weights file"),                         # weights_file
+        lambda: mlc.read_weights(_pickled_object()),                             # weights_unsafe
+        lambda: mlc.read_weights(_newer_weights()),                              # weights_newer
+        lambda: W.fit_state_dict(torch.nn.Linear(4, 3), {"weight": torch.zeros(5, 4), "bias": torch.zeros(5)}),
+        lambda: mlc.run_path("0123456789abcdef"),                                # run_missing
+    ):
+        try:
+            call()
+        except (GraphError, KeyError) as exc:
+            raised.append(exc)
+    assert {getattr(e, "code", None) for e in raised} >= {
+        "too_big", "task_inputs", "weights_file", "weights_unsafe", "weights_newer", "weights_mismatch", "run_missing"}, \
+        [getattr(e, "code", None) for e in raised]
+    for exc in raised:
+        p = mlc.describe_error(exc, mlp)
+        fixes.setdefault(p["code"], []).extend(p["fixes"])
+    # the rest: the very error the code raises, with the facts its fixes need
+    synthetic = {
+        "wrong_rank": (lambda: LinearNode("fc", {"out_features": 10}).out_shape((1, 28, 28)),
+                       _g([_IMG, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]])),
+        "transform_param": (None, _g([_IMG, ("fc", "Linear", {"out_features": 10}), _OUT], [["in", "fc"], ["fc", "out"]],
+                                     settings=[{"source": "in", "target": "fc", "transform": "reshape",
+                                                "params": {"shape": [5]}}])),
+    }
+    for code, (call, spec) in synthetic.items():
+        if call is not None:
+            try:
+                call()
+            except GraphError as exc:
+                assert exc.code == code, exc
+                fixes.setdefault(code, []).extend(mlc.describe_error(exc, spec)["fixes"])
+        else:
+            exc = GraphError("the connection's setting does not fit", code=code, edge=("in", "fc"), node_id="fc")
+            fixes.setdefault(code, []).extend(mlc.describe_error(exc, spec)["fixes"])
+    for code, facts, spec in (
+        ("output_not_classes", {}, _g([_IMG, ("c", "Conv2d", {}), ("out", "Output", {"any_shape": True})],
+                                      [["in", "c"], ["c", "out"]])),
+        ("text_missing", {}, mlp), ("custom_missing", {}, mlp), ("custom_too_many", {}, mlp),
+        ("custom_value", {}, mlp), ("custom_label", {}, mlp), ("task_output_shape", {}, mlp),
+        ("task_needs_any_shape", {}, mlp), ("task_any_shape_on", {}, mlp), ("no_gpu", {}, mlp),
+        ("no_test_part", {}, mlp), ("few_rows", {}, mlp), ("draw_needs_generative", {}, mlp),
+        ("draw_class", {}, mlp), ("generate_needs_text", {}, mlp), ("generate_needs_lm", {}, mlp),
+    ):
+        p = mlc.describe_error(GraphError("x", code=code, facts=facts), spec)
+        fixes.setdefault(code, []).extend(p["fixes"])
+    missing = [c for c in CAT.CATALOG if not fixes.get(c)]
+    assert not missing, f"codes without a fix: {missing}"
+    print(f"[stage21] all {len(CAT.CATALOG)} codes explained in plain words, each with a fix "
+          f"({sum(len(v) for v in fixes.values())} fixes offered)")
+
+
+def _pickled_object() -> bytes:
+    buf = io.BytesIO()
+    torch.save({"weights": torch.zeros(2), "thing": ValueError("not a tensor")}, buf)
+    return buf.getvalue()
+
+
+def _newer_weights() -> bytes:
+    buf = io.BytesIO()
+    torch.save({"format": W.WEIGHTS_FORMAT, "version": W.WEIGHTS_VERSION + 1, "state_dict": {"w": torch.zeros(1)}}, buf)
+    return buf.getvalue()
+
+
+def test_every_error_carries_a_code():
+    """No error the user can meet is raised without its catalogue code: every
+    ``ShapeError(...)`` / ``GraphError(...)`` in the package names one, and every code
+    named exists in the catalogue."""
+    root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mlconstructor")
+    named: set[str] = set()
+    bare: list[str] = []
+    for dirpath, _dirs, files in os.walk(root):
+        for fname in files:
+            if not fname.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, fname)
+            tree = ast.parse(open(path, encoding="utf-8").read())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = node.func.id if isinstance(node.func, ast.Name) else (
+                    node.func.attr if isinstance(node.func, ast.Attribute) else "")
+                kw = {k.arg: k.value for k in node.keywords}
+                if fn in ("ShapeError", "GraphError", "_fail", "_bad", "TaskPlan") and "code" in kw and isinstance(
+                        kw["code"], ast.Constant) and isinstance(kw["code"].value, str):
+                    named.add(kw["code"].value)
+                if fn in ("ShapeError", "GraphError") and "code" not in kw:
+                    bare.append(f"{os.path.relpath(path, root)}:{node.lineno}")
+    assert not bare, f"errors raised without a code: {bare}"
+    named -= {"other"}
+    unknown = sorted(c for c in named if c not in CAT.CATALOG)
+    assert not unknown, f"codes not in the catalogue: {unknown}"
+    print(f"[stage21] every error names its code ({len(named)} codes raised, all in the catalogue)")
+
+
+def _fix_cases() -> list[dict]:
+    """The cases the editor's fixes.ts is checked against: a broken graph, a fix, and the
+    graph after it — written by the backend (frontend/src/app/core/fix-cases.json)."""
+    cases = []
+    for name in BROKEN_GRAPHS:
+        spec = _broken(name)
+        if name == "class_rows":
+            continue  # a big template: the others cover its edits
+        d = mlc.diagnose(spec)
+        for p in d.problems + d.warnings:
+            for f in [f.model_dump() for f in p.fixes if _graph_only(f.model_dump())][:2]:
+                after = mlc.apply_fix(spec, f)
+                train_set = {o["name"]: o["value"] for o in f["ops"] if o["op"] == "set_train"}
+                cases.append({
+                    "name": f"{name}: {f['label']}",
+                    "before": {"nodes": [n.model_dump() for n in spec.nodes], "edges": spec.edges,
+                               "edge_settings": [s.model_dump() for s in spec.edge_settings]},
+                    "ops": f["ops"],
+                    "after": {"nodes": [n.model_dump() for n in after.nodes], "edges": after.edges,
+                              "edge_settings": [s.model_dump() for s in after.edge_settings], "train": train_set},
+                })
+    return cases
+
+
+FIX_CASES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                              "frontend", "src", "app", "core", "fix-cases.json")
+
+
+def test_fixes_match_the_editor():
+    """The editor applies a fix's edits itself (fixes.ts). The cases it is tested against
+    are the backend's own: the file holds exactly what apply_fix makes of each."""
+    with open(FIX_CASES_PATH, encoding="utf-8") as f:
+        stored = json.load(f)
+    now = json.loads(json.dumps(_fix_cases()))
+    assert stored == now, "fix-cases.json is out of date: regenerate it from _fix_cases()"
+    kinds = {o["op"] for c in stored for o in c["ops"]}
+    assert kinds >= {"set_param", "set_inner_param", "add_inner", "remove_inner", "set_transform", "insert_node",
+                     "add_node", "remove_node", "add_edge", "remove_edge", "reorder_inputs", "rename_node",
+                     "set_train"}, kinds
+    # a fix applies to a copy: the graph passed in is left as it was
+    spec = _broken("too_many_inputs")
+    before = spec.model_dump()
+    mlc.apply_fix(spec, mlc.diagnose(spec).problems[0].fixes[0].model_dump())
+    assert spec.model_dump() == before
+    print(f"[stage21] {len(stored)} fix cases shared with the editor, every edit kind among them")
+
+
+def test_library_is_free_of_problems_and_quick_to_check():
+    """Every template of the library — the real-size flagships too — builds without a
+    problem or a warning; the live check stays quick (the picture foldings of Stage 14
+    are now only worked out when needed)."""
+    import time as _t
+
+    slow = []
+    for info in list_architectures():
+        for aid in [info.id] + ([info.real_id] if info.real_id else []):
+            if aid == "deepseek_v3_real":
+                continue  # 671B on the meta device takes seconds: sized elsewhere
+            t0 = _t.time()
+            d = mlc.diagnose(get_architecture(aid))
+            took = _t.time() - t0
+            assert not d.problems and not d.warnings and d.build is not None, (aid, d.problems, d.warnings)
+            if took > 4.0:
+                slow.append((aid, round(took, 2)))
+    assert not slow, slow
+    # the quick folding gives the very same pictures as before
+    from math import isqrt
+    from mlconstructor.connections import _image_factorizations
+
+    def old(n, limit=8):
+        found = []
+        for c in range(1, n + 1):
+            if n % c:
+                continue
+            hw = n // c
+            for h in range(2, isqrt(hw) + 1):
+                if hw % h == 0 and hw // h >= 2:
+                    found.append((c, h, hw // h))
+        found.sort(key=lambda t: (t[1] < 4, t[1] != t[2], t[2] / t[1], t[0], -t[1]))
+        return found[:limit]
+
+    for n in list(range(1, 1500)) + [3072, 12288, 50176, 65536, 99991]:
+        assert _image_factorizations(n) == old(n), n
+    print("[stage21] the whole library checks clean, each real-size flagship in a few seconds at most")
+
+
+def test_diagnosis_reports_everything_at_once():
+    """Several problems are reported together (not just the first), shapes worked out
+    before a problem are kept, warnings come with the build, a train issue with its fix."""
+    spec = _g([_I784, ("a", "Linear", {"out_features": 30}), ("att", "MultiheadAttention", {"num_heads": 4}),
+               ("b", "Linear", {"out_features": 10}), ("lone", "ReLU", {}), _OUT],
+              [["in", "a"], ["a", "out"], ["b", "out"]])
+    d = mlc.diagnose(spec)
+    codes = sorted(p.code for p in d.problems)
+    assert codes == ["no_connection", "no_connection", "no_connection", "too_many_inputs"], codes
+    assert d.shapes["in"] == [784] and d.shapes["a"] == [30] and d.build is None, d.shapes
+    # a branch cut off by a broken connection is the error's consequence: no "leads nowhere" warning on top
+    cut = mlc.diagnose(_broken("no_connection"))
+    assert [p.code for p in cut.problems] == ["no_connection"] and not cut.warnings, cut.warnings
+    # a working graph: its build, as /build gives it
+    ok = mlc.diagnose(get_architecture("mlp"))
+    assert ok.ok and ok.build.total_params > 0 and ok.build.task == "classification" and ok.build.trainable
+    # CLIP's mini builds but cannot be trained here: the note comes with "Run once instead"
+    clip = mlc.diagnose(get_architecture("clip"))
+    assert clip.ok and clip.train_issue.code == "task_inputs" and clip.train_issue.fixes[0].ops[0]["action"] == "run_once"
+    # a fix that would not remove the problem is never offered: each one was tried on a copy
+    for name in ("no_connection", "merge_shapes", "too_small", "not_divisible"):
+        sp = _broken(name)
+        prob = next(p for p in mlc.diagnose(sp).problems if p.code == BROKEN_GRAPHS[name][1])
+        for f in prob.fixes:
+            after = mlc.diagnose(mlc.apply_fix(sp, f.model_dump()))
+            assert not any(DG._key(GraphError("", code=p.code, node_id=p.node_id, edge=tuple(p.edge) if p.edge else None))
+                           == DG._key(GraphError("", code=prob.code, node_id=prob.node_id,
+                                                 edge=tuple(prob.edge) if prob.edge else None))
+                           for p in after.problems), (name, f.label)
+    print("[stage21] every problem at once; shapes before a problem kept; fixes all tried first")
+
+
+def test_stage21_http():
+    st, health = _asgi("GET", "/health")
+    assert st == 200 and health["api"] >= 21, health
+    st, d = _post("/diagnose", _broken("too_small").model_dump())
+    assert st == 200 and d["problems"][0]["code"] == "too_small" and d["problems"][0]["fixes"], d
+    assert d["problems"][0]["fixes"][0]["ops"][0]["op"] == "set_param" and d["build"] is None, d
+    st, d = _post("/diagnose", get_architecture("mlp").model_dump())
+    assert st == 200 and d["ok"] and d["build"]["total_params"] > 0, d
+    st, cat = _asgi("GET", "/errors")
+    assert st == 200 and {e["code"] for e in cat["entries"]} == set(CAT.CATALOG), cat.keys()
+    assert "C×H×W" in cat["glossary"] and cat["categories"]["wiring"] == "Connections", cat["categories"]
+    # /build: the 422 keeps its message, and explains it with its fixes
+    st, res = _post("/build", _broken("not_divisible").model_dump())
+    err = res["error"]
+    assert st == 422 and isinstance(res["detail"], str) and err["code"] == "not_divisible", res
+    assert err["node_id"] == "att" and err["title"] and err["why"] and "hint" in err and err["fixes"], err
+    # training a real-size flagship: too big, with the way out
+    st, res = _post("/train/stream", get_architecture("qwen3_real").model_dump())
+    assert st == 422 and res["error"]["code"] == "too_big" and res["error"]["fixes"][0]["ops"][0]["action"] == "open_library", res
+    # weights that are gone: a 404 that says what to do
+    st, res = _post("/test", {"spec": get_architecture("mlp").model_dump(), "run_id": "0123456789abcdef"})
+    assert st == 404 and "detail" in res and res["error"]["code"] == "run_missing", res
+    assert [o["action"] for f in res["error"]["fixes"] for o in f["ops"]] == ["train", "open_weights"], res
+    print("[stage21] HTTP: /diagnose, /errors, explained 422s and 404s")
+
+
 if __name__ == "__main__":
     test_layer_catalog()
     test_build_summary_shapes()
@@ -3465,8 +3973,15 @@ if __name__ == "__main__":
     test_generative_export_trains_like_the_app()
     test_mnist_export_reads_the_same_digits()
     test_stage20_http()
+    test_every_broken_graph_is_explained_and_repaired()
+    test_every_code_is_explained_with_a_fix()
+    test_every_error_carries_a_code()
+    test_fixes_match_the_editor()
+    test_library_is_free_of_problems_and_quick_to_check()
+    test_diagnosis_reports_everything_at_once()
+    test_stage21_http()
     print(
         "\nALL CHECKS PASSED (v1 + Stage 1 + Stage 2 + Stage 3 + Stage 4 + Stage 5 + Stage 6 "
         "+ Stage 7 + Stage 8 + Stage 9 + Stage 10 offline + Stage 11 + Stage 12 + Stage 13 + Stage 14 "
-        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18 + Stage 19 + Stage 20)"
+        "+ Stage 15 + Stage 16 + Stage 17 + Stage 18 + Stage 19 + Stage 20 + Stage 21)"
     )

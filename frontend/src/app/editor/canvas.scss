@@ -1,0 +1,263 @@
+// Stage 22 — the canvas: nodes by family, wires with the data flowing, live training.
+// Colours: tokens only (src/theme/tokens.css).
+
+.canvas-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background-color: var(--bg);
+  // fine dots every 22 px, a bolder one every fifth (moved and scaled with the view by the page)
+  background-image:
+    radial-gradient(circle, var(--bg-dot-2) 1.3px, transparent 1.5px),
+    radial-gradient(circle, var(--bg-dot) 1px, transparent 1.2px);
+  background-size:
+    110px 110px,
+    22px 22px;
+}
+.canvas-wrap:active {
+  cursor: grabbing;
+}
+.canvas-wrap.drop {
+  outline: 3px dashed var(--accent);
+  outline-offset: -8px;
+}
+.canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+// ----------------------------------------------------------------- the wires
+.edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.eg .edge {
+  fill: none;
+  stroke: color-mix(in srgb, var(--c) 55%, var(--border-2));
+  stroke-width: 2;
+  transition:
+    stroke var(--dur-2) var(--ease),
+    stroke-width var(--dur-2) var(--ease);
+}
+.eg.lit .edge {
+  stroke: var(--c);
+  stroke-width: 2.6;
+}
+.eg.sel .edge {
+  stroke: var(--c);
+  stroke-width: 3.4;
+}
+// the data flowing: dots running along the wire. Only where it is shown, and in steps (about
+// 20 redraws a second, not one per screen frame): the browser shares the processor with training.
+.eg .flow {
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-dasharray: 0.1 13;
+  animation: mlc-flow 1.1s steps(22) infinite;
+}
+// while training the wires glow still (drawn once): the wave on the nodes carries the motion
+.canvas-wrap.training .eg .edge {
+  stroke: color-mix(in srgb, var(--glow-fwd) 60%, var(--c));
+  stroke-width: 2.4;
+  transition: none; // no 200-ms fade: it would redraw every wire at the screen's rate as a run starts
+}
+@keyframes mlc-flow {
+  to {
+    stroke-dashoffset: -26.2;
+  }
+}
+.edges .edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.eg.problem .edge {
+  stroke: var(--danger);
+  stroke-dasharray: 6 4;
+}
+.eg.warn .edge {
+  stroke: var(--warning);
+  stroke-dasharray: 3 4;
+}
+.eg.focus .edge {
+  stroke-width: 4;
+  animation: problem-pulse 1.1s var(--ease) 3;
+}
+
+// the shape on a wire (and its transform, when it has one)
+.edge-badge {
+  position: absolute;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--c) 40%, var(--border));
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: var(--fs-2xs);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  user-select: none;
+  animation: mlc-fade-in var(--dur-2) var(--ease);
+  transition:
+    border-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease),
+    box-shadow var(--dur-2) var(--ease);
+}
+.eb-tf {
+  color: var(--c);
+  font-weight: var(--fw-semi);
+}
+.edge-badge.auto .eb-tf {
+  font-style: italic;
+}
+.eb-shape {
+  font-family: var(--font-mono);
+}
+.edge-badge.lit {
+  border-color: var(--c);
+  color: var(--text);
+}
+.edge-badge.sel {
+  border-color: var(--c);
+  color: var(--text);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 28%, transparent);
+}
+.edge-badge.problem {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.edge-badge.warn {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+// ------------------------------------------------------- canvas overlays
+// the overlays are near-opaque, with no backdrop blur and no fade-in: the pass legend changes 20 times
+// a second while a run streams, and a blurred backdrop would be blurred anew at each change
+.viewbar,
+.fam-legend,
+.pass-legend {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-1) 94%, transparent);
+  cursor: default;
+}
+.viewbar {
+  top: 12px;
+  right: 12px;
+  gap: 6px;
+  padding: 4px;
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+.viewbar .seg button {
+  width: 30px;
+  flex: 0 0 auto;
+}
+.motion-btn.off {
+  color: var(--text-3);
+}
+.motion-btn.off .ico {
+  opacity: 0.45;
+}
+.zoom {
+  min-width: 40px;
+  padding-right: 4px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  text-align: right;
+}
+.fam-legend,
+.pass-legend {
+  right: 12px;
+  bottom: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 12px;
+  max-width: min(560px, 46%);
+  padding: 6px 10px;
+  border-radius: var(--r-md);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  box-shadow: var(--shadow-1);
+}
+.fam-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.fam-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fam);
+}
+.pass-legend {
+  gap: 6px;
+}
+.pl {
+  width: 10px;
+  height: 10px;
+  margin-left: 4px;
+  border-radius: 50%;
+}
+.pl.fwd {
+  background: var(--glow-fwd);
+  box-shadow: 0 0 8px var(--glow-fwd);
+}
+.pl.bwd {
+  background: var(--glow-bwd);
+  box-shadow: 0 0 8px var(--glow-bwd);
+}
+.pl-step {
+  margin-left: 8px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+}
+
+.hint,
+.drop-hint {
+  position: absolute;
+  left: 50%;
+  z-index: 6;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-2);
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: mlc-slide-up var(--dur-2) var(--ease-out);
+}
+.hint {
+  top: 12px;
+}
+.drop-hint {
+  top: 50%;
+  padding: 14px 20px;
+  font-size: var(--fs-base);
+}

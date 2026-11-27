@@ -1,361 +1,264 @@
-// Stage 15 — honest accuracy: held-out (validation) numbers, the verdict, split rows.
+// Training results (Stages 15–20), on the design system (Stage 22): tokens only.
 
 // The headline number: green only when it generalises, amber when it over- or underfits.
-.kv-main {
+.result .kv-main {
   margin-top: 4px;
-  font-size: 15px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  color: var(--text);
+  font-size: var(--fs-base);
   b {
-    font-size: 17px;
+    font-size: var(--fs-xl);
+    font-weight: var(--fw-bold);
   }
-  &.kv-good b {
-    color: var(--ion-color-success-shade, #28ba62);
+  &.kv-good {
+    border-color: color-mix(in srgb, var(--success) 40%, transparent);
+    background: var(--success-soft);
+    b {
+      color: var(--success);
+    }
   }
-  &.kv-bad b {
-    color: var(--ion-color-warning-shade, #e0ac08);
+  &.kv-bad {
+    border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+    background: var(--warning-soft);
+    b {
+      color: var(--warning);
+    }
   }
+}
+.kv-small {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
 }
 
 // With a held-out curve the training curve turns grey and dashed; alone it stays as it was.
 .spark.acc.has-val .train-line {
-  stroke: var(--ion-color-medium, #92949c);
+  stroke: var(--text-3);
   stroke-dasharray: 4 3;
 }
 .spark.acc .val-line {
-  stroke: var(--ion-color-success, #2dd36f);
+  stroke: var(--success);
   stroke-width: 2;
 }
-
 .acc-legend {
   .lg-val {
-    color: var(--ion-color-success, #2dd36f);
+    color: var(--success);
   }
   .lg-train {
-    opacity: 0.75;
+    color: var(--text-3);
   }
 }
 
 .fit,
 .train-warn {
-  margin: 6px 0;
-  padding: 7px 10px;
-  border-radius: 8px;
-  font-size: 12.5px;
-  line-height: 1.4;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warning);
+  border-radius: var(--r-md);
+  background: var(--warning-soft);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
 }
-
-.fit {
-  border-left: 3px solid var(--ion-color-warning, #ffc409);
-  background: rgba(255, 196, 9, 0.1);
+.fit .fit-i {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--warning);
+}
+.fit.fit-good {
+  border-left-color: var(--success);
+  background: var(--success-soft);
   .fit-i {
-    margin-right: 6px;
-    font-weight: 700;
-  }
-  &.fit-good {
-    border-left-color: var(--ion-color-success, #2dd36f);
-    background: rgba(45, 211, 111, 0.1);
+    color: var(--success);
   }
 }
-
 .train-warn {
-  border-left: 3px solid var(--ion-color-medium, #92949c);
-  background: rgba(146, 148, 156, 0.12);
+  border-left-color: var(--border-2);
+  background: var(--surface-3);
 }
 
-.dp-table {
-  .dp-split {
-    white-space: nowrap;
-    font-size: 11px;
-    opacity: 0.7;
-  }
-  tr.dp-held {
-    background: rgba(45, 211, 111, 0.08);
-    .dp-split {
-      color: var(--ion-color-success, #2dd36f);
-      opacity: 1;
-      font-weight: 600;
-    }
-  }
-}
-
-// Stage 16 — the final test, saved / loaded weights, test rows.
+// Stage 16 — the final test, saved / loaded weights.
 .weights-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin: 8px 0 2px;
+  margin: 10px 0 4px;
   .lw-label {
     flex: 1 1 100%;
-    font-size: 12px;
-    opacity: 0.8;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
   }
 }
-
 .weights-loaded {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  font-size: 12px;
-  border-left: 3px solid var(--ion-color-tertiary, #5260ff);
-  background: rgba(82, 96, 255, 0.08);
-  border-radius: 6px;
-  margin: 0 12px 8px;
+  margin: 8px 0 4px;
+  padding: 6px 8px 6px 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: var(--fs-sm);
   b {
     word-break: break-all;
   }
   .lw-x {
+    display: grid;
+    place-items: center;
+    padding: 2px;
     border: 0;
+    border-radius: var(--r-xs);
     background: transparent;
+    color: var(--text-3);
     cursor: pointer;
-    font-size: 13px;
-    opacity: 0.7;
     &:hover {
-      opacity: 1;
+      color: var(--text);
     }
   }
 }
-
 .final-test {
-  margin: 10px 0 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--ion-color-step-150, #e2e4e8);
-  border-radius: 8px;
-  .ft-h {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    opacity: 0.65;
-    margin-bottom: 4px;
-  }
-}
-
-.dp-table tr.dp-test {
-  background: rgba(82, 96, 255, 0.08);
-  .dp-split {
-    color: var(--ion-color-tertiary, #5260ff);
-    opacity: 1;
-    font-weight: 600;
-  }
-}
-
-// The weights button joins Data / Export: let the row wrap instead of breaking a label.
-.s8-actions {
-  flex-wrap: wrap;
-  ion-button {
-    flex: 1 1 auto; // sized by the label, so a third button moves to the next row
-    white-space: nowrap;
-  }
-}
-
-// Stage 17 — flagships in the library, the real-size note.
-.arch-group {
-  margin: 10px 12px 2px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.7;
-}
-
-.a-real {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  .a-real-btn {
-    border: 1px solid var(--ion-color-tertiary, #5260ff);
-    color: var(--ion-color-tertiary, #5260ff);
-    background: transparent;
-    border-radius: 10px;
-    padding: 1px 8px;
-    font-size: 11px;
-    cursor: pointer;
-    &:hover {
-      background: rgba(82, 96, 255, 0.08);
-    }
-  }
-  .a-hf {
-    font-size: 11px;
-    color: var(--ion-color-medium, #92949c);
-    text-decoration: none;
-    &:hover {
-      text-decoration: underline;
-    }
-  }
-}
-
-.real-size {
-  margin: 4px 0 8px;
-  padding: 8px 10px;
-  border-left: 3px solid var(--ion-color-tertiary, #5260ff);
-  background: rgba(82, 96, 255, 0.08);
-  border-radius: 8px;
-  font-size: 12.5px;
-  line-height: 1.4;
+  margin: 12px 0 6px;
+  padding: 2px 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
 }
 
 // Stage 20 — the gallery: pictures drawn or reconstructed by the network.
 .gallery {
-  margin: 6px 0 8px;
+  margin: 10px 0 8px;
   .gal-h {
-    font-size: 12px;
-    font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semi);
   }
   .gal-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 5px;
   }
   figure {
     margin: 0;
     text-align: center;
+    animation: mlc-pop-in var(--dur-3) var(--ease-out);
   }
   img {
+    display: block;
     width: 52px;
     height: 52px;
+    border-radius: var(--r-sm);
+    background: var(--img-bg);
     image-rendering: pixelated;
-    border-radius: 4px;
-    background: #000;
-    display: block;
+    box-shadow: var(--shadow-1);
   }
   figcaption {
-    font-size: 10px;
-    opacity: 0.7;
     max-width: 52px;
     overflow: hidden;
+    color: var(--text-3);
+    font-size: var(--fs-2xs);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
-
 .task-note {
   display: block;
-  margin-top: 2px;
-}
-
-.kv-small {
-  font-size: 11px;
-  font-weight: 500;
-  text-align: right;
 }
 
 // Stage 19 — Run once: a forward pass on random inputs.
 .once {
   margin: 4px 0 8px;
   padding: 8px 10px;
-  border-left: 3px solid var(--ion-color-success, #2dd36f);
-  background: rgba(45, 211, 111, 0.08);
-  border-radius: 8px;
-  font-size: 12.5px;
-  line-height: 1.5;
+  border-left: 3px solid var(--success);
+  border-radius: var(--r-md);
+  background: var(--success-soft);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
   .once-h {
-    font-weight: 600;
     margin-bottom: 2px;
+    font-weight: var(--fw-semi);
   }
   .once-chip {
-    display: inline-block;
     margin: 1px 4px 1px 0;
-    padding: 0 6px;
-    border-radius: 6px;
-    background: rgba(127, 127, 127, 0.14);
-    font-size: 11.5px;
   }
   .once-sample {
-    font-family: ui-monospace, Consolas, monospace;
-    font-size: 11px;
-    opacity: 0.75;
+    color: var(--text-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
     overflow-wrap: anywhere;
   }
   .once-warn {
-    color: var(--ion-color-danger, #eb445a);
+    color: var(--danger);
   }
-}
-
-.once-err {
-  display: block;
-  margin: 4px 0 8px;
-  font-size: 12px;
 }
 
 // Stage 18 — Your text and your GPT writing.
 .text-ta {
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 13px;
+  font-family: var(--font-text);
+  font-size: var(--fs-md);
 }
-
-.as-link {
-  border: 0;
-  background: transparent;
-  padding: 0;
-}
-
 .text-stats {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 6px;
-  font-size: 12px;
-  opacity: 0.85;
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
 }
-
-.dp-table {
-  .dp-char {
-    font-family: "SFMono-Regular", Consolas, monospace;
-  }
-  .dp-text {
-    white-space: pre;
-    font-family: Georgia, "Times New Roman", serif;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 420px;
-  }
-}
-
 .gen-box {
-  margin: 10px 0 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--ion-color-step-150, #e2e4e8);
-  border-radius: 8px;
-  .ft-h {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    opacity: 0.65;
-    margin-bottom: 4px;
-  }
+  margin: 12px 0 6px;
+  padding: 2px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
   .gen-prompt-ta {
-    width: 100%;
-    box-sizing: border-box;
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 13px;
-    resize: vertical;
+    font-family: var(--font-text);
+    font-size: var(--fs-md);
   }
   .gen-controls {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    margin: 6px 0;
-    font-size: 12px;
-    input {
+    margin: 8px 0 4px;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .input {
       width: 64px;
+      height: 28px;
+    }
+    .select {
+      width: auto;
+      height: 28px;
     }
   }
   .gen-out {
+    margin: 8px 0 0;
+    padding: 9px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    color: var(--text);
+    font-family: var(--font-text);
+    font-size: var(--fs-md);
+    line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
-    margin: 6px 0 0;
-    padding: 8px;
-    border-radius: 6px;
-    background: rgba(146, 148, 156, 0.1);
-    font-family: Georgia, "Times New Roman", serif;
-    font-size: 13px;
-    line-height: 1.45;
     .gen-given {
-      opacity: 0.55;
+      color: var(--text-3);
     }
   }
 }

@@ -1,0 +1,316 @@
+// Stage 22 — the inspector: collapsible sections, grouped settings, sliders and switches,
+// help in place. Colours: tokens only.
+
+.sec {
+  border-bottom: 1px solid var(--border);
+}
+.sec-h {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  background: var(--surface-1);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease);
+}
+.sec-h:hover {
+  color: var(--text);
+}
+.chev {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.chev.open {
+  transform: rotate(90deg);
+}
+.sec-b {
+  padding: 4px 14px 14px;
+  animation: mlc-slide-up var(--dur-2) var(--ease-out);
+}
+
+// ------------------------------------------------ the selected layer's header
+.insp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+.ih-ico {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fam) 16%, transparent);
+  color: var(--fam);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fam) 30%, transparent);
+}
+.ih-ico .ico {
+  width: 19px;
+  height: 19px;
+}
+.ih-t {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ih-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semi);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ih-sub {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insp-head .btn.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.doc {
+  margin: -4px 0 12px;
+  padding: 9px 11px;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  animation: mlc-slide-up var(--dur-2) var(--ease-out);
+}
+
+.grp-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 8px;
+  color: var(--text-3);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.grp-h::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border);
+}
+.grp-h .ico {
+  width: 13px;
+  height: 13px;
+}
+.grp-toggle {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.grp-toggle:hover {
+  color: var(--text);
+}
+.grp-n {
+  font-family: var(--font-mono);
+  letter-spacing: 0;
+}
+.field .switch + .f-help {
+  margin-left: 44px;
+}
+.del-btn {
+  margin-top: 14px;
+}
+.empty-insp {
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+.empty-insp p {
+  margin: 4px 0 8px;
+}
+
+// ------------------------------------------- a Repeat block's inner layers
+.block-editor {
+  margin: 10px 0 4px;
+  padding: 2px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+}
+.be-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.be-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 3px 4px 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition:
+    border-color var(--dur-1) var(--ease),
+    box-shadow var(--dur-2) var(--ease);
+}
+.be-list li:hover {
+  border-color: var(--border-2);
+}
+.be-list li.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.be-ico {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-xs);
+  background: color-mix(in srgb, var(--fam) 15%, transparent);
+  color: var(--fam);
+}
+.be-ico .ico {
+  width: 13px;
+  height: 13px;
+}
+.be-type {
+  flex: 1 1 auto;
+  font-size: var(--fs-md);
+}
+.be-x .ico {
+  width: 13px;
+  height: 13px;
+}
+.be-add {
+  margin-bottom: 4px;
+}
+
+// --------------------------------------------------------------- training
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.btn-row .btn {
+  flex: 1 1 auto;
+}
+.train-cfg .switch {
+  margin-bottom: 6px;
+}
+
+// ----------------------------------------------------------------- result
+.result .kv {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+  color: var(--text-2);
+  font-size: var(--fs-md);
+}
+.result .kv b {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+  text-align: right;
+}
+.order {
+  margin-top: 6px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  word-break: break-word;
+}
+.busy-note {
+  margin-bottom: 6px;
+}
+.hint-line {
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+// the live run: a pulsing dot, the share done, a progress bar
+.live-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 6px;
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semi);
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--glow-fwd);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--glow-fwd) 25%, transparent);
+}
+.live-pct {
+  margin-left: auto;
+  color: var(--glow-fwd);
+  font-family: var(--font-mono);
+}
+.progress {
+  height: 5px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--surface-4);
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--glow-fwd), var(--accent));
+  transform: scaleX(var(--p, 0));
+  transform-origin: left center;
+  // no transition: see .train-btn .tb-fill
+}
+
+// sparklines
+.spark {
+  display: block;
+  width: 100%;
+  height: 60px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+}
+.spark polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.spark .area {
+  fill: var(--accent-soft);
+  stroke: none;
+}
+.spark.acc polyline {
+  stroke: var(--success);
+}

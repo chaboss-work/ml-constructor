@@ -1,23 +1,50 @@
 import { CommonModule } from '@angular/common';
 import { Component, HostListener, computed, effect, inject, signal } from '@angular/core';
-import {
-  IonBadge,
-  IonButton,
-  IonButtons,
-  IonCheckbox,
-  IonContent,
-  IonHeader,
-  IonInput,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonNote,
-  IonSearchbar,
-  IonTitle,
-  IonToolbar,
-} from '@ionic/angular';
 
 import { ApiService } from '../core/api.service';
+import {
+  Family,
+  archLook,
+  familyOf,
+  graphDepths,
+  groupByFamily,
+  groupParams,
+  iconOf,
+  keyParams,
+  waveOf,
+} from '../core/families';
+import {
+  BATCH_STEPS,
+  EPOCH_STEPS,
+  FrameBatcher,
+  LR_STEPS,
+  PASS_MS,
+  SAMPLE_STEPS,
+  WAVE_TICK_MS,
+  downsample,
+  ladderPct,
+  nearestIndex,
+  glowAt,
+  progressOf,
+  rangePct,
+  totalSteps,
+  wavePhase,
+} from '../core/live';
+import {
+  NodeView,
+  THEME_MODES,
+  Theme,
+  ThemeMode,
+  browserEnv,
+  loadMode,
+  loadMotion,
+  loadView,
+  paintTheme,
+  resolveTheme,
+  setMode,
+  setMotion,
+  setView,
+} from '../core/theme';
 import {
   AdapterProposal,
   ArchitectureInfo,
@@ -69,7 +96,11 @@ import {
 import { applyFixOps, textParts } from '../core/fixes';
 
 const NODE_W = 174;
-const NODE_H = 78;
+/** Stage 22 — a node's height, the same in the compact and the detailed view: the wires end at its
+ * ports, and the templates' layout (112 px a row) keeps room for a shape on every wire. */
+const NODE_H = 64;
+/** Above this many connections the data-flow animation stays off (it redraws every wire, every frame). */
+const MAX_FLOW_EDGES = 150;
 const AUTOSAVE_DELAY_MS = 700;
 const ANALYSIS_DELAY_MS = 450;
 /** The backend API this page needs: Stage 21 (every problem explained, with one-click fixes). */
@@ -101,11 +132,11 @@ export function humanCount(n: number | null | undefined): string {
 /** Stage 16 — the share of rows kept for the final test unless the project says otherwise. */
 const DEFAULT_TEST_FRACTION = 0.1;
 /** The choices of the "Final test" picker. */
-const TEST_CHOICES: { value: number; label: string }[] = [
-  { value: 0, label: 'Off — no final test' },
-  { value: 0.1, label: '10 % of rows (default)' },
-  { value: 0.2, label: '20 % of rows' },
-  { value: 0.3, label: '30 % of rows' },
+const TEST_CHOICES: { value: number; label: string; short: string }[] = [
+  { value: 0, label: 'Off — no final test', short: 'Off' },
+  { value: 0.1, label: '10 % of rows (default)', short: '10 %' },
+  { value: 0.2, label: '20 % of rows', short: '20 %' },
+  { value: 0.3, label: '30 % of rows', short: '30 %' },
 ];
 /** The largest weights file the backend accepts (64 MB). */
 const MAX_WEIGHTS_BYTES = 64 * 1024 * 1024;
@@ -120,12 +151,12 @@ function toBase64(buf: ArrayBuffer): string {
 /** Stage 15 — the share of rows held out for validation unless the project says otherwise. */
 const DEFAULT_VAL_FRACTION = 0.2;
 /** The choices of the "Check on new data" picker. */
-const VAL_CHOICES: { value: number; label: string }[] = [
-  { value: 0, label: 'Off — measure on the training rows' },
-  { value: 0.1, label: '10 % of rows' },
-  { value: 0.2, label: '20 % of rows (default)' },
-  { value: 0.3, label: '30 % of rows' },
-  { value: 0.5, label: '50 % of rows' },
+const VAL_CHOICES: { value: number; label: string; short: string }[] = [
+  { value: 0, label: 'Off — measure on the training rows', short: 'Off' },
+  { value: 0.1, label: '10 % of rows', short: '10 %' },
+  { value: 0.2, label: '20 % of rows (default)', short: '20 %' },
+  { value: 0.3, label: '30 % of rows', short: '30 %' },
+  { value: 0.5, label: '50 % of rows', short: '50 %' },
 ];
 const ORIGINS: readonly ProjectOrigin[] = ['new', 'browser', 'server', 'file'];
 
@@ -138,31 +169,83 @@ interface Notice {
 @Component({
   selector: 'app-editor',
   standalone: true,
-  imports: [
-    CommonModule,
-    IonHeader,
-    IonToolbar,
-    IonTitle,
-    IonButtons,
-    IonButton,
-    IonContent,
-    IonList,
-    IonItem,
-    IonLabel,
-    IonInput,
-    IonCheckbox,
-    IonBadge,
-    IonNote,
-    IonSearchbar,
-  ],
+  // Stage 22: the design system replaces Ionic's widgets (tokens: src/theme/tokens.css,
+  // shared components: src/styles.scss) — the page is plain, themable HTML.
+  imports: [CommonModule],
   templateUrl: './editor.page.html',
-  styleUrls: ['./editor.page.scss', './projects.scss', './connections.scss', './training.scss', './problems.scss'],
+  styleUrls: [
+    './editor.page.scss',
+    './canvas.scss',
+    './nodes.scss',
+    './inspector.scss',
+    './projects.scss',
+    './connections.scss',
+    './training.scss',
+    './problems.scss',
+  ],
 })
 export class EditorPage {
   private api = inject(ApiService);
 
   readonly NODE_W = NODE_W;
-  readonly NODE_H = NODE_H;
+
+  // ---- the look (Stage 22): theme, node view, animations — remembered per browser ----
+  private themeEnv = browserEnv();
+  readonly THEME_MODES = THEME_MODES;
+  themeMode = signal<ThemeMode>(loadMode(this.themeEnv));
+  theme = signal<Theme>(resolveTheme(this.themeMode(), this.themeEnv.systemDark()));
+  nodeView = signal<NodeView>(loadView(this.themeEnv));
+  motion = signal(loadMotion(this.themeEnv));
+  /** the node / connection under the pointer: its wires light up and show the data flowing */
+  hoverNode = signal<string | null>(null);
+  hoverEdge = signal<string | null>(null);
+  /** the inspector's sections, the layer's description, its advanced settings */
+  private secClosed = signal<Record<string, boolean>>({});
+  docOpen = signal(false);
+  advOpen = signal(false);
+  readonly EPOCH_STEPS = EPOCH_STEPS;
+  readonly LR_STEPS = LR_STEPS;
+  readonly BATCH_STEPS = BATCH_STEPS;
+  readonly SAMPLE_STEPS = SAMPLE_STEPS;
+  /** Live training on the canvas: where the run is (null when no run streams). */
+  trainLive = signal<{
+    step: number;
+    total: number | null;
+    epoch: number;
+    epochs: number;
+    acc: number | null;
+    valAcc: number | null;
+  } | null>(null);
+  /** Steps arrive one line each; the page takes them together, 20 times a second. */
+  private stepBatch = new FrameBatcher<TrainEvent>((items) => this.applySteps(items));
+  /** The system asks for less motion: the training wave stays still (the progress still shows). */
+  private reduceMotion = (() => {
+    try {
+      return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      return false;
+    }
+  })();
+  /** The training wave, while a run streams and animations are on: 20 times a second the page sets
+   * the opacity of each node's two glow elements (glowAt) — nothing else. No CSS animation runs, so
+   * the browser never draws per screen frame; and no style is recomputed beyond those elements
+   * (a CSS variable on the canvas did that for the whole canvas: ~4 ms a tick, measured). */
+  private waveDriver = effect((onCleanup) => {
+    if (!this.waveOn()) return;
+    const start = performance.now();
+    const timer = setInterval(() => {
+      const phase = wavePhase(performance.now() - start, PASS_MS);
+      document.querySelectorAll<HTMLElement>('.canvas-wrap .node').forEach((n) => {
+        const [f, b] = glowAt(phase, Number(n.dataset['wave']) || 0);
+        const g = n.querySelectorAll<HTMLElement>('.glow');
+        if (g.length === 2) {
+          g[0].style.opacity = f.toFixed(3);
+          g[1].style.opacity = b.toFixed(3);
+        }
+      });
+    }, WAVE_TICK_MS);
+    onCleanup(() => clearInterval(timer));
+  });
 
   // ---- palette ----
   layers = signal<LayerInfo[]>([]);
@@ -372,6 +455,275 @@ export class EditorPage {
       this.scheduleAnalysis(); // ...rebuild shortly after a change: live shapes and transforms
     });
     this.autosaveArmed = restored !== 'pending';
+
+    // Stage 22: "as the system" follows the system's light / dark switch while the page is open
+    paintTheme(this.themeEnv, this.theme(), false);
+    try {
+      window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+        if (this.themeMode() !== 'auto') return;
+        const t: Theme = e.matches ? 'dark' : 'light';
+        this.theme.set(t);
+        paintTheme(this.themeEnv, t, true);
+      });
+    } catch {
+      /* an old browser without change events: the theme updates on the next load */
+    }
+  }
+
+  // ------------------------------------------------------------ the look (Stage 22)
+  setThemeMode(m: ThemeMode): void {
+    this.themeMode.set(m);
+    this.theme.set(setMode(this.themeEnv, m));
+  }
+
+  themeTitle(m: ThemeMode): string {
+    return m === 'light' ? 'Light theme' : m === 'dark' ? 'Dark theme' : 'As the system: light or dark';
+  }
+
+  themeIcon(m: ThemeMode): string {
+    return m === 'light' ? 'sun' : m === 'dark' ? 'moon' : 'auto';
+  }
+
+  setNodeView(v: NodeView): void {
+    this.nodeView.set(v);
+    setView(this.themeEnv, v);
+  }
+
+  toggleMotion(): void {
+    const on = !this.motion();
+    this.motion.set(on);
+    setMotion(this.themeEnv, on);
+  }
+
+  /** The dotted grid moves and scales with the canvas (two layers: fine dots, every fifth bolder). */
+  gridPos = computed(() => {
+    const p = this.pan();
+    return `${p.x}px ${p.y}px, ${p.x}px ${p.y}px`;
+  });
+  gridSize = computed(() => {
+    const z = this.zoom();
+    return `${110 * z}px ${110 * z}px, ${22 * z}px ${22 * z}px`;
+  });
+
+  /** A node's height: the wires end at its ports. */
+  readonly NODE_H = NODE_H;
+
+  private layerByType = computed(() => new Map(this.layers().map((l) => [l.type, l])));
+
+  /** node id -> its family (colour, icon) and the icon it shows */
+  private famById = computed(() => {
+    const byType = this.layerByType();
+    const m = new Map<string, Family>();
+    for (const n of this.nodes()) {
+      const cat = byType.get(n.type)?.category;
+      const fam = familyOf(cat);
+      m.set(n.id, { ...fam, icon: iconOf(n.type, cat) });
+    }
+    return m;
+  });
+
+  famOf(n: EditorNode): Family {
+    return this.famById().get(n.id) ?? familyOf(null);
+  }
+
+  famVar(key: string): string {
+    return `var(--fam-${key})`;
+  }
+
+  layerIcon(l: LayerInfo): string {
+    return iconOf(l.type, l.category);
+  }
+
+  famKey(l: LayerInfo): string {
+    return familyOf(l.category).key;
+  }
+
+  archLookOf(a: ArchitectureInfo): { family: string; icon: string } {
+    return archLook(a.category);
+  }
+
+  /** The palette: layers grouped by family, in a fixed order. */
+  paletteGroups = computed(() => groupByFamily(this.filteredLayers()));
+
+  /** The families on the canvas, for the small legend. */
+  legend = computed(() => {
+    const keys = new Set<string>();
+    const out: Family[] = [];
+    for (const n of this.nodes()) {
+      const f = this.famById().get(n.id);
+      if (f && !keys.has(f.key)) {
+        keys.add(f.key);
+        out.push(f);
+      }
+    }
+    return out.slice(0, 10);
+  });
+
+  /** Each node's place in the training wave (0 at the inputs … 1 at the deepest node). */
+  waveByNode = computed(() =>
+    waveOf(
+      graphDepths(
+        this.nodes().map((n) => n.id),
+        this.edges().map((e) => [e.source, e.target] as const),
+      ),
+    ),
+  );
+
+  /** node id -> its parameter count (the detailed view's badge) */
+  paramsByNode = computed(() => new Map((this.liveBuild()?.layers ?? []).map((l) => [l.id, l.num_params])));
+
+  /** The node the training result shows on: the (first) Output. */
+  outputId = computed(() => this.nodes().find((n) => n.type === 'Output')?.id ?? null);
+
+  /** A run is streaming: the canvas shows the wave, the Output its progress ring. */
+  training = computed(() => this.trainLive() !== null);
+  /** The wave shows: a run streams, animations are on, and the system does not ask for less motion. */
+  waveOn = computed(() => this.training() && this.motion() && !this.reduceMotion);
+
+  trainPct = computed(() => {
+    const t = this.trainLive();
+    return t ? progressOf(t.step, t.total) : 0;
+  });
+
+  /** The progress ring around the Output's icon (a circle with pathLength 100). */
+  ringDash = computed(() => `${(this.trainPct() * 100).toFixed(1)} 100`);
+
+  trainPctText = computed(() => {
+    const t = this.trainLive();
+    return t?.total ? `${Math.floor(this.trainPct() * 100)} %` : t ? `step ${t.step}` : '';
+  });
+
+  /** What the Output node says: the run's progress while it trains, the result after. */
+  outputBadge = computed<{ text: string; title: string; good: boolean; live: boolean } | null>(() => {
+    const live = this.trainLive();
+    if (live) {
+      const acc = live.valAcc ?? live.acc;
+      return {
+        text: acc != null ? `${(acc * 100).toFixed(1)} %` : `${Math.floor(this.trainPct() * 100)} %`,
+        title: `Training: epoch ${live.epoch} of ${live.epochs}` + (acc != null ? ', accuracy after the last epoch' : ''),
+        good: false,
+        live: true,
+      };
+    }
+    const t = this.trainResult();
+    if (!t) return null;
+    if (this.isGenerative(t.task)) {
+      const err = t.final_val_loss ?? t.final_loss;
+      return { text: `err ${err.toFixed(3)}`, title: `Error on new pictures: ${err}`, good: t.fit === 'generalises', live: false };
+    }
+    const acc = t.final_val_accuracy ?? t.final_accuracy;
+    const where = t.final_val_accuracy != null ? 'on new data' : 'on the training rows';
+    return {
+      text: `${(acc * 100).toFixed(1)} %`,
+      title: `Accuracy ${where}: ${acc.toFixed(3)}`,
+      good: t.final_val_accuracy != null && t.fit === 'generalises',
+      live: false,
+    };
+  });
+
+  /** The detailed view's line of key settings. */
+  keyLine(n: EditorNode): string {
+    if (n.type === 'Repeat') return this.innerSummary(n);
+    return keyParams(n.params, this.layerByType().get(n.type)?.params);
+  }
+
+  /** A node's second line: its id — and in the detailed view its key settings after it. */
+  subLine(n: EditorNode): string {
+    if (this.nodeView() !== 'detailed') return n.id;
+    const k = this.keyLine(n);
+    return k ? `${n.id} · ${k}` : n.id;
+  }
+
+  /** A connection lights up under the pointer, when selected, or when its node is hovered. */
+  isLit(e: { id: string; source: string; target: string }): boolean {
+    const h = this.hoverNode();
+    return e.id === this.hoverEdge() || e.id === this.selectedEdge() || (!!h && (e.source === h || e.target === h));
+  }
+
+  /** The data-flow animation on the lit wires (hovered, selected, of the hovered node). Not while
+   * training: redrawing the wires then cost ~2 % of the training speed (measured; the browser shares
+   * the processor) — the wires glow still, and the wave on the nodes shows the batch passing. */
+  flowOn(e: { id: string; source: string; target: string }): boolean {
+    if (!this.motion() || this.training() || this.edges().length > MAX_FLOW_EDGES) return false;
+    return this.isLit(e);
+  }
+
+  /** The tensor shape on a wire: always in the detailed view, else when a transform or the pointer is there. */
+  showBadge(e: { id: string; source: string; target: string; label: string; shape: string }): boolean {
+    if (!e.label && !e.shape) return false;
+    return this.nodeView() === 'detailed' || !!e.label || this.isLit(e);
+  }
+
+  isSecOpen(key: string): boolean {
+    return !this.secClosed()[key];
+  }
+
+  toggleSec(key: string): void {
+    this.secClosed.update((s) => ({ ...s, [key]: !s[key] }));
+  }
+
+  /** The inspector's groups for the selected layer. */
+  selectedGroups = computed(() => groupParams(this.selectedInfo()?.params ?? []));
+
+  /** The same groups for a block's inner layer. */
+  groupsOf(defs: readonly ParamDef[]): ReturnType<typeof groupParams> {
+    return groupParams(defs);
+  }
+
+  /** How a parameter is edited: a switch, segments, a list, a slider or a plain field. */
+  paramKind(p: ParamDef): 'switch' | 'seg' | 'select' | 'range' | 'number' | 'list' | 'text' {
+    if (p.type === 'bool') return 'switch';
+    if (p.choices?.length) return p.choices.length <= 4 && p.choices.every((c) => c.length <= 12) ? 'seg' : 'select';
+    if ((p.type === 'int' || p.type === 'float') && p.min != null && p.max != null && p.max > p.min) return 'range';
+    if (p.type === 'int' || p.type === 'float') return 'number';
+    if (p.type === 'intlist') return 'list';
+    return 'text';
+  }
+
+  /** A parameter's value as its field shows it (lists as "1, 28, 28"). */
+  paramValue(params: Record<string, unknown>, p: ParamDef): string | number | boolean {
+    const v = params[p.name] ?? p.default;
+    if (p.type === 'intlist') return Array.isArray(v) ? v.join(', ') : String(v ?? '');
+    return v as string | number | boolean;
+  }
+
+  rangeStep(p: ParamDef): number {
+    return p.type === 'int' ? 1 : Math.max((Number(p.max) - Number(p.min)) / 100, 1e-6);
+  }
+
+  rangePctOf(p: ParamDef, v: unknown): string {
+    return rangePct(Number(p.min), Number(p.max), Number(v));
+  }
+
+  ladderIdx(steps: readonly number[], v: number): number {
+    return nearestIndex(steps, v);
+  }
+
+  ladderPct(steps: readonly number[], v: number): string {
+    return ladderPct(steps, v);
+  }
+
+  /** One setter for a field of the node inspector: a node's parameter, or one of its block's inner layers. */
+  setP(nodeId: string, inner: number | null, p: ParamDef, raw: unknown): void {
+    if (inner == null) this.setParam(nodeId, p, raw);
+    else this.setInnerParam(inner, p, raw);
+  }
+
+  /** The area under a sparkline (its points closed along the bottom). */
+  areaOf(points: string): string {
+    return points ? `${points} 216,60 4,60` : '';
+  }
+
+  /** Steps arrive together once per frame: one redraw for many of them. */
+  private applySteps(items: TrainEvent[]): void {
+    const losses: number[] = [];
+    let last = 0;
+    for (const e of items) {
+      if (e.loss != null) losses.push(e.loss);
+      if (e.step != null) last = e.step;
+    }
+    if (losses.length) this.liveLoss.update((a) => a.concat(losses));
+    if (last) this.trainLive.update((t) => (t ? { ...t, step: last } : t));
   }
 
   // ---------------------------------------------------------------- derived
@@ -484,12 +836,20 @@ export class EditorPage {
     const selected = this.selectedEdge();
     const issues = this.issueByEdge();
     const focus = this.focusEdge();
+    const fams = this.famById();
+    const shapes = this.shapeById();
     const views: {
       id: string;
+      source: string;
+      target: string;
       d: string;
       mx: number;
       my: number;
       label: string;
+      /** Stage 22: the tensor shape the target receives, for the wire */
+      shape: string;
+      /** Stage 22: the source's family colour */
+      color: string;
       auto: boolean;
       selected: boolean;
       problem: boolean;
@@ -510,19 +870,24 @@ export class EditorPage {
       const live = info.get(id);
       const pinned = !!e.transform && e.transform !== AUTO;
       const label = live?.label ?? (pinned ? (e.transform as string) : '');
-      const shapes = live ? ` · [${live.in_shape.join('×')}] → [${live.out_shape.join('×')}]` : '';
+      const inOut = live ? ` · [${live.in_shape.join('×')}] → [${live.out_shape.join('×')}]` : '';
+      const arriving = live?.out_shape ?? shapes.get(e.source) ?? null;
       views.push({
         id,
+        source: e.source,
+        target: e.target,
         d: `M ${x1} ${y1} C ${x1} ${y1 + k}, ${x2} ${y2 - k}, ${x2} ${y2}`,
         mx: (x1 + x2) / 2, // the curve's midpoint (its control points share the ends' x)
         my: (y1 + y2) / 2,
         label,
+        shape: arriving ? arriving.join('×') : '',
+        color: `var(--fam-${fams.get(e.source)?.key ?? 'other'})`,
         auto: live ? live.auto : !pinned,
         selected: id === selected,
         problem: issues.get(id) === 'error',
         warn: issues.get(id) === 'warning',
         focus: id === focus,
-        title: `${e.source} → ${e.target}${label ? ' · ' + label : ''}${shapes} — click to set up`,
+        title: `${e.source} → ${e.target}${label ? ' · ' + label : ''}${inOut} — click to set up`,
       });
     }
     return views;
@@ -656,6 +1021,7 @@ export class EditorPage {
 
   private pointsOf(c: number[], fixed01: boolean): string {
     if (c.length === 0) return '';
+    if (c.length > 220) c = downsample(c, 220); // Stage 22: the 220-px chart never redraws thousands of points
     const W = 220;
     const H = 60;
     const pad = 4;
@@ -1538,34 +1904,51 @@ export class EditorPage {
     this.drawResult.set(null);
     this.drawError.set(null);
     const spec = this.toSpec();
+    this.stepBatch.reset();
+    const epochs = this.epochs();
+    const batch = this.batchSize();
+    const cap = Number(this.trainExtra()['steps']) || null;
     this.api
       .trainStream(spec, (e) => {
+        if (e.type === 'step') {
+          this.stepBatch.push(e); // Stage 22: no drawing here — the page takes the steps once per frame
+          return;
+        }
+        this.stepBatch.flush(); // whatever else arrives, the steps before it come first
         if (e.type === 'start') {
           this.liveLoss.set([]);
           this.liveAcc.set([]);
           this.liveValAcc.set([]);
-        } else if (e.type === 'step' && e.loss != null) {
-          this.liveLoss.update((a) => [...a, e.loss as number]);
-        } else if (e.type === 'epoch' && e.acc != null) {
-          this.liveAcc.update((a) => [...a, e.acc as number]);
+          this.trainLive.set({ step: 0, total: totalSteps(e, epochs, batch, cap), epoch: 0, epochs, acc: null, valAcc: null });
+        } else if (e.type === 'epoch') {
+          if (e.acc != null) this.liveAcc.update((a) => [...a, e.acc as number]);
           if (e.val_acc != null) this.liveValAcc.update((a) => [...a, e.val_acc as number]);
+          this.trainLive.update((t) =>
+            t ? { ...t, epoch: e.epoch ?? t.epoch, acc: e.acc ?? t.acc, valAcc: e.val_acc ?? t.valAcc } : t,
+          );
         } else if (e.type === 'samples' && e.images) {
           this.liveGallery.set(e.images); // Stage 20: the pictures after this epoch
           this.liveGalleryEpoch.set(e.epoch ?? 0);
         } else if (e.type === 'done' && e.result) {
+          this.trainLive.set(null);
           this.trainResult.set(e.result);
           if (e.result.run_id) this.loadedWeights.set(null); // the loaded weights went into this run
           this.busy.set(false);
         } else if (e.type === 'error') {
+          this.trainLive.set(null);
           this.runError.set(e.detail ?? 'Training failed');
           if (e.error?.code) this.showRunProblem(e.error);
           this.busy.set(false);
         }
       })
       .then(() => {
+        this.stepBatch.flush();
+        this.trainLive.set(null);
         if (this.busy() && !this.trainResult()) this.busy.set(false); // stream ended without a result
       })
       .catch((err) => {
+        this.stepBatch.reset();
+        this.trainLive.set(null);
         if (err?.fallback) {
           // older backend without /train/stream — fall back to the plain endpoint
           this.api.train(spec).subscribe({

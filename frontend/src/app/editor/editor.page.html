@@ -1,1183 +1,1534 @@
-<ion-header>
-  <ion-toolbar color="dark">
-    <ion-buttons slot="start">
-      <ion-button fill="clear" size="small" [disabled]="busy()" (click)="newProject()">New</ion-button>
-      <ion-button fill="clear" size="small" [disabled]="busy()" (click)="openProjects()">Open</ion-button>
-      <ion-button fill="clear" size="small" title="Save (Ctrl+S)" (click)="saveProject()">Save</ion-button>
-      <ion-button fill="clear" size="small" [disabled]="busy()" (click)="clearGraph()">Clear</ion-button>
-    </ion-buttons>
-    <ion-title>
-      <span class="brand">ML Constructor</span>
-      <button type="button" class="proj-name" title="Projects: rename, save, open" (click)="openProjects()">
-        {{ projectName() }}
+<!-- Stage 22: every icon of the editor, drawn once (24 × 24, stroked with the text colour) -->
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-io" viewBox="0 0 24 24"><path d="M3 12h12M10 7l5 5-5 5M19 5v14" /></symbol>
+  <symbol id="i-input" viewBox="0 0 24 24"><path d="M12 3v11M7.5 9.5 12 14l4.5-4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></symbol>
+  <symbol id="i-output" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4.5" /><circle cx="12" cy="12" r="1.2" fill="currentColor" /></symbol>
+  <symbol id="i-dense" viewBox="0 0 24 24"><circle cx="5" cy="7" r="2" /><circle cx="5" cy="17" r="2" /><circle cx="19" cy="7" r="2" /><circle cx="19" cy="17" r="2" /><path d="M7 7h10M7 17h10M6.7 8.3l10.6 7.4M6.7 15.7l10.6-7.4" /></symbol>
+  <symbol id="i-conv" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5" /><path d="M9 3v18M15 3v18M3 9h18M3 15h18" /></symbol>
+  <symbol id="i-pool" viewBox="0 0 24 24"><path d="M4 5h16l-6 7.5V18l-4 2v-7.5z" /></symbol>
+  <symbol id="i-act" viewBox="0 0 24 24"><path d="M3 18h7c2.2 0 3.3-1.6 4.4-4.2L19 5" /><path d="M3 21h18" /></symbol>
+  <symbol id="i-norm" viewBox="0 0 24 24"><path d="M3 19c3.5 0 4.5-12 9-12s5.5 12 9 12M3 19h18" /></symbol>
+  <symbol id="i-reg" viewBox="0 0 24 24"><circle cx="7" cy="7" r="2.2" /><circle cx="17" cy="7" r="2.2" /><circle cx="7" cy="17" r="2.2" /><path d="M14.5 14.5l5 5M19.5 14.5l-5 5" /></symbol>
+  <symbol id="i-shape" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="8" rx="1.5" /><path d="M14 8h7M18 5l3 3-3 3M3 18h18" /></symbol>
+  <symbol id="i-seq" viewBox="0 0 24 24"><rect x="2" y="9" width="5" height="6" rx="1.2" /><rect x="9.5" y="9" width="5" height="6" rx="1.2" /><rect x="17" y="9" width="5" height="6" rx="1.2" /><path d="M7 12h2.5M14.5 12H17" /></symbol>
+  <symbol id="i-attn" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6" /><circle cx="4.5" cy="5" r="1.7" /><circle cx="19.5" cy="5" r="1.7" /><circle cx="4.5" cy="19" r="1.7" /><circle cx="19.5" cy="19" r="1.7" /><path d="M5.9 6.3l4.3 3.9M18.1 6.3l-4.3 3.9M5.9 17.7l4.3-3.9M18.1 17.7l-4.3-3.9" /></symbol>
+  <symbol id="i-merge" viewBox="0 0 24 24"><path d="M5 3c0 6 7 6 7 11v7M19 3c0 6-7 6-7 11M8.5 17.5 12 21l3.5-3.5" /></symbol>
+  <symbol id="i-block" viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5zM3 12.5l9 5 9-5M3 17l9 5 9-5" /></symbol>
+  <symbol id="i-llm" viewBox="0 0 24 24"><path d="M4 5h16v11H10l-6 4.5z" /><path d="M8 9h8M8 12.5h5" /></symbol>
+  <symbol id="i-gen" viewBox="0 0 24 24"><path d="M11 3l1.8 5.2L18 10l-5.2 1.8L11 17l-1.8-5.2L4 10l5.2-1.8zM19 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" /></symbol>
+  <symbol id="i-vision" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7zM3.5 7 12 12l8.5-5M12 12v9.5" /></symbol>
+  <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.5" /></symbol>
+  <symbol id="i-upsample" viewBox="0 0 24 24"><path d="M4 20l6-6M4 20v-5M4 20h5M20 4l-6 6M20 4v5M20 4h-5" /></symbol>
+  <symbol id="i-audio" viewBox="0 0 24 24"><path d="M3 12h1.5M7 8v8M11 4v16M15 7v10M19 10v4" /></symbol>
+  <symbol id="i-wire" viewBox="0 0 24 24"><path d="M5 19c7 0 7-14 14-14" /><circle cx="4" cy="19" r="2" /><circle cx="20" cy="5" r="2" /></symbol>
+  <symbol id="i-new" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M12 11v6M9 14h6" /></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2zM8 3v5h7V3M8 21v-6h8v6" /></symbol>
+  <symbol id="i-clear" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5" /></symbol>
+  <symbol id="i-build" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z" /></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor" /></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></symbol>
+  <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" /></symbol>
+  <symbol id="i-compact" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="5" rx="1.5" /><rect x="3" y="14" width="18" height="5" rx="1.5" /></symbol>
+  <symbol id="i-detailed" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5" /><path d="M7 8h10M7 12h7M7 16h5" /></symbol>
+  <symbol id="i-motion" viewBox="0 0 24 24"><path d="M2 12c2-4.5 4-4.5 6 0s4 4.5 6 0 4-4.5 6 0" /><path d="M20 12h2" /></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6" /></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5v.7M12 17h.01" /></symbol>
+  <symbol id="i-data" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M3 14h18M9 9v11" /></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 8-5 4 5 4M16 8l5 4-5 4M14 5l-4 14" /></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol>
+  <symbol id="i-brush" viewBox="0 0 24 24"><path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L11 15.8l-3.6-.8.8-3.6zM7 16c-2 0-3 1.5-3 3.5V21h1.5C7.5 21 9 20 9 18" /></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" /></symbol>
+  <symbol id="i-library" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19zM12 10v4M12 17h.01" /></symbol>
+  <symbol id="i-err" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></symbol>
+</svg>
+
+<!-- ====================================================== the top bar -->
+<header class="topbar">
+  <div class="tb-brand">
+    <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+      <defs>
+        <linearGradient id="mlc-logo-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" class="lg-a" />
+          <stop offset="1" class="lg-b" />
+        </linearGradient>
+      </defs>
+      <rect width="32" height="32" rx="8" fill="url(#mlc-logo-grad)" />
+      <g class="logo-mark">
+        <circle cx="16" cy="8.5" r="3.1" />
+        <circle cx="9.5" cy="23" r="3.1" />
+        <circle cx="22.5" cy="23" r="3.1" />
+        <path d="M16 11.5 L9.5 20 M16 11.5 L22.5 20" />
+      </g>
+    </svg>
+    <span class="brand">ML Constructor</span>
+  </div>
+  <div class="tb-project">
+    <button type="button" class="proj-name" title="Projects: rename, save, open" (click)="openProjects()">
+      {{ projectName() }}
+    </button>
+    <span class="save-state" [class.warn]="autosaveError()" [class.edited]="dirty()" [title]="saveTooltip()">
+      {{ saveStatus() }}
+    </span>
+  </div>
+  <nav class="tb-file">
+    <button type="button" class="btn ghost sm" [disabled]="busy()" (click)="newProject()" title="A new, empty project">
+      <svg class="ico"><use href="#i-new"></use></svg><span class="lbl">New</span>
+    </button>
+    <button type="button" class="btn ghost sm" [disabled]="busy()" (click)="openProjects()" title="Open a project">
+      <svg class="ico"><use href="#i-open"></use></svg><span class="lbl">Open</span>
+    </button>
+    <button type="button" class="btn ghost sm" title="Save (Ctrl+S)" (click)="saveProject()">
+      <svg class="ico"><use href="#i-save"></use></svg><span class="lbl">Save</span>
+    </button>
+    <button type="button" class="btn ghost sm" [disabled]="busy()" (click)="clearGraph()" title="Clear the canvas">
+      <svg class="ico"><use href="#i-clear"></use></svg><span class="lbl">Clear</span>
+    </button>
+  </nav>
+  <div class="tb-spacer"></div>
+  <div class="seg theme-seg" role="radiogroup" aria-label="Theme">
+    @for (m of THEME_MODES; track m) {
+      <button type="button" role="radio" [attr.aria-checked]="themeMode() === m" [class.on]="themeMode() === m"
+        [title]="themeTitle(m)" (click)="setThemeMode(m)">
+        <svg class="ico"><use [attr.href]="'#i-' + themeIcon(m)"></use></svg>
       </button>
-      <span class="save-state" [class.warn]="autosaveError()" [class.edited]="dirty()" [title]="saveTooltip()">
-        {{ saveStatus() }}
-      </span>
-    </ion-title>
-    <ion-buttons slot="end">
-      <ion-button fill="outline" [disabled]="busy() || !nodes().length" (click)="onBuild()">Build</ion-button>
-      <ion-button fill="outline" color="primary" [disabled]="busy() || onceBusy() || !nodes().length || !runnable()"
-        (click)="onRunOnce()"
-        [title]="runnable() ? 'Run the network once on random inputs: does it run, what comes out, how fast' : 'Real size: too big to run here — the mini version runs'">
-        {{ onceBusy() ? 'Running…' : 'Run once' }}</ion-button>
-      <ion-button fill="solid" color="primary" [disabled]="busy() || !nodes().length || inspectOnly()" (click)="onTrain()"
-        [title]="trainNote() || (inspectOnly() ? 'Real size: too big to train here — the mini version trains' : 'Train the network')">Train ▶</ion-button>
-    </ion-buttons>
-  </ion-toolbar>
-</ion-header>
+    }
+  </div>
+  <div class="tb-run">
+    <button type="button" class="btn" [disabled]="busy() || !nodes().length" (click)="onBuild()"
+      title="Build the network: every layer's shape and parameters">
+      <svg class="ico"><use href="#i-build"></use></svg>Build
+    </button>
+    <button type="button" class="btn" [disabled]="busy() || onceBusy() || !nodes().length || !runnable()"
+      (click)="onRunOnce()"
+      [title]="runnable() ? 'Run the network once on random inputs: does it run, what comes out, how fast' : 'Real size: too big to run here — the mini version runs'">
+      <svg class="ico"><use href="#i-bolt"></use></svg>{{ onceBusy() ? 'Running…' : 'Run once' }}
+    </button>
+    <button type="button" class="btn primary train-btn" [class.running]="training()" [style.--p]="trainPct()"
+      [disabled]="busy() || !nodes().length || inspectOnly()" (click)="onTrain()"
+      [title]="trainNote() || (inspectOnly() ? 'Real size: too big to train here — the mini version trains' : 'Train the network')">
+      <span class="tb-fill"></span>
+      <svg class="ico"><use href="#i-play"></use></svg>
+      <span class="tb-label">{{ training() ? 'Training · ' + trainPctText() : 'Train' }}</span>
+    </button>
+  </div>
+</header>
 
-<ion-content [scrollY]="false">
-  <div class="layout">
-    <!-- ===================== palette ===================== -->
-    <aside class="panel palette">
-      @if (architectures().length) {
-        <div class="panel-h">Architectures</div>
-        <ion-list lines="none" class="arch-list" [class.flash]="libraryFlash()">
-          @for (a of architectures(); track a.id; let i = $index) {
-            @if (i === firstFlagship()) {
-              <div class="arch-group" title="Each trains here as a mini model; its real size can be inspected">
-                Flagship language models
-              </div>
-            }
-            @if (i === firstVisionFlagship()) {
-              <div class="arch-group" title="Each runs here as a mini model (Run once); its real size can be inspected">
-                Flagships: images, 3D, sound, vision
-              </div>
-            }
-            <ion-item button detail="false" [title]="a.description" (click)="loadArchitecture(a.id)">
-              <ion-label>
-                <div class="l-name">{{ a.name }}</div>
-                <div class="a-desc">{{ a.description }}</div>
-                @if (a.scale === 'mini' && a.real_id) {
-                  <div class="a-real">
-                    <button class="a-real-btn" (click)="$event.stopPropagation(); loadArchitecture(a.real_id, a)"
-                      [title]="'Open ' + a.real_name + ' at its real size: every layer and shape (inspect only)'">
-                      {{ a.real_name }} · {{ human(a.real_params) }}
-                    </button>
-                    @if (a.hf_url) {
-                      <a class="a-hf" [href]="a.hf_url" target="_blank" rel="noopener noreferrer"
-                        (click)="$event.stopPropagation()" title="The model card on Hugging Face">HF ↗</a>
-                    }
-                  </div>
-                }
-              </ion-label>
-            </ion-item>
-          }
-        </ion-list>
-      }
-
-      <div class="panel-h">Layers</div>
-      <ion-searchbar
-        class="palette-search"
-        placeholder="Search layers…"
-        [debounce]="0"
-        (ionInput)="paletteQuery.set($any($event).detail.value ?? '')"
-      ></ion-searchbar>
-      @if (layersError()) {
-        <ion-note color="danger" class="pad block">{{ layersError() }}</ion-note>
-      }
-      <ion-list lines="none">
-        @for (l of filteredLayers(); track l.type) {
-          <ion-item button detail="false" (click)="addNode(l)">
-            <ion-label>
-              <div class="l-name">{{ l.label }}</div>
-              <div class="l-cat">{{ l.category }}</div>
-            </ion-label>
-          </ion-item>
-        } @empty {
-          <ion-note class="pad block muted">Nothing found</ion-note>
-        }
-      </ion-list>
-    </aside>
-
-    <!-- ===================== canvas ====================== -->
-    <main
-      class="canvas-wrap"
-      [class.drop]="dropHover()"
-      (pointerdown)="canvasDown($event)"
-      (wheel)="onWheel($event)"
-      (dragover)="onDragOver($event)"
-      (dragleave)="onDragLeave($event)"
-      (drop)="onDrop($event)"
-    >
-      <div class="canvas" [style.transform]="canvasTransform()">
-        <svg class="edges" width="4000" height="4000">
-          @for (e of edgeViews(); track e.id) {
-            <path class="edge" [class.sel]="e.selected" [class.problem]="e.problem" [class.warn]="e.warn"
-              [class.focus]="e.focus" [attr.d]="e.d"></path>
-            <!-- a wide invisible stroke: easy to click -->
-            <path class="edge-hit" [attr.d]="e.d" (pointerdown)="selectEdge(e.id, $event)">
-              <title>{{ e.title }}</title>
-            </path>
-          }
-        </svg>
-
-        @for (e of edgeViews(); track e.id) {
-          @if (e.label) {
-            <div
-              class="edge-badge"
-              [class.auto]="e.auto"
-              [class.sel]="e.selected"
-              [class.problem]="e.problem"
-              [class.warn]="e.warn"
-              [style.left.px]="e.mx"
-              [style.top.px]="e.my"
-              [title]="e.title"
-              (pointerdown)="selectEdge(e.id, $event)"
-            >
-              {{ e.label }}
+<div class="layout">
+  <!-- ===================== palette ===================== -->
+  <aside class="panel palette">
+    @if (architectures().length) {
+      <div class="panel-h"><svg class="ico"><use href="#i-library"></use></svg>Architectures</div>
+      <div class="arch-list" [class.flash]="libraryFlash()">
+        @for (a of architectures(); track a.id; let i = $index) {
+          @if (i === firstFlagship()) {
+            <div class="arch-group" title="Each trains here as a mini model; its real size can be inspected">
+              Flagship language models
             </div>
           }
+          @if (i === firstVisionFlagship()) {
+            <div class="arch-group" title="Each runs here as a mini model (Run once); its real size can be inspected">
+              Flagships: images, 3D, sound, vision
+            </div>
+          }
+          @let look = archLookOf(a);
+          <div class="arch-card" role="button" tabindex="0" [title]="a.description" [style.--fam]="famVar(look.family)"
+            (click)="loadArchitecture(a.id)" (keydown.enter)="loadArchitecture(a.id)">
+            <span class="ac-ico"><svg class="ico"><use [attr.href]="'#i-' + look.icon"></use></svg></span>
+            <span class="ac-body">
+              <span class="ac-name">{{ a.name }}</span>
+              <span class="ac-desc">{{ a.description }}</span>
+              @if (a.scale === 'mini' && a.real_id) {
+                <span class="a-real">
+                  <button type="button" class="a-real-btn" (click)="$event.stopPropagation(); loadArchitecture(a.real_id, a)"
+                    [title]="'Open ' + a.real_name + ' at its real size: every layer and shape (inspect only)'">
+                    {{ a.real_name }} · {{ human(a.real_params) }}
+                  </button>
+                  @if (a.hf_url) {
+                    <a class="a-hf" [href]="a.hf_url" target="_blank" rel="noopener noreferrer"
+                      (click)="$event.stopPropagation()" title="The model card on Hugging Face">HF
+                      <svg class="ico"><use href="#i-link"></use></svg></a>
+                  }
+                </span>
+              }
+            </span>
+          </div>
         }
+      </div>
+    }
 
-        @for (n of nodes(); track n.id) {
+    <div class="panel-h"><svg class="ico"><use href="#i-block"></use></svg>Layers</div>
+    <label class="search">
+      <svg class="ico"><use href="#i-search"></use></svg>
+      <input class="input" type="search" placeholder="Search layers…" aria-label="Search layers"
+        [value]="paletteQuery()" (input)="paletteQuery.set($any($event).target.value ?? '')" />
+    </label>
+    @if (layersError()) {
+      <div class="callout err pal-err">{{ layersError() }}</div>
+    }
+    @for (g of paletteGroups(); track g.family.key) {
+      <div class="pg" [style.--fam]="famVar(g.family.key)">
+        <div class="pg-h"><span class="pg-dot"></span>{{ g.family.label }}<span class="pg-n">{{ g.layers.length }}</span></div>
+        @for (l of g.layers; track l.type) {
+          <button type="button" class="layer-item" (click)="addNode(l)" [title]="l.doc || l.label">
+            <span class="li-ico"><svg class="ico"><use [attr.href]="'#i-' + layerIcon(l)"></use></svg></span>
+            <span class="li-name">{{ l.label }}</span>
+            <svg class="ico li-add"><use href="#i-plus"></use></svg>
+          </button>
+        }
+      </div>
+    } @empty {
+      <div class="empty">Nothing found</div>
+    }
+  </aside>
+
+  <!-- ===================== canvas ====================== -->
+  <main
+    class="canvas-wrap"
+    [class.drop]="dropHover()"
+    [class.training]="training()"
+    [class.detailed]="nodeView() === 'detailed'"
+    [style.background-position]="gridPos()"
+    [style.background-size]="gridSize()"
+    (pointerdown)="canvasDown($event)"
+    (wheel)="onWheel($event)"
+    (dragover)="onDragOver($event)"
+    (dragleave)="onDragLeave($event)"
+    (drop)="onDrop($event)"
+  >
+    <div class="canvas" [style.transform]="canvasTransform()">
+      <svg class="edges" width="4000" height="4000">
+        @for (e of edgeViews(); track e.id) {
+          <g class="eg" [class.sel]="e.selected" [class.problem]="e.problem" [class.warn]="e.warn" [class.focus]="e.focus"
+            [class.lit]="isLit(e)" [style.--c]="e.color">
+            <path class="edge" [attr.d]="e.d"></path>
+            @if (flowOn(e)) {
+              <path class="flow" [attr.d]="e.d"></path>
+            }
+            <!-- a wide invisible stroke: easy to click -->
+            <path class="edge-hit" [attr.d]="e.d" (pointerdown)="selectEdge(e.id, $event)"
+              (pointerenter)="hoverEdge.set(e.id)" (pointerleave)="hoverEdge.set(null)">
+              <title>{{ e.title }}</title>
+            </path>
+          </g>
+        }
+      </svg>
+
+      @for (e of edgeViews(); track e.id) {
+        @if (showBadge(e)) {
           <div
-            class="node"
-            [class.sel]="n.id === selectedId()"
-            [class.problem]="issueByNode().get(n.id) === 'error'"
-            [class.warn]="issueByNode().get(n.id) === 'warning'"
-            [class.focus]="focusNode() === n.id"
-            [style.left.px]="n.x"
-            [style.top.px]="n.y"
-            [style.width.px]="NODE_W"
-            (pointerdown)="nodePointerDown(n.id, $event)"
+            class="edge-badge"
+            [class.auto]="e.auto"
+            [class.tf]="!!e.label"
+            [class.sel]="e.selected"
+            [class.problem]="e.problem"
+            [class.warn]="e.warn"
+            [class.lit]="isLit(e)"
+            [style.left.px]="e.mx"
+            [style.top.px]="e.my"
+            [style.--c]="e.color"
+            [title]="e.title"
+            (pointerdown)="selectEdge(e.id, $event)"
+            (pointerenter)="hoverEdge.set(e.id)"
+            (pointerleave)="hoverEdge.set(null)"
           >
-            <div
-              class="port in"
-              [class.live]="connectFrom() && connectFrom() !== n.id"
-              (click)="finishConnect(n.id, $event)"
-            ></div>
+            @if (e.label) {
+              <span class="eb-tf">{{ e.label }}</span>
+            }
+            @if (e.shape) {
+              <span class="eb-shape">{{ e.shape }}</span>
+            }
+          </div>
+        }
+      }
 
-            <div class="node-h">{{ nodeTitle(n) }}</div>
-            @if (issueByNode().get(n.id); as issue) {
+      @for (n of nodes(); track n.id) {
+        @let fam = famOf(n);
+        @let issue = issueByNode().get(n.id);
+        @let isOut = n.id === outputId();
+        <div
+          class="node"
+          [class.sel]="n.id === selectedId()"
+          [class.problem]="issue === 'error'"
+          [class.warn]="issue === 'warning'"
+          [class.focus]="focusNode() === n.id"
+          [class.out]="isOut"
+          [style.--fam]="famVar(fam.key)"
+          [attr.data-wave]="waveByNode().get(n.id) ?? 0"
+          [style.left.px]="n.x"
+          [style.top.px]="n.y"
+          [style.width.px]="NODE_W"
+          [style.height.px]="NODE_H"
+          (pointerdown)="nodePointerDown(n.id, $event)"
+          (pointerenter)="hoverNode.set(n.id)"
+          (pointerleave)="hoverNode.set(null)"
+        >
+          @if (waveOn()) {
+            <span class="glow fwd"></span><span class="glow bwd"></span>
+          }
+          <div class="port in" [class.live]="connectFrom() && connectFrom() !== n.id" (click)="finishConnect(n.id, $event)"></div>
+          <div class="n-head">
+            <span class="n-ico">
+              @if (isOut && training()) {
+                <svg class="ring" viewBox="0 0 36 36" aria-hidden="true">
+                  <circle class="ring-bg" cx="18" cy="18" r="16"></circle>
+                  <circle class="ring-fg" cx="18" cy="18" r="16" pathLength="100" [attr.stroke-dasharray]="ringDash()"></circle>
+                </svg>
+              }
+              <svg class="ico"><use [attr.href]="'#i-' + fam.icon"></use></svg>
+            </span>
+            <div class="n-t">
+              <div class="n-title">{{ nodeTitle(n) }}</div>
+              <div class="n-id" [title]="subLine(n)">{{ subLine(n) }}</div>
+            </div>
+            @if (issue) {
               <span class="issue-dot" [class.warn]="issue === 'warning'"
                 [title]="issue === 'warning' ? 'A warning — see Problems' : 'A problem — see Problems'">!</span>
             }
-            <div class="node-id">{{ n.id }}</div>
-            @if (n.type === 'Repeat') {
-              <div class="blk-inner">{{ innerSummary(n) }}</div>
-            }
+          </div>
+          <div class="n-foot">
             @if (shapeById().get(n.id); as sh) {
-              <ion-badge class="shape">[{{ sh.join('×') }}]</ion-badge>
+              <span class="b-shape" [title]="'Shape of the data it sends on: [' + sh.join('×') + ']'">{{ sh.join('×') }}</span>
             }
+            @if (isOut && outputBadge(); as ob) {
+              <span class="b-result" [class.good]="ob.good" [class.live]="ob.live" [title]="ob.title">{{ ob.text }}</span>
+            } @else if (nodeView() === 'detailed' && paramsByNode().get(n.id); as np) {
+              <span class="b-params" [title]="(np | number) + ' parameters'">{{ human(np) }}</span>
+            }
+          </div>
+          <div class="port out" [class.from]="connectFrom() === n.id" (click)="startConnect(n.id, $event)"></div>
+        </div>
+      }
+    </div>
 
-            <div
-              class="port out"
-              [class.from]="connectFrom() === n.id"
-              (click)="startConnect(n.id, $event)"
-            ></div>
+    <!-- the view: compact / detailed nodes, animations, zoom -->
+    <div class="viewbar" (pointerdown)="$event.stopPropagation()">
+      <div class="seg" role="radiogroup" aria-label="Node view">
+        <button type="button" role="radio" [attr.aria-checked]="nodeView() === 'compact'" [class.on]="nodeView() === 'compact'"
+          (click)="setNodeView('compact')" title="Compact nodes: the layer and its output shape">
+          <svg class="ico"><use href="#i-compact"></use></svg>
+        </button>
+        <button type="button" role="radio" [attr.aria-checked]="nodeView() === 'detailed'" [class.on]="nodeView() === 'detailed'"
+          (click)="setNodeView('detailed')" title="Detailed nodes: key settings, parameter counts, the shape on every wire">
+          <svg class="ico"><use href="#i-detailed"></use></svg>
+        </button>
+      </div>
+      <button type="button" class="btn sm icon motion-btn" [class.off]="!motion()" (click)="toggleMotion()"
+        [title]="motion() ? 'Animations on — click to turn them off' : 'Animations off — click to turn them on'">
+        <svg class="ico"><use href="#i-motion"></use></svg>
+      </button>
+      <span class="zoom">{{ zoom() * 100 | number: '1.0-0' }}%</span>
+    </div>
+
+    @if (training()) {
+      <div class="pass-legend" (pointerdown)="$event.stopPropagation()">
+        <span class="pl fwd"></span>forward pass
+        <span class="pl bwd"></span>backward pass (gradients)
+        <span class="pl-step">
+          step {{ trainLive()?.step | number }}{{ trainLive()?.total ? ' / ' + (trainLive()?.total | number) : '' }}
+          · epoch {{ trainLive()?.epoch }} / {{ trainLive()?.epochs }}
+        </span>
+      </div>
+    } @else if (legend().length) {
+      <div class="fam-legend" (pointerdown)="$event.stopPropagation()">
+        @for (f of legend(); track f.key) {
+          <span [style.--fam]="famVar(f.key)"><i></i>{{ f.label }}</span>
+        }
+      </div>
+    }
+
+    @if (connectFrom()) {
+      <div class="hint">Click another node's top port (input) to connect · click the canvas to cancel</div>
+    }
+    @if (backendOutdated()) {
+      <div class="outdated" (pointerdown)="$event.stopPropagation()">
+        <svg class="ico"><use href="#i-warn"></use></svg>
+        The server still runs an older backend than this page. Connections will not adapt by themselves, errors
+        come without hints, and accuracy on new data, the final test and saved weights are missing until the
+        backend is restarted.
+      </div>
+    }
+    @if (dropHover()) {
+      <div class="drop-hint">Drop a .mlc.json project file to open it</div>
+    }
+    @if (problemList().length || fixNote()) {
+      <div class="problems" [class.collapsed]="!problemsOpen()" (pointerdown)="$event.stopPropagation()"
+        (wheel)="$event.stopPropagation()">
+        <button type="button" class="problems-h" (click)="problemsOpen.set(!problemsOpen())"
+          [title]="problemsOpen() ? 'Hide the problems' : 'Show the problems'">
+          @if (errorCount()) {
+            <span class="cnt err"><svg class="ico"><use href="#i-err"></use></svg>{{ errorCount() }} {{ errorCount() === 1 ? 'problem' : 'problems' }}</span>
+          }
+          @if (warningCount()) {
+            <span class="cnt wrn"><svg class="ico"><use href="#i-warn"></use></svg>{{ warningCount() }} {{ warningCount() === 1 ? 'warning' : 'warnings' }}</span>
+          }
+          @if (!problemList().length) {
+            <span class="cnt ok"><svg class="ico"><use href="#i-ok"></use></svg>No problems</span>
+          }
+          <svg class="ico chev" [class.open]="problemsOpen()"><use href="#i-chev"></use></svg>
+        </button>
+        @if (fixNote(); as fn) {
+          <div class="fix-note">{{ fn }}</div>
+        }
+        @if (problemsOpen()) {
+          <div class="problems-body">
+            @for (p of shownProblems(); track problemKey(p)) {
+              <div class="pcard" [class.warn]="p.severity === 'warning'" [class.focus]="focusKey() === problemKey(p)"
+                (click)="focusProblem(p)">
+                <div class="pcard-h">
+                  <svg class="ico picon"><use [attr.href]="p.severity === 'warning' ? '#i-warn' : '#i-err'"></use></svg>
+                  <b class="ptitle">{{ p.title }}</b>
+                  @if (p.node_id || p.edge) {
+                    <button type="button" class="pshow" (click)="focusProblem(p, $event)"
+                      title="Show it on the canvas">Show</button>
+                  }
+                </div>
+                <div class="pmsg">{{ p.message }}</div>
+                @if (p.why) {
+                  <details class="pwhy" (click)="$event.stopPropagation()">
+                    <summary>Why?</summary>
+                    <span
+                      >@for (seg of parts(p.why); track $index) {@if (seg.term) {<button type="button" class="term"
+                            (click)="toggleTerm(p, seg.term, $event)" title="What does it mean?">{{ seg.text }}</button
+                        >} @else {<span>{{ seg.text }}</span>}}</span
+                    >
+                  </details>
+                }
+                @if (p.todo) {
+                  <div class="ptodo">
+                    <b>What to do:</b>&nbsp;@for (seg of parts(p.todo); track $index) {@if (seg.term) {<button
+                          type="button" class="term" (click)="toggleTerm(p, seg.term, $event)"
+                          title="What does it mean?">{{ seg.text }}</button
+                        >} @else {<span>{{ seg.text }}</span>}}
+                  </div>
+                }
+                @if (termText(p); as tt) {
+                  <div class="pterm"><b>{{ tt.term }}</b> — {{ tt.text }}</div>
+                }
+                @if (p.fixes.length) {
+                  <div class="pfixes">
+                    @for (f of p.fixes; track $index) {
+                      <button type="button" class="pfix" [class.first]="$first" (click)="applyFix(f, $event)"
+                        [title]="'One click: ' + f.label">{{ f.label }}</button>
+                    }
+                  </div>
+                }
+              </div>
+            }
+            @if (problemList().length > PROBLEMS_SHOWN) {
+              <button type="button" class="pmore" (click)="problemsAll.set(!problemsAll())">
+                {{ problemsAll() ? 'Show fewer' : 'Show all ' + problemList().length }}
+              </button>
+            }
           </div>
         }
       </div>
-
-      @if (connectFrom()) {
-        <div class="hint">Click another node's top port (input) to connect · click the canvas to cancel</div>
-      }
-      <div class="zoomhint">{{ zoom() * 100 | number: '1.0-0' }}%</div>
-      @if (backendOutdated()) {
-        <div class="outdated" (pointerdown)="$event.stopPropagation()">
-          ⚠ The server still runs an older backend than this page. Connections will not adapt by themselves, errors
-          come without hints, and accuracy on new data, the final test and saved weights are missing until the
-          backend is restarted.
-        </div>
-      }
-      @if (dropHover()) {
-        <div class="drop-hint">Drop a .mlc.json project file to open it</div>
-      }
-      @if (problemList().length || fixNote()) {
-        <div class="problems" [class.collapsed]="!problemsOpen()" (pointerdown)="$event.stopPropagation()"
-          (wheel)="$event.stopPropagation()">
-          <button type="button" class="problems-h" (click)="problemsOpen.set(!problemsOpen())"
-            [title]="problemsOpen() ? 'Hide the problems' : 'Show the problems'">
-            @if (errorCount()) {
-              <span class="cnt err">⛔ {{ errorCount() }} {{ errorCount() === 1 ? 'problem' : 'problems' }}</span>
-            }
-            @if (warningCount()) {
-              <span class="cnt wrn">⚠ {{ warningCount() }} {{ warningCount() === 1 ? 'warning' : 'warnings' }}</span>
-            }
-            @if (!problemList().length) {
-              <span class="cnt ok">✓ No problems</span>
-            }
-            <span class="chev">{{ problemsOpen() ? '▾' : '▸' }}</span>
-          </button>
-          @if (fixNote(); as fn) {
-            <div class="fix-note">{{ fn }}</div>
+    }
+    @if (notice(); as nt) {
+      <div
+        class="notice"
+        [class.warn]="nt.kind === 'warn'"
+        [class.error]="nt.kind === 'error'"
+        (pointerdown)="$event.stopPropagation()"
+      >
+        <div class="notice-body">
+          <div class="notice-text">{{ nt.text }}</div>
+          @for (d of nt.details; track $index) {
+            <div class="notice-d">• {{ d }}</div>
           }
-          @if (problemsOpen()) {
-            <div class="problems-body">
-              @for (p of shownProblems(); track problemKey(p)) {
-                <div class="pcard" [class.warn]="p.severity === 'warning'" [class.focus]="focusKey() === problemKey(p)"
-                  (click)="focusProblem(p)">
-                  <div class="pcard-h">
-                    <span class="picon">{{ p.severity === 'warning' ? '⚠' : '⛔' }}</span>
-                    <b class="ptitle">{{ p.title }}</b>
-                    @if (p.node_id || p.edge) {
-                      <button type="button" class="pshow" (click)="focusProblem(p, $event)"
-                        title="Show it on the canvas">Show</button>
-                    }
-                  </div>
-                  <div class="pmsg">{{ p.message }}</div>
-                  @if (p.why) {
-                    <details class="pwhy" (click)="$event.stopPropagation()">
-                      <summary>Why?</summary>
-                      <span
-                        >@for (seg of parts(p.why); track $index) {@if (seg.term) {<button type="button" class="term"
-                              (click)="toggleTerm(p, seg.term, $event)" title="What does it mean?">{{ seg.text }}</button
-                          >} @else {<span>{{ seg.text }}</span>}}</span
-                      >
-                    </details>
-                  }
-                  @if (p.todo) {
-                    <div class="ptodo">
-                      <b>What to do:</b>&nbsp;@for (seg of parts(p.todo); track $index) {@if (seg.term) {<button
-                            type="button" class="term" (click)="toggleTerm(p, seg.term, $event)"
-                            title="What does it mean?">{{ seg.text }}</button
-                          >} @else {<span>{{ seg.text }}</span>}}
-                    </div>
-                  }
-                  @if (termText(p); as tt) {
-                    <div class="pterm"><b>{{ tt.term }}</b> — {{ tt.text }}</div>
-                  }
-                  @if (p.fixes.length) {
-                    <div class="pfixes">
-                      @for (f of p.fixes; track $index) {
-                        <button type="button" class="pfix" [class.first]="$first" (click)="applyFix(f, $event)"
-                          [title]="'One click: ' + f.label">{{ f.label }}</button>
-                      }
-                    </div>
+        </div>
+        <button type="button" class="notice-x" title="Dismiss" (click)="notice.set(null)">
+          <svg class="ico"><use href="#i-x"></use></svg>
+        </button>
+      </div>
+    }
+  </main>
+
+  <!-- ==================== inspector ==================== -->
+  <aside class="panel inspector">
+    <!-- ---------- the selected layer or connection ---------- -->
+    <section class="sec">
+      <button type="button" class="sec-h" (click)="toggleSec('node')" [attr.aria-expanded]="isSecOpen('node')">
+        <svg class="ico chev" [class.open]="isSecOpen('node')"><use href="#i-chev"></use></svg>
+        {{ selectedEdgeObj() ? 'Connection' : selectedNode() ? 'Layer' : 'Inspector' }}
+      </button>
+      @if (isSecOpen('node')) {
+        <div class="sec-b">
+          @if (selectedEdgeObj(); as ce) {
+            <!-- ============ a connection (Stage 14) ============ -->
+            <div class="conn">
+              <div class="insp-head" [style.--fam]="'var(--accent)'">
+                <span class="ih-ico"><svg class="ico"><use href="#i-wire"></use></svg></span>
+                <div class="ih-t">
+                  <div class="ih-title">Connection</div>
+                  <div class="ih-sub">{{ ce.source }} → {{ ce.target }}</div>
+                </div>
+              </div>
+              @if (selectedEdgeInfo(); as ei) {
+                <div class="conn-shapes">
+                  <span class="badge">{{ ei.in_shape.join('×') }}</span>
+                  <svg class="ico"><use href="#i-chev"></use></svg>
+                  <span class="badge">{{ ei.out_shape.join('×') }}</span>
+                  @if (ei.num_params) {
+                    <span class="conn-weights">{{ ei.num_params | number }} weights</span>
                   }
                 </div>
+              } @else if (connOptions()?.in_shape; as ish) {
+                <div class="conn-shapes">arriving <span class="badge">{{ ish.join('×') }}</span></div>
               }
-              @if (problemList().length > PROBLEMS_SHOWN) {
-                <button type="button" class="pmore" (click)="problemsAll.set(!problemsAll())">
-                  {{ problemsAll() ? 'Show fewer' : 'Show all ' + problemList().length }}
+
+              <div class="field">
+                <label class="f-label" for="conn-transform">Transform</label>
+                <select id="conn-transform" class="select" (change)="setEdgeTransform($any($event).target.value)">
+                  <option value="auto" [selected]="!ce.transform || ce.transform === 'auto'">
+                    Auto (recommended){{ autoSummary() }}
+                  </option>
+                  @for (o of connOptions()?.options ?? []; track o.transform) {
+                    <option
+                      [value]="o.transform"
+                      [selected]="o.transform === ce.transform"
+                      [disabled]="!o.fits && o.transform !== ce.transform"
+                      [title]="o.note || o.description"
+                    >
+                      {{ o.label }}{{ o.learnable ? ' · learns weights' : '' }}{{ o.fits ? '' : ' — does not fit here' }}
+                    </option>
+                  }
+                </select>
+              </div>
+
+              @if (currentOption(); as opt) {
+                <div class="conn-desc">{{ opt.description }}</div>
+                @if (opt.presets.length > 1) {
+                  <div class="conn-presets">
+                    @for (p of opt.presets.slice(0, 6); track $index) {
+                      <button type="button" class="chip" [class.on]="isPresetActive(p)" (click)="applyEdgePreset(p)">
+                        {{ presetLabel(p) }}
+                      </button>
+                    }
+                  </div>
+                }
+                @for (p of opt.params; track p.name) {
+                  <div class="field">
+                    <label class="f-label">{{ p.label || p.name }}</label>
+                    @if (p.choices?.length) {
+                      <select class="select" (change)="setEdgeParam(p, $any($event).target.value)">
+                        @for (c of p.choices; track c) {
+                          <option [value]="c" [selected]="edgeParam(p) === c">{{ c }}</option>
+                        }
+                      </select>
+                    } @else {
+                      <input
+                        class="input"
+                        [type]="p.type === 'int' || p.type === 'float' ? 'number' : 'text'"
+                        [value]="edgeParam(p)"
+                        (input)="setEdgeParam(p, $any($event).target.value)"
+                      />
+                    }
+                    @if (p.help) {
+                      <span class="f-help">{{ p.help }}</span>
+                    }
+                  </div>
+                }
+              } @else if (!ce.transform || ce.transform === 'auto') {
+                <div class="conn-desc">
+                  Auto picks the simplest change that lets {{ ce.target }} take what {{ ce.source }} sends — nothing at
+                  all when the shapes already fit. Pick a transform above to choose yourself.
+                </div>
+              }
+
+              @if (connOptions()?.problem; as pr) {
+                <div class="callout err">{{ pr }}</div>
+              }
+              @if (connError()) {
+                <div class="callout warn">{{ connError() }}</div>
+              }
+              <button type="button" class="btn danger sm block del-btn" (click)="deleteSelectedEdge()">
+                <svg class="ico"><use href="#i-clear"></use></svg>Delete connection
+              </button>
+              <span class="f-help">Tip: select a connection or a node and press Delete.</span>
+            </div>
+          } @else if (selectedNode(); as n) {
+            <!-- ============ a layer ============ -->
+            @let fam = famOf(n);
+            @let info = selectedInfo();
+            <div class="insp-head" [style.--fam]="famVar(fam.key)">
+              <span class="ih-ico"><svg class="ico"><use [attr.href]="'#i-' + fam.icon"></use></svg></span>
+              <div class="ih-t">
+                <div class="ih-title">{{ nodeTitle(n) }}</div>
+                <div class="ih-sub">{{ fam.label }} · {{ n.id }}</div>
+              </div>
+              @if (info?.doc) {
+                <button type="button" class="btn ghost sm icon" [class.on]="docOpen()" (click)="docOpen.set(!docOpen())"
+                  title="What does this layer do?">
+                  <svg class="ico"><use href="#i-help"></use></svg>
                 </button>
               }
             </div>
+            @if (docOpen() && info?.doc) {
+              <div class="doc">{{ info?.doc }}</div>
+            }
+            @if (info) {
+              @let g = selectedGroups();
+              @if (g.main.length) {
+                @if (g.options.length || g.advanced.length) {
+                  <div class="grp-h">Settings</div>
+                }
+                @for (p of g.main; track p.name) {
+                  <ng-container *ngTemplateOutlet="paramField; context: { $implicit: p, params: n.params, node: n.id, inner: null }"></ng-container>
+                }
+              }
+              @if (g.options.length) {
+                <div class="grp-h">Options</div>
+                @for (p of g.options; track p.name) {
+                  <ng-container *ngTemplateOutlet="paramField; context: { $implicit: p, params: n.params, node: n.id, inner: null }"></ng-container>
+                }
+              }
+              @if (g.advanced.length) {
+                <button type="button" class="grp-h grp-toggle" (click)="advOpen.set(!advOpen())" [attr.aria-expanded]="advOpen()">
+                  <svg class="ico chev" [class.open]="advOpen()"><use href="#i-chev"></use></svg>
+                  Advanced <span class="grp-n">{{ g.advanced.length }}</span>
+                </button>
+                @if (advOpen()) {
+                  @for (p of g.advanced; track p.name) {
+                    <ng-container *ngTemplateOutlet="paramField; context: { $implicit: p, params: n.params, node: n.id, inner: null }"></ng-container>
+                  }
+                }
+              }
+              @if (!info.params.length && n.type !== 'Repeat') {
+                <span class="f-help">This layer has no settings.</span>
+              }
+            }
+            @if (n.type === 'Repeat') {
+              <div class="block-editor">
+                <div class="grp-h">Inner layers · stamped ×{{ n.params['repeat'] }}</div>
+                @if (blockLayers().length) {
+                  <ol class="be-list">
+                    @for (il of blockLayers(); track $index) {
+                      @let ilInfo = innerInfo(il.type);
+                      <li [class.sel]="innerSel() === $index" (click)="innerSel.set($index)"
+                        [style.--fam]="famVar(ilInfo ? famKey(ilInfo) : 'other')">
+                        <span class="be-ico"><svg class="ico"><use [attr.href]="'#i-' + (ilInfo ? layerIcon(ilInfo) : 'dot')"></use></svg></span>
+                        <span class="be-type">{{ il.type }}</span>
+                        <button type="button" class="btn ghost sm icon be-x" title="Remove this inner layer"
+                          (click)="removeInner($index); $event.stopPropagation()">
+                          <svg class="ico"><use href="#i-x"></use></svg>
+                        </button>
+                      </li>
+                    }
+                  </ol>
+                } @else {
+                  <span class="f-help">No inner layers yet — add one below.</span>
+                }
+                <select class="select be-add" (change)="addInner($any($event).target.value); $any($event).target.value = ''">
+                  <option value="">+ Add inner layer…</option>
+                  @for (t of innerTypes(); track t) {
+                    <option [value]="t">{{ t }}</option>
+                  }
+                </select>
+
+                @if (innerSel() !== null && blockLayers()[innerSel()!]; as il) {
+                  @if (innerInfo(il.type); as iinfo) {
+                    @let ig = groupsOf(iinfo.params);
+                    @if (ig.main.length) {
+                      <div class="grp-h">{{ il.type }} · settings</div>
+                      @for (p of ig.main; track p.name) {
+                        <ng-container *ngTemplateOutlet="paramField; context: { $implicit: p, params: il.params, node: n.id, inner: innerSel() }"></ng-container>
+                      }
+                    }
+                    @if (ig.options.length) {
+                      <div class="grp-h">{{ ig.main.length ? 'Options' : il.type + ' · options' }}</div>
+                      @for (p of ig.options; track p.name) {
+                        <ng-container *ngTemplateOutlet="paramField; context: { $implicit: p, params: il.params, node: n.id, inner: innerSel() }"></ng-container>
+                      }
+                    }
+                    @if (ig.advanced.length) {
+                      <button type="button" class="grp-h grp-toggle" (click)="advOpen.set(!advOpen())" [attr.aria-expanded]="advOpen()">
+                        <svg class="ico chev" [class.open]="advOpen()"><use href="#i-chev"></use></svg>
+                        Advanced <span class="grp-n">{{ ig.advanced.length }}</span>
+                      </button>
+                      @if (advOpen()) {
+                        @for (p of ig.advanced; track p.name) {
+                          <ng-container *ngTemplateOutlet="paramField; context: { $implicit: p, params: il.params, node: n.id, inner: innerSel() }"></ng-container>
+                        }
+                      }
+                    }
+                  }
+                }
+              </div>
+            }
+            <button type="button" class="btn danger sm block del-btn" (click)="deleteSelected()">
+              <svg class="ico"><use href="#i-clear"></use></svg>Delete node
+            </button>
+          } @else {
+            <div class="empty-insp">
+              <p>Click a node to edit its settings, or a connection (a line) to set how it reshapes the data.</p>
+              <p>To connect: click a node's bottom port (output), then another node's top port (input).</p>
+            </div>
           }
         </div>
       }
-      @if (notice(); as nt) {
-        <div
-          class="notice"
-          [class.warn]="nt.kind === 'warn'"
-          [class.error]="nt.kind === 'error'"
-          (pointerdown)="$event.stopPropagation()"
-        >
-          <div class="notice-body">
-            <div class="notice-text">{{ nt.text }}</div>
-            @for (d of nt.details; track $index) {
-              <div class="notice-d">• {{ d }}</div>
-            }
-          </div>
-          <button type="button" class="notice-x" title="Dismiss" (click)="notice.set(null)">✕</button>
-        </div>
-      }
-    </main>
+    </section>
 
-    <!-- ==================== inspector ==================== -->
-    <aside class="panel inspector">
-      <div class="panel-h">Inspector</div>
-      @if (selectedEdgeObj(); as ce) {
-        <!-- ============ a connection (Stage 14) ============ -->
-        <div class="pad conn">
-          <div class="insp-title">Connection <ion-note>· {{ ce.source }} → {{ ce.target }}</ion-note></div>
-          @if (selectedEdgeInfo(); as ei) {
-            <div class="conn-shapes">
-              [{{ ei.in_shape.join('×') }}] → [{{ ei.out_shape.join('×') }}]
-              @if (ei.num_params) {
-                <span class="conn-weights">· {{ ei.num_params | number }} weights</span>
+    <!-- ---------- training ---------- -->
+    <section class="sec">
+      <button type="button" class="sec-h" (click)="toggleSec('train')" [attr.aria-expanded]="isSecOpen('train')">
+        <svg class="ico chev" [class.open]="isSecOpen('train')"><use href="#i-chev"></use></svg>
+        Training
+      </button>
+      @if (isSecOpen('train')) {
+        <div class="sec-b train-cfg">
+          @if (stage8()) {
+            <div class="grp-h">Data</div>
+            <div class="field">
+              <label class="f-label" for="mlc-dataset">Dataset</label>
+              <select id="mlc-dataset" class="select" (change)="setDataset($any($event).target.value)">
+                @for (d of datasets(); track d.id) {
+                  <option [value]="d.id" [selected]="d.id === dataset()" [title]="d.description">{{ d.name }}</option>
+                }
+              </select>
+              @if (datasetInfo(dataset())?.input_shape; as sh) {
+                <span class="f-help">needs Input [{{ sh.join('×') }}]</span>
+              }
+              @if (isGenerative(taskName())) {
+                <span class="f-help task-note">
+                  {{ taskName() === 'diffusion'
+                    ? 'Learns to see the noise in noisy pictures — then draws new ones from pure noise.'
+                    : 'Learns to give back its input' + (analysis()?.layers?.some(isSampler) ? ', through random codes — then draws new pictures.' : '.') }}
+                </span>
               }
             </div>
-          } @else if (connOptions()?.in_shape; as ish) {
-            <div class="conn-shapes">arriving: [{{ ish.join('×') }}]</div>
+            <div class="btn-row">
+              <button type="button" class="btn sm" [disabled]="busy() || !nodes().length" (click)="openData()">
+                <svg class="ico"><use href="#i-data"></use></svg>Data
+              </button>
+              <button type="button" class="btn sm" [disabled]="busy() || !nodes().length" (click)="openExport()">
+                <svg class="ico"><use href="#i-code"></use></svg>Export .py
+              </button>
+              <button type="button" class="btn sm" [disabled]="busy() || weightsBusy() || !nodes().length"
+                (click)="weightsInput.click()"
+                title="Load a .pt weights file saved from this graph (Save weights) or by the exported model.py">
+                <svg class="ico"><use href="#i-upload"></use></svg>{{ weightsBusy() ? 'Loading…' : 'Load weights' }}
+              </button>
+              <input #weightsInput class="weights-file" type="file" accept=".pt,.pth,application/octet-stream"
+                (change)="onWeightsFile($event)" hidden />
+            </div>
+            @if (loadedWeights(); as lw) {
+              <div class="weights-loaded">
+                <span title="{{ lw.info.note }}"><svg class="ico"><use href="#i-upload"></use></svg> Starts from <b>{{ lw.name }}</b></span>
+                <button type="button" class="lw-x" title="Train from fresh weights instead" (click)="clearLoadedWeights()">
+                  <svg class="ico"><use href="#i-x"></use></svg>
+                </button>
+              </div>
+            }
           }
 
-          <label class="conn-label" for="conn-transform">Transform</label>
-          <select id="conn-transform" class="ds-select" (change)="setEdgeTransform($any($event).target.value)">
-            <option value="auto" [selected]="!ce.transform || ce.transform === 'auto'">
-              Auto (recommended){{ autoSummary() }}
-            </option>
-            @for (o of connOptions()?.options ?? []; track o.transform) {
-              <option
-                [value]="o.transform"
-                [selected]="o.transform === ce.transform"
-                [disabled]="!o.fits && o.transform !== ce.transform"
-                [title]="o.note || o.description"
-              >
-                {{ o.label }}{{ o.learnable ? ' · learns weights' : '' }}{{ o.fits ? '' : ' — does not fit here' }}
-              </option>
-            }
-          </select>
+          <div class="grp-h">Schedule</div>
+          <div class="field">
+            <div class="f-label">Epochs</div>
+            <div class="slider-row">
+              <input class="range" type="range" min="0" [max]="EPOCH_STEPS.length - 1" step="1" aria-label="Epochs"
+                [value]="ladderIdx(EPOCH_STEPS, epochs())" [style.--pct]="ladderPct(EPOCH_STEPS, epochs())"
+                (input)="epochs.set(EPOCH_STEPS[+$any($event).target.value])" />
+              <input class="input" type="number" min="1" aria-label="Epochs" [value]="epochs()"
+                (input)="epochs.set(+$any($event).target.value)" />
+            </div>
+            <span class="f-help">How many times it goes through the training rows.</span>
+          </div>
+          <div class="field">
+            <div class="f-label">Learning rate</div>
+            <div class="slider-row">
+              <input class="range" type="range" min="0" [max]="LR_STEPS.length - 1" step="1" aria-label="Learning rate"
+                [value]="ladderIdx(LR_STEPS, lr())" [style.--pct]="ladderPct(LR_STEPS, lr())"
+                (input)="lr.set(LR_STEPS[+$any($event).target.value])" />
+              <input class="input" type="number" step="any" aria-label="Learning rate" [value]="lr()"
+                (input)="lr.set(+$any($event).target.value)" />
+            </div>
+            <span class="f-help">How big each step of learning is: too small learns slowly, too big jumps around.</span>
+          </div>
+          <div class="field">
+            <div class="f-label">Batch size</div>
+            <div class="slider-row">
+              <input class="range" type="range" min="0" [max]="BATCH_STEPS.length - 1" step="1" aria-label="Batch size"
+                [value]="ladderIdx(BATCH_STEPS, batchSize())" [style.--pct]="ladderPct(BATCH_STEPS, batchSize())"
+                (input)="batchSize.set(BATCH_STEPS[+$any($event).target.value])" />
+              <input class="input" type="number" min="1" aria-label="Batch size" [value]="batchSize()"
+                (input)="batchSize.set(+$any($event).target.value)" />
+            </div>
+            <span class="f-help">Rows per step.</span>
+          </div>
+          <div class="field">
+            <div class="f-label">Samples</div>
+            <div class="slider-row">
+              <input class="range" type="range" min="0" [max]="SAMPLE_STEPS.length - 1" step="1" aria-label="Samples"
+                [value]="ladderIdx(SAMPLE_STEPS, samples())" [style.--pct]="ladderPct(SAMPLE_STEPS, samples())"
+                (input)="samples.set(SAMPLE_STEPS[+$any($event).target.value])" />
+              <input class="input" type="number" min="1" aria-label="Samples" [value]="samples()"
+                (input)="samples.set(+$any($event).target.value)" />
+            </div>
+            <span class="f-help">How many rows to make or take from the dataset.</span>
+          </div>
 
-          @if (currentOption(); as opt) {
-            <div class="conn-desc">{{ opt.description }}</div>
-            @if (opt.presets.length > 1) {
-              <div class="conn-presets">
-                @for (p of opt.presets.slice(0, 6); track $index) {
-                  <button type="button" class="chip" [class.on]="isPresetActive(p)" (click)="applyEdgePreset(p)">
-                    {{ presetLabel(p) }}
+          <div class="grp-h">Checks</div>
+          <div class="field">
+            <div class="f-label">Check on new data</div>
+            <div class="seg" role="radiogroup" aria-label="Check on new data">
+              @for (c of valChoices; track c.value) {
+                <button type="button" role="radio" [attr.aria-checked]="c.value === valFraction()"
+                  [class.on]="c.value === valFraction()" [title]="c.label" (click)="setValFraction(c.value)">{{ c.short }}</button>
+              }
+              @if (valChoiceMissing()) {
+                <button type="button" class="on" [title]="pct(valFraction()) + ' of rows'">{{ pct(valFraction()) }}</button>
+              }
+            </div>
+            <span class="f-help">
+              @if (valFraction() > 0) {
+                {{ pct(valFraction()) }} of the rows are held out: the network never trains on them, so their accuracy
+                shows how it does on new data.
+              } @else {
+                Off: accuracy is measured on the very rows it trained on.
+              }
+            </span>
+          </div>
+          <div class="field">
+            <div class="f-label">Final test</div>
+            <div class="seg" role="radiogroup" aria-label="Final test">
+              @for (c of testChoices; track c.value) {
+                <button type="button" role="radio" [attr.aria-checked]="c.value === testFraction()"
+                  [class.on]="c.value === testFraction()" [title]="c.label" (click)="setTestFraction(c.value)">{{ c.short }}</button>
+              }
+              @if (testChoiceMissing()) {
+                <button type="button" class="on" [title]="pct(testFraction()) + ' of rows'">{{ pct(testFraction()) }}</button>
+              }
+            </div>
+            <span class="f-help">
+              @if (testFraction() > 0) {
+                {{ pct(testFraction()) }} more are kept for one final check: not trained on, not judged per epoch. Press
+                Test when you are done tuning.
+              } @else {
+                Off: no rows are kept for a final test.
+              }
+            </span>
+          </div>
+          @if (stage8() && cudaAvailable()) {
+            <div class="field">
+              <div class="f-label">Device</div>
+              <div class="seg" role="radiogroup" aria-label="Device">
+                <button type="button" role="radio" [attr.aria-checked]="device() === 'cpu'" [class.on]="device() === 'cpu'"
+                  (click)="device.set('cpu')">CPU</button>
+                <button type="button" role="radio" [attr.aria-checked]="device() === 'cuda'" [class.on]="device() === 'cuda'"
+                  (click)="device.set('cuda')">GPU (CUDA)</button>
+              </div>
+              <span class="f-help">CPU by default; pick GPU to train on CUDA.</span>
+            </div>
+          }
+          @if (stage8()) {
+            <div class="grp-h">Checkpoints</div>
+            <label class="switch">
+              <input type="checkbox" [checked]="saveCheckpoint()" (change)="saveCheckpoint.set($any($event).target.checked)" />
+              <span class="track"></span><span>Save checkpoint</span>
+            </label>
+            <label class="switch">
+              <input type="checkbox" [checked]="resumeCheckpoint()" (change)="resumeCheckpoint.set($any($event).target.checked)" />
+              <span class="track"></span><span>Resume from checkpoint</span>
+            </label>
+          }
+        </div>
+      }
+    </section>
+
+    <!-- ---------- result ---------- -->
+    <section class="sec">
+      <button type="button" class="sec-h" (click)="toggleSec('result')" [attr.aria-expanded]="isSecOpen('result')">
+        <svg class="ico chev" [class.open]="isSecOpen('result')"><use href="#i-chev"></use></svg>
+        Result
+      </button>
+      @if (isSecOpen('result')) {
+        <div class="sec-b result">
+          @if (inspectOnly() && analysis(); as an) {
+            @if (an.train_note) {
+              <div class="callout info">{{ an.train_note }}</div>
+            } @else {
+              <div class="callout info">
+                <b>Real size · {{ an.total_params | number }} parameters.</b>
+                Built on the "meta" device: every layer and shape of the real model, no memory used. It is
+                too big to train here (the limit is {{ human(an.max_train_params) }}): the mini version in the
+                library trains.
+              </div>
+            }
+          }
+          @if (onceResult(); as r) {
+            <div class="once">
+              <div class="once-h">Run once · {{ r.ms }} ms · {{ r.total_params | number }} parameters</div>
+              <div class="once-row">
+                In:
+                @for (inp of r.inputs; track inp.id) {
+                  <span class="badge once-chip" [title]="kindText(inp.kind)">{{ inp.name || inp.id }} [{{ shapeStr(inp.shape) }}]</span>
+                }
+              </div>
+              <div class="once-row">
+                Out: <b>[{{ shapeStr(r.output_shape) }}]</b> · mean {{ r.mean | number: '1.3-3' }} · spread
+                {{ r.std | number: '1.3-3' }} · from {{ r.min | number: '1.2-2' }} to {{ r.max | number: '1.2-2' }}
+              </div>
+              <div class="once-sample" title="The first numbers of the output">{{ sampleStr(r.sample) }}</div>
+              @if (!r.finite) {
+                <div class="once-warn">Some outputs are not finite numbers (NaN or infinity).</div>
+              }
+            </div>
+          }
+          @if (onceError()) {
+            <div class="callout err">{{ onceError() }}</div>
+          }
+          @if (!trainResult() && loadedWeights(); as lw) {
+            <div class="weights-actions">
+              <span class="lw-label">Loaded: {{ lw.info.tensors }} tensors, {{ lw.info.params | number }} parameters</span>
+              <button type="button" class="btn primary sm" [disabled]="testBusy()" (click)="onTest()"
+                title="Measure the loaded weights on the test rows">
+                <svg class="ico"><use href="#i-check"></use></svg>{{ testBusy() ? 'Testing…' : 'Test' }}
+              </button>
+            </div>
+          }
+          @if (busy() && !training()) {
+            <span class="f-help busy-note">Running…</span>
+          }
+          @if (runError() && runErrorInfo()?.code) {
+            <div class="callout err">{{ runErrorInfo()?.title }} — see Problems on the canvas, with fixes.</div>
+          } @else if (runError()) {
+            <div class="callout err">
+              {{ runError() }}
+              @if (runErrorInfo()?.hint; as h) {
+                <div class="hint-line">→ {{ h }}</div>
+              }
+            </div>
+          } @else if (!diagnosis() && analysisError(); as ae) {
+            <div class="callout warn">
+              <div>The graph does not build yet: {{ ae.message }}</div>
+              @if (ae.hint) {
+                <div class="hint-line">→ {{ ae.hint }}</div>
+              }
+            </div>
+          } @else if (diagnosis()?.train_issue; as ti) {
+            @if (ti.fixes.length) {
+              <div class="train-fixes">
+                @for (f of ti.fixes; track $index) {
+                  <button type="button" class="pfix" (click)="applyFix(f, $event)">{{ f.label }}</button>
+                }
+              </div>
+            }
+          }
+          @if (proposals().length) {
+            <div class="fixes">
+              <div class="grp-h">Smart adapter</div>
+              @for (p of proposals(); track p.source_id + '>' + p.target_id) {
+                <div class="fix">
+                  <span class="f-help">{{ p.reason }}</span>
+                  <button type="button" class="btn primary sm block" (click)="applyProposal(p)">Insert {{ p.adapter_type }}</button>
+                </div>
+              }
+            </div>
+          }
+          @if (buildResult(); as b) {
+            <div class="kv"><span>Parameters</span><b>{{ b.total_params | number }}</b></div>
+            <div class="kv"><span>Layers</span><b>{{ b.layers.length }}</b></div>
+            <div class="order">{{ b.order.join(' → ') }}</div>
+          }
+          @if (training() && curveLoss().length) {
+            <div class="live-h">
+              <span class="live-dot"></span>Training live · epoch {{ trainLive()?.epoch }} / {{ trainLive()?.epochs }}
+              <span class="live-pct">{{ trainPctText() }}</span>
+            </div>
+            <div class="progress"><span [style.--p]="trainPct()"></span></div>
+            <svg class="spark" viewBox="0 0 220 60" preserveAspectRatio="none">
+              <polygon class="area" [attr.points]="areaOf(lossPoints())"></polygon>
+              <polyline [attr.points]="lossPoints()"></polyline>
+            </svg>
+            <span class="f-help">loss · {{ curveLoss().length | number }} steps</span>
+            @if (curveAcc().length) {
+              <svg class="spark acc" [class.has-val]="curveValAcc().length > 0" viewBox="0 0 220 60" preserveAspectRatio="none">
+                <polyline class="train-line" [attr.points]="accPoints()"></polyline>
+                @if (curveValAcc().length) {
+                  <polyline class="val-line" [attr.points]="valAccPoints()"></polyline>
+                }
+              </svg>
+            }
+            @if (liveGallery().length) {
+              <div class="gallery">
+                <div class="gal-h">After epoch {{ liveGalleryEpoch() }}</div>
+                <div class="gal-grid">
+                  @for (g of liveGallery(); track $index) {
+                    <figure><img [src]="imgUrl(g)" [alt]="g.label" /><figcaption>{{ g.label }}</figcaption></figure>
+                  }
+                </div>
+              </div>
+            }
+          }
+          @if (trainResult(); as t) {
+            @if (isGenerative(t.task)) {
+              <div class="kv kv-main" [class.kv-good]="t.fit === 'generalises'" [class.kv-bad]="t.fit === 'overfits'"
+                [title]="t.loss_name ?? ''">
+                <span>Error on new pictures</span><b>{{ (t.final_val_loss ?? t.final_loss) | number: '1.4-4' }}</b>
+              </div>
+              <div class="kv"><span>On training pictures</span><b>{{ t.final_loss | number: '1.4-4' }}</b></div>
+              @if (t.final_kl) {
+                <div class="kv" title="The reconstruction error, and how far the codes are from N(0, I) (per number)">
+                  <span>Reconstruction · KL</span><b>{{ t.final_recon | number: '1.4-4' }} · {{ t.final_kl | number: '1.4-4' }}</b>
+                </div>
+              }
+              <div class="kv"><span>Error measured</span><b class="kv-small">{{ t.loss_name }}</b></div>
+              <div class="kv" title="Pictures trained on / judged after every epoch / kept for the final test">
+                <span>Pictures · train / check / test</span>
+                <b>{{ t.train_samples }} / {{ t.val_samples }} / {{ t.test_samples }}</b>
+              </div>
+            } @else if (t.final_val_accuracy != null) {
+              <div
+                class="kv kv-main"
+                [class.kv-good]="t.fit === 'generalises'"
+                [class.kv-bad]="t.fit === 'overfits' || t.fit === 'underfits'"
+                title="Accuracy on the rows held out from training: how it does on new data"
+              >
+                <span>On new data</span><b>{{ t.final_val_accuracy | number: '1.3-3' }}</b>
+              </div>
+              <div class="kv" title="Accuracy on the rows the network trained on">
+                <span>On training rows</span><b>{{ t.final_accuracy | number: '1.3-3' }}</b>
+              </div>
+              <div class="kv"><span>Loss · new / training</span>
+                <b>{{ t.final_val_loss | number: '1.4-4' }} / {{ t.final_loss | number: '1.4-4' }}</b></div>
+              @if (t.test_samples) {
+                <div class="kv" title="Rows trained on / judged after every epoch / kept for the final test">
+                  <span>Rows · train / check / test</span>
+                  <b>{{ t.train_samples }} / {{ t.val_samples }} / {{ t.test_samples }}</b>
+                </div>
+              } @else {
+                <div class="kv"><span>Rows · trained / held out</span><b>{{ t.train_samples }} / {{ t.val_samples }}</b></div>
+              }
+            } @else {
+              <div class="kv"><span>Accuracy (training rows)</span><b>{{ t.final_accuracy | number: '1.3-3' }}</b></div>
+              <div class="kv"><span>Final loss</span><b>{{ t.final_loss | number: '1.4-4' }}</b></div>
+            }
+            @if (t.fit_note) {
+              <div class="fit" [class.fit-good]="t.fit === 'generalises'">
+                <svg class="ico fit-i"><use [attr.href]="t.fit === 'generalises' ? '#i-ok' : '#i-warn'"></use></svg>{{ t.fit_note }}
+              </div>
+            }
+            @for (w of t.warnings ?? []; track $index) {
+              <div class="train-warn">{{ w }}</div>
+            }
+            <div class="kv"><span>Steps</span><b>{{ t.steps | number }}</b></div>
+            @if (t.seconds != null) {
+              <div class="kv" title="Training time on the server"><span>Time</span><b>{{ t.seconds | number: '1.2-2' }} s</b></div>
+            }
+            @if (t.run_id) {
+              <div class="weights-actions">
+                <button type="button" class="btn sm" (click)="onSaveWeights()" title="Download the trained weights (.pt)">
+                  <svg class="ico"><use href="#i-save"></use></svg>Save weights
+                </button>
+                @if (t.test_samples) {
+                  <button type="button" class="btn primary sm" [disabled]="testBusy()" (click)="onTest()"
+                    title="Measure these weights on the test rows: used for nothing else">
+                    <svg class="ico"><use href="#i-check"></use></svg>{{ testBusy() ? 'Testing…' : 'Test' }}
                   </button>
                 }
               </div>
             }
-            @for (p of opt.params; track p.name) {
-              <label class="conn-label">{{ p.label || p.name }}</label>
-              @if (p.choices?.length) {
-                <select class="ds-select" (change)="setEdgeParam(p, $any($event).target.value)">
-                  @for (c of p.choices; track c) {
-                    <option [value]="c" [selected]="edgeParam(p) === c">{{ c }}</option>
+            @if (isGenerative(t.task)) {
+              <div class="gallery">
+                <div class="gal-h">
+                  {{ drawResult() ? 'Drawn · ' + drawResult()!.ms + ' ms'
+                    : t.task === 'diffusion' ? 'Drawn by the trained network'
+                    : 'Originals, reconstructions' + (t.draw_free ? ' and new pictures' : '') }}
+                </div>
+                <div class="gal-grid">
+                  @for (g of drawResult()?.images ?? t.gallery ?? []; track $index) {
+                    <figure><img [src]="imgUrl(g)" [alt]="g.label" /><figcaption>{{ g.label }}</figcaption></figure>
                   }
-                </select>
-              } @else {
-                <input
-                  class="conn-input"
-                  [type]="p.type === 'int' || p.type === 'float' ? 'number' : 'text'"
-                  [value]="edgeParam(p)"
-                  (input)="setEdgeParam(p, $any($event).target.value)"
-                />
-              }
-              @if (p.help) {
-                <ion-note class="help">{{ p.help }}</ion-note>
-              }
-            }
-          } @else if (!ce.transform || ce.transform === 'auto') {
-            <div class="conn-desc">
-              Auto picks the simplest change that lets {{ ce.target }} take what {{ ce.source }} sends — nothing at
-              all when the shapes already fit. Pick a transform above to choose yourself.
-            </div>
-          }
-
-          @if (connOptions()?.problem; as pr) {
-            <ion-note color="danger" class="block conn-problem">{{ pr }}</ion-note>
-          }
-          @if (connError()) {
-            <ion-note color="warning" class="block conn-problem">{{ connError() }}</ion-note>
-          }
-          <ion-button expand="block" fill="outline" color="danger" size="small" (click)="deleteSelectedEdge()">
-            Delete connection
-          </ion-button>
-          <ion-note class="muted block conn-tip">Tip: select a connection or a node and press Delete.</ion-note>
-        </div>
-      } @else if (selectedNode(); as n) {
-        <div class="pad">
-          <div class="insp-title">{{ nodeTitle(n) }} <ion-note>· {{ n.id }}</ion-note></div>
-          @if (selectedInfo(); as info) {
-            <ion-list lines="none">
-              @for (p of info.params; track p.name) {
-                <ion-item>
-                  <ion-label position="stacked">{{ p.label || p.name }}</ion-label>
-                  @switch (p.type) {
-                    @case ('bool') {
-                      <ion-checkbox
-                        slot="start"
-                        [checked]="!!n.params[p.name]"
-                        (ionChange)="setParam(n.id, p, $any($event).detail.checked)"
-                      ></ion-checkbox>
-                    }
-                    @default {
-                      <ion-input
-                        [value]="paramDisplay(n, p)"
-                        [type]="p.type === 'int' || p.type === 'float' ? 'number' : 'text'"
-                        (ionInput)="setParam(n.id, p, $any($event).detail.value)"
-                      ></ion-input>
-                    }
-                  }
-                  @if (p.help) {
-                    <ion-note class="help">{{ p.help }}</ion-note>
-                  }
-                </ion-item>
-              }
-            </ion-list>
-          }
-          @if (n.type === 'Repeat') {
-            <div class="block-editor">
-              <div class="be-h">Inner layers (stamped ×{{ n.params['repeat'] }})</div>
-              @if (blockLayers().length) {
-                <ol class="be-list">
-                  @for (il of blockLayers(); track $index) {
-                    <li [class.sel]="innerSel() === $index" (click)="innerSel.set($index)">
-                      <span class="be-type">{{ il.type }}</span>
-                      <ion-button fill="clear" size="small" color="danger" (click)="removeInner($index); $event.stopPropagation()">✕</ion-button>
-                    </li>
-                  }
-                </ol>
-              } @else {
-                <ion-note class="muted block">No inner layers yet — add one below.</ion-note>
-              }
-              <select class="be-add" (change)="addInner($any($event).target.value); $any($event).target.value = ''">
-                <option value="">+ Add inner layer…</option>
-                @for (t of innerTypes(); track t) {
-                  <option [value]="t">{{ t }}</option>
+                </div>
+                @if (drawResult()?.note; as note) {
+                  <span class="f-help">{{ note }}</span>
                 }
-              </select>
-
-              @if (innerSel() !== null && blockLayers()[innerSel()!]; as il) {
-                @if (innerInfo(il.type); as info) {
-                  @if (info.params.length) {
-                    <div class="be-params-h">{{ il.type }} · parameters</div>
-                    <ion-list lines="none">
-                      @for (p of info.params; track p.name) {
-                        <ion-item>
-                          <ion-label position="stacked">{{ p.label || p.name }}</ion-label>
-                          @switch (p.type) {
-                            @case ('bool') {
-                              <ion-checkbox
-                                slot="start"
-                                [checked]="!!il.params[p.name]"
-                                (ionChange)="setInnerParam(innerSel()!, p, $any($event).detail.checked)"
-                              ></ion-checkbox>
-                            }
-                            @default {
-                              <ion-input
-                                [value]="il.params[p.name]"
-                                [type]="p.type === 'int' || p.type === 'float' ? 'number' : 'text'"
-                                (ionInput)="setInnerParam(innerSel()!, p, $any($event).detail.value)"
-                              ></ion-input>
-                            }
+              </div>
+              @if (t.run_id) {
+                <div class="gen-box">
+                  <div class="grp-h"><svg class="ico"><use href="#i-brush"></use></svg>Draw with your model</div>
+                  <div class="gen-controls">
+                    @if (t.draw_classes) {
+                      <label>Class
+                        <select class="select" (change)="drawLabel.set($any($event).target.value)">
+                          <option value="" [selected]="drawLabel() === ''">one of each</option>
+                          @for (c of drawClassOptions(); track c) {
+                            <option [value]="c" [selected]="drawLabel() === '' + c">{{ c }}</option>
                           }
-                        </ion-item>
-                      }
-                    </ion-list>
-                  }
-                }
-              }
-            </div>
-          }
-          <ion-button expand="block" fill="outline" color="danger" size="small" (click)="deleteSelected()">
-            Delete node
-          </ion-button>
-        </div>
-      } @else {
-        <ion-note class="pad block muted">
-          Click a node to edit its parameters, or a connection (a line) to set how it reshapes the data.<br />
-          To connect: click a node's bottom port (output), then another node's top port (input).
-        </ion-note>
-      }
-
-      <div class="panel-h">Training</div>
-      <ion-list lines="none" class="train-cfg">
-        @if (stage8()) {
-          <ion-item>
-            <ion-label position="stacked">Dataset</ion-label>
-            <select class="ds-select" (change)="setDataset($any($event).target.value)">
-              @for (d of datasets(); track d.id) {
-                <option [value]="d.id" [selected]="d.id === dataset()" [title]="d.description">{{ d.name }}</option>
-              }
-            </select>
-            @if (datasetInfo(dataset())?.input_shape; as sh) {
-              <ion-note class="help">needs Input [{{ sh.join('×') }}]</ion-note>
-            }
-            @if (isGenerative(taskName())) {
-              <ion-note class="help task-note">
-                {{ taskName() === 'diffusion'
-                  ? 'Learns to see the noise in noisy pictures — then draws new ones from pure noise.'
-                  : 'Learns to give back its input' + (analysis()?.layers?.some(isSampler) ? ', through random codes — then draws new pictures.' : '.') }}
-              </ion-note>
-            }
-          </ion-item>
-        }
-        @if (stage8() && cudaAvailable()) {
-          <ion-item>
-            <ion-label position="stacked">Device</ion-label>
-            <select class="ds-select" (change)="device.set($any($event).target.value)">
-              <option value="cpu" [selected]="device() === 'cpu'">CPU</option>
-              <option value="cuda" [selected]="device() === 'cuda'">GPU (CUDA)</option>
-            </select>
-            <ion-note class="help">CPU by default; pick GPU to train on CUDA.</ion-note>
-          </ion-item>
-        }
-        <ion-item>
-          <ion-label position="stacked">Epochs</ion-label>
-          <ion-input type="number" [value]="epochs()" (ionInput)="epochs.set(+$any($event).detail.value)"></ion-input>
-        </ion-item>
-        <ion-item>
-          <ion-label position="stacked">Learning rate</ion-label>
-          <ion-input type="number" [value]="lr()" (ionInput)="lr.set(+$any($event).detail.value)"></ion-input>
-        </ion-item>
-        <ion-item>
-          <ion-label position="stacked">Batch size</ion-label>
-          <ion-input type="number" [value]="batchSize()" (ionInput)="batchSize.set(+$any($event).detail.value)"></ion-input>
-        </ion-item>
-        <ion-item>
-          <ion-label position="stacked">Samples</ion-label>
-          <ion-input type="number" [value]="samples()" (ionInput)="samples.set(+$any($event).detail.value)"></ion-input>
-        </ion-item>
-        <ion-item>
-          <ion-label position="stacked">Check on new data</ion-label>
-          <select class="ds-select" (change)="setValFraction($any($event).target.value)">
-            @for (c of valChoices; track c.value) {
-              <option [value]="c.value" [selected]="c.value === valFraction()">{{ c.label }}</option>
-            }
-            @if (valChoiceMissing()) {
-              <option [value]="valFraction()" selected>{{ pct(valFraction()) }} of rows</option>
-            }
-          </select>
-          <ion-note class="help">
-            @if (valFraction() > 0) {
-              {{ pct(valFraction()) }} of the rows are held out: the network never trains on them, so their accuracy
-              shows how it does on new data.
-            } @else {
-              Off: accuracy is measured on the very rows it trained on.
-            }
-          </ion-note>
-        </ion-item>
-        <ion-item>
-          <ion-label position="stacked">Final test</ion-label>
-          <select class="ds-select" (change)="setTestFraction($any($event).target.value)">
-            @for (c of testChoices; track c.value) {
-              <option [value]="c.value" [selected]="c.value === testFraction()">{{ c.label }}</option>
-            }
-            @if (testChoiceMissing()) {
-              <option [value]="testFraction()" selected>{{ pct(testFraction()) }} of rows</option>
-            }
-          </select>
-          <ion-note class="help">
-            @if (testFraction() > 0) {
-              {{ pct(testFraction()) }} more are kept for one final check: not trained on, not judged per epoch. Press
-              Test when you are done tuning.
-            } @else {
-              Off: no rows are kept for a final test.
-            }
-          </ion-note>
-        </ion-item>
-        @if (stage8()) {
-          <ion-item>
-            <ion-checkbox
-              slot="start"
-              [checked]="saveCheckpoint()"
-              (ionChange)="saveCheckpoint.set($any($event).detail.checked)"
-            ></ion-checkbox>
-            <ion-label>Save checkpoint</ion-label>
-          </ion-item>
-          <ion-item>
-            <ion-checkbox
-              slot="start"
-              [checked]="resumeCheckpoint()"
-              (ionChange)="resumeCheckpoint.set($any($event).detail.checked)"
-            ></ion-checkbox>
-            <ion-label>Resume from checkpoint</ion-label>
-          </ion-item>
-        }
-      </ion-list>
-      @if (stage8()) {
-        <div class="pad s8-actions">
-          <ion-button size="small" fill="outline" [disabled]="busy() || !nodes().length" (click)="openData()">
-            Data
-          </ion-button>
-          <ion-button size="small" fill="outline" [disabled]="busy() || !nodes().length" (click)="openExport()">
-            Export .py
-          </ion-button>
-          <ion-button size="small" fill="outline" [disabled]="busy() || weightsBusy() || !nodes().length"
-            (click)="weightsInput.click()"
-            title="Load a .pt weights file saved from this graph (Save weights) or by the exported model.py">
-            {{ weightsBusy() ? 'Loading…' : 'Load weights' }}
-          </ion-button>
-          <input #weightsInput class="weights-file" type="file" accept=".pt,.pth,application/octet-stream"
-            (change)="onWeightsFile($event)" hidden />
-        </div>
-        @if (loadedWeights(); as lw) {
-          <div class="pad weights-loaded">
-            <span title="{{ lw.info.note }}">⤓ Starts from <b>{{ lw.name }}</b></span>
-            <button class="lw-x" title="Train from fresh weights instead" (click)="clearLoadedWeights()">✕</button>
-          </div>
-        }
-      }
-
-      <div class="panel-h">Result</div>
-      <div class="pad result">
-        @if (inspectOnly() && analysis(); as an) {
-          @if (an.train_note) {
-            <div class="real-size">{{ an.train_note }}</div>
-          } @else {
-            <div class="real-size">
-              <b>Real size · {{ an.total_params | number }} parameters.</b>
-              Built on the "meta" device: every layer and shape of the real model, no memory used. It is
-              too big to train here (the limit is {{ human(an.max_train_params) }}): the mini version in the
-              library trains.
-            </div>
-          }
-        }
-        @if (onceResult(); as r) {
-          <div class="once">
-            <div class="once-h">Run once · {{ r.ms }} ms · {{ r.total_params | number }} parameters</div>
-            <div class="once-row">
-              In:
-              @for (inp of r.inputs; track inp.id) {
-                <span class="once-chip" [title]="kindText(inp.kind)">{{ inp.name || inp.id }} [{{ shapeStr(inp.shape) }}]</span>
-              }
-            </div>
-            <div class="once-row">
-              Out: <b>[{{ shapeStr(r.output_shape) }}]</b> · mean {{ r.mean | number: '1.3-3' }} · spread
-              {{ r.std | number: '1.3-3' }} · from {{ r.min | number: '1.2-2' }} to {{ r.max | number: '1.2-2' }}
-            </div>
-            <div class="once-sample" title="The first numbers of the output">{{ sampleStr(r.sample) }}</div>
-            @if (!r.finite) {
-              <div class="once-warn">Some outputs are not finite numbers (NaN or infinity).</div>
-            }
-          </div>
-        }
-        @if (onceError()) {
-          <ion-note color="danger" class="once-err">{{ onceError() }}</ion-note>
-        }
-        @if (!trainResult() && loadedWeights(); as lw) {
-          <div class="weights-actions">
-            <span class="lw-label">Loaded: {{ lw.info.tensors }} tensors, {{ lw.info.params | number }} parameters</span>
-            <ion-button size="small" fill="solid" [disabled]="testBusy()" (click)="onTest()"
-              title="Measure the loaded weights on the test rows">
-              {{ testBusy() ? 'Testing…' : 'Test' }}
-            </ion-button>
-          </div>
-        }
-        @if (busy()) {
-          <ion-note class="muted">Running…</ion-note>
-        }
-        @if (runError() && runErrorInfo()?.code) {
-          <div class="soft-problem run-problem">⛔ {{ runErrorInfo()?.title }} — see Problems on the canvas, with fixes.</div>
-        } @else if (runError()) {
-          <ion-note color="danger" class="block">{{ runError() }}</ion-note>
-          @if (runErrorInfo()?.hint; as h) {
-            <ion-note class="block hint-line">→ {{ h }}</ion-note>
-          }
-        } @else if (!diagnosis() && analysisError(); as ae) {
-          <div class="soft-problem">
-            <div>⚠ The graph does not build yet: {{ ae.message }}</div>
-            @if (ae.hint) {
-              <div class="hint-line">→ {{ ae.hint }}</div>
-            }
-          </div>
-        } @else if (diagnosis()?.train_issue; as ti) {
-          @if (ti.fixes.length) {
-            <div class="train-fixes">
-              @for (f of ti.fixes; track $index) {
-                <button type="button" class="pfix" (click)="applyFix(f, $event)">{{ f.label }}</button>
-              }
-            </div>
-          }
-        }
-        @if (proposals().length) {
-          <div class="fixes">
-            <div class="fixes-h">Smart adapter</div>
-            @for (p of proposals(); track p.source_id + '>' + p.target_id) {
-              <div class="fix">
-                <ion-note class="block">{{ p.reason }}</ion-note>
-                <ion-button size="small" expand="block" fill="solid" color="primary" (click)="applyProposal(p)">
-                  Insert {{ p.adapter_type }}
-                </ion-button>
-              </div>
-            }
-          </div>
-        }
-        @if (buildResult(); as b) {
-          <div class="kv"><span>Parameters</span><b>{{ b.total_params | number }}</b></div>
-          <div class="kv"><span>Layers</span><b>{{ b.layers.length }}</b></div>
-          <div class="order">{{ b.order.join(' → ') }}</div>
-        }
-        @if (busy() && curveLoss().length) {
-          <svg class="spark" viewBox="0 0 220 60" preserveAspectRatio="none">
-            <polyline [attr.points]="lossPoints()"></polyline>
-          </svg>
-          @if (curveAcc().length) {
-            <svg class="spark acc" [class.has-val]="curveValAcc().length > 0" viewBox="0 0 220 60" preserveAspectRatio="none">
-              <polyline class="train-line" [attr.points]="accPoints()"></polyline>
-              @if (curveValAcc().length) {
-                <polyline class="val-line" [attr.points]="valAccPoints()"></polyline>
-              }
-            </svg>
-          }
-          <ion-note class="muted">training live · {{ curveLoss().length }} steps</ion-note>
-          @if (liveGallery().length) {
-            <div class="gallery">
-              <div class="gal-h">After epoch {{ liveGalleryEpoch() }}</div>
-              <div class="gal-grid">
-                @for (g of liveGallery(); track $index) {
-                  <figure><img [src]="imgUrl(g)" [alt]="g.label" /><figcaption>{{ g.label }}</figcaption></figure>
-                }
-              </div>
-            </div>
-          }
-        }
-        @if (trainResult(); as t) {
-          @if (isGenerative(t.task)) {
-            <div class="kv kv-main" [class.kv-good]="t.fit === 'generalises'" [class.kv-bad]="t.fit === 'overfits'"
-              [title]="t.loss_name ?? ''">
-              <span>Error on new pictures</span><b>{{ (t.final_val_loss ?? t.final_loss) | number: '1.4-4' }}</b>
-            </div>
-            <div class="kv"><span>On training pictures</span><b>{{ t.final_loss | number: '1.4-4' }}</b></div>
-            @if (t.final_kl) {
-              <div class="kv" title="The reconstruction error, and how far the codes are from N(0, I) (per number)">
-                <span>Reconstruction · KL</span><b>{{ t.final_recon | number: '1.4-4' }} · {{ t.final_kl | number: '1.4-4' }}</b>
-              </div>
-            }
-            <div class="kv"><span>Error measured</span><b class="kv-small">{{ t.loss_name }}</b></div>
-            <div class="kv" title="Pictures trained on / judged after every epoch / kept for the final test">
-              <span>Pictures · train / check / test</span>
-              <b>{{ t.train_samples }} / {{ t.val_samples }} / {{ t.test_samples }}</b>
-            </div>
-          } @else if (t.final_val_accuracy != null) {
-            <div
-              class="kv kv-main"
-              [class.kv-good]="t.fit === 'generalises'"
-              [class.kv-bad]="t.fit === 'overfits' || t.fit === 'underfits'"
-              title="Accuracy on the rows held out from training: how it does on new data"
-            >
-              <span>On new data</span><b>{{ t.final_val_accuracy | number: '1.3-3' }}</b>
-            </div>
-            <div class="kv" title="Accuracy on the rows the network trained on">
-              <span>On training rows</span><b>{{ t.final_accuracy | number: '1.3-3' }}</b>
-            </div>
-            <div class="kv"><span>Loss · new / training</span>
-              <b>{{ t.final_val_loss | number: '1.4-4' }} / {{ t.final_loss | number: '1.4-4' }}</b></div>
-            @if (t.test_samples) {
-              <div class="kv" title="Rows trained on / judged after every epoch / kept for the final test">
-                <span>Rows · train / check / test</span>
-                <b>{{ t.train_samples }} / {{ t.val_samples }} / {{ t.test_samples }}</b>
-              </div>
-            } @else {
-              <div class="kv"><span>Rows · trained / held out</span><b>{{ t.train_samples }} / {{ t.val_samples }}</b></div>
-            }
-          } @else {
-            <div class="kv"><span>Accuracy (training rows)</span><b>{{ t.final_accuracy | number: '1.3-3' }}</b></div>
-            <div class="kv"><span>Final loss</span><b>{{ t.final_loss | number: '1.4-4' }}</b></div>
-          }
-          @if (t.fit_note) {
-            <div class="fit" [class.fit-good]="t.fit === 'generalises'">
-              <span class="fit-i">{{ fitIcon(t.fit) }}</span>{{ t.fit_note }}
-            </div>
-          }
-          @for (w of t.warnings ?? []; track $index) {
-            <div class="train-warn">{{ w }}</div>
-          }
-          <div class="kv"><span>Steps</span><b>{{ t.steps }}</b></div>
-          @if (t.run_id) {
-            <div class="weights-actions">
-              <ion-button size="small" fill="outline" (click)="onSaveWeights()" title="Download the trained weights (.pt)">
-                Save weights
-              </ion-button>
-              @if (t.test_samples) {
-                <ion-button size="small" fill="solid" [disabled]="testBusy()" (click)="onTest()"
-                  title="Measure these weights on the test rows: used for nothing else">
-                  {{ testBusy() ? 'Testing…' : 'Test' }}
-                </ion-button>
-              }
-            </div>
-          }
-          @if (isGenerative(t.task)) {
-            <div class="gallery">
-              <div class="gal-h">
-                {{ drawResult() ? 'Drawn · ' + drawResult()!.ms + ' ms'
-                  : t.task === 'diffusion' ? 'Drawn by the trained network'
-                  : 'Originals, reconstructions' + (t.draw_free ? ' and new pictures' : '') }}
-              </div>
-              <div class="gal-grid">
-                @for (g of drawResult()?.images ?? t.gallery ?? []; track $index) {
-                  <figure><img [src]="imgUrl(g)" [alt]="g.label" /><figcaption>{{ g.label }}</figcaption></figure>
-                }
-              </div>
-              @if (drawResult()?.note; as note) {
-                <ion-note class="block">{{ note }}</ion-note>
-              }
-            </div>
-            @if (t.run_id) {
-              <div class="gen-box">
-                <div class="ft-h">Draw with your model</div>
-                <div class="gen-controls">
-                  @if (t.draw_classes) {
-                    <label>Class
-                      <select (change)="drawLabel.set($any($event).target.value)">
-                        <option value="" [selected]="drawLabel() === ''">one of each</option>
-                        @for (c of drawClassOptions(); track c) {
-                          <option [value]="c" [selected]="drawLabel() === '' + c">{{ c }}</option>
-                        }
-                      </select>
-                    </label>
-                  }
-                  <label>How many <input type="number" min="1" max="64" [value]="drawCount()"
-                    (input)="drawCount.set(+$any($event).target.value || 10)" /></label>
-                  @if (t.task === 'diffusion') {
-                    <label title="More steps: cleaner pictures, slower">Steps <input type="number" min="1" max="1000"
-                      [value]="drawSteps()" (input)="drawSteps.set(+$any($event).target.value || 50)" /></label>
-                    @if (t.draw_classes && t.draw_free) {
-                      <label title="How strongly the class steers the picture (1 = no extra push)">Guidance
-                        <select (change)="drawGuidance.set(+$any($event).target.value)">
-                          <option value="1" [selected]="drawGuidance() === 1">1 · off</option>
-                          <option value="2" [selected]="drawGuidance() === 2">2</option>
-                          <option value="3" [selected]="drawGuidance() === 3">3</option>
-                          <option value="5" [selected]="drawGuidance() === 5">5 · strong</option>
                         </select>
                       </label>
                     }
+                    <label>How many <input class="input" type="number" min="1" max="64" [value]="drawCount()"
+                      (input)="drawCount.set(+$any($event).target.value || 10)" /></label>
+                    @if (t.task === 'diffusion') {
+                      <label title="More steps: cleaner pictures, slower">Steps <input class="input" type="number" min="1"
+                        max="1000" [value]="drawSteps()" (input)="drawSteps.set(+$any($event).target.value || 50)" /></label>
+                      @if (t.draw_classes && t.draw_free) {
+                        <label title="How strongly the class steers the picture (1 = no extra push)">Guidance
+                          <select class="select" (change)="drawGuidance.set(+$any($event).target.value)">
+                            <option value="1" [selected]="drawGuidance() === 1">1 · off</option>
+                            <option value="2" [selected]="drawGuidance() === 2">2</option>
+                            <option value="3" [selected]="drawGuidance() === 3">3</option>
+                            <option value="5" [selected]="drawGuidance() === 5">5 · strong</option>
+                          </select>
+                        </label>
+                      }
+                    }
+                    <button type="button" class="btn primary sm" [disabled]="drawBusy()" (click)="onDraw()">
+                      <svg class="ico"><use href="#i-brush"></use></svg>{{ drawBusy() ? 'Drawing…' : 'Draw' }}
+                    </button>
+                  </div>
+                  @if (drawError()) {
+                    <div class="callout err">{{ drawError() }}</div>
                   }
-                  <ion-button size="small" fill="solid" [disabled]="drawBusy()" (click)="onDraw()">
-                    {{ drawBusy() ? 'Drawing…' : 'Draw' }}
-                  </ion-button>
                 </div>
-                @if (drawError()) {
-                  <ion-note color="danger" class="block">{{ drawError() }}</ion-note>
+              }
+            }
+            @if (dataset() === 'text' && t.run_id) {
+              <div class="gen-box">
+                <div class="grp-h"><svg class="ico"><use href="#i-pen"></use></svg>Write with your model</div>
+                <textarea class="textarea gen-prompt-ta" rows="2" placeholder="Start a sentence… (empty: the text's beginning)"
+                  [value]="genPrompt()" (input)="genPrompt.set($any($event).target.value)"></textarea>
+                <div class="gen-controls">
+                  <label>Length <input class="input" type="number" min="1" max="2000" [value]="genLength()"
+                    (input)="genLength.set(+$any($event).target.value || 200)" /></label>
+                  <label title="0 = always the most likely character; higher = bolder">Boldness
+                    <select class="select" (change)="genTemperature.set(+$any($event).target.value)">
+                      <option value="0" [selected]="genTemperature() === 0">0 · most likely</option>
+                      <option value="0.5" [selected]="genTemperature() === 0.5">0.5</option>
+                      <option value="0.8" [selected]="genTemperature() === 0.8">0.8</option>
+                      <option value="1.2" [selected]="genTemperature() === 1.2">1.2 · bold</option>
+                    </select>
+                  </label>
+                  <button type="button" class="btn primary sm" [disabled]="genBusy()" (click)="onGenerate()">
+                    <svg class="ico"><use href="#i-pen"></use></svg>{{ genBusy() ? 'Writing…' : 'Write' }}
+                  </button>
+                </div>
+                @if (genError()) {
+                  <div class="callout err">{{ genError() }}</div>
+                }
+                @if (genResult(); as g) {
+                  <pre class="gen-out"><span class="gen-given">{{ g.prompt }}</span><b>{{ g.text }}</b></pre>
                 }
               </div>
             }
-          }
-          @if (dataset() === 'text' && t.run_id) {
-            <div class="gen-box">
-              <div class="ft-h">Write with your model</div>
-              <textarea class="gen-prompt-ta" rows="2" placeholder="Start a sentence… (empty: the text's beginning)"
-                [value]="genPrompt()" (input)="genPrompt.set($any($event).target.value)"></textarea>
-              <div class="gen-controls">
-                <label>Length <input type="number" min="1" max="2000" [value]="genLength()"
-                  (input)="genLength.set(+$any($event).target.value || 200)" /></label>
-                <label title="0 = always the most likely character; higher = bolder">Boldness
-                  <select (change)="genTemperature.set(+$any($event).target.value)">
-                    <option value="0" [selected]="genTemperature() === 0">0 · most likely</option>
-                    <option value="0.5" [selected]="genTemperature() === 0.5">0.5</option>
-                    <option value="0.8" [selected]="genTemperature() === 0.8">0.8</option>
-                    <option value="1.2" [selected]="genTemperature() === 1.2">1.2 · bold</option>
-                  </select>
-                </label>
-                <ion-button size="small" fill="solid" [disabled]="genBusy()" (click)="onGenerate()">
-                  {{ genBusy() ? 'Writing…' : 'Write' }}
-                </ion-button>
+            @if (t.checkpoint) {
+              <div class="kv">
+                <span>Checkpoint</span>
+                <b>saved{{ t.best_accuracy != null ? (t.final_val_accuracy != null ? ' · best on new data ' : ' · best ') + (t.best_accuracy | number: '1.3-3') : '' }}</b>
               </div>
-              @if (genError()) {
-                <ion-note color="danger" class="block">{{ genError() }}</ion-note>
-              }
-              @if (genResult(); as g) {
-                <pre class="gen-out"><span class="gen-given">{{ g.prompt }}</span><b>{{ g.text }}</b></pre>
-              }
-            </div>
-          }
-          @if (t.checkpoint) {
-            <div class="kv">
-              <span>Checkpoint</span>
-              <b>saved{{ t.best_accuracy != null ? (t.final_val_accuracy != null ? ' · best on new data ' : ' · best ') + (t.best_accuracy | number: '1.3-3') : '' }}</b>
-            </div>
-          }
-          @if (t.resumed) {
-            <div class="kv"><span>Resumed</span><b>from checkpoint</b></div>
-          }
-          <svg class="spark" viewBox="0 0 220 60" preserveAspectRatio="none">
-            <polyline [attr.points]="lossPoints()"></polyline>
-          </svg>
-          <ion-note class="muted">loss curve · {{ t.device }}</ion-note>
-          @if (t.acc_curve?.length) {
-            <svg class="spark acc" [class.has-val]="!!t.val_acc_curve?.length" viewBox="0 0 220 60" preserveAspectRatio="none">
-              <polyline class="train-line" [attr.points]="accPoints()"></polyline>
-              @if (t.val_acc_curve?.length) {
-                <polyline class="val-line" [attr.points]="valAccPoints()"></polyline>
-              }
+            }
+            @if (t.resumed) {
+              <div class="kv"><span>Resumed</span><b>from checkpoint</b></div>
+            }
+            <svg class="spark" viewBox="0 0 220 60" preserveAspectRatio="none">
+              <polygon class="area" [attr.points]="areaOf(lossPoints())"></polygon>
+              <polyline [attr.points]="lossPoints()"></polyline>
             </svg>
-            @if (t.val_acc_curve?.length) {
-              <ion-note class="muted acc-legend">
-                accuracy per epoch (0–1) · <span class="lg-val">━ new data</span> ·
-                <span class="lg-train">┅ training rows</span>
-              </ion-note>
-            } @else {
-              <ion-note class="muted">accuracy curve · per epoch (0–1)</ion-note>
+            <span class="f-help">loss curve · {{ t.device }}</span>
+            @if (t.acc_curve?.length) {
+              <svg class="spark acc" [class.has-val]="!!t.val_acc_curve?.length" viewBox="0 0 220 60" preserveAspectRatio="none">
+                <polyline class="train-line" [attr.points]="accPoints()"></polyline>
+                @if (t.val_acc_curve?.length) {
+                  <polyline class="val-line" [attr.points]="valAccPoints()"></polyline>
+                }
+              </svg>
+              @if (t.val_acc_curve?.length) {
+                <span class="f-help acc-legend">
+                  accuracy per epoch (0–1) · <span class="lg-val">━ new data</span> ·
+                  <span class="lg-train">┅ training rows</span>
+                </span>
+              } @else {
+                <span class="f-help">accuracy curve · per epoch (0–1)</span>
+              }
             }
           }
-        }
-        @if (testError()) {
-          <ion-note color="danger" class="block">{{ testError() }}</ion-note>
-        }
-        @if (shownTest(); as ft) {
-          <div class="final-test">
-            <div class="ft-h">Final test · {{ ft.samples }} rows used for nothing else</div>
-            @if (isGenerative(ft.task)) {
-              <div class="kv kv-main" [class.kv-good]="ft.same_split === true && !ft.warnings?.length">
-                <span>Error on test pictures</span><b>{{ ft.loss | number: '1.4-4' }}</b>
-              </div>
-              @if (ft.val_loss != null) {
-                <div class="kv"><span>On validation pictures</span><b>{{ ft.val_loss | number: '1.4-4' }}</b></div>
+          @if (testError()) {
+            <div class="callout err">{{ testError() }}</div>
+          }
+          @if (shownTest(); as ft) {
+            <div class="final-test">
+              <div class="grp-h">Final test · {{ ft.samples }} rows used for nothing else</div>
+              @if (isGenerative(ft.task)) {
+                <div class="kv kv-main" [class.kv-good]="ft.same_split === true && !ft.warnings?.length">
+                  <span>Error on test pictures</span><b>{{ ft.loss | number: '1.4-4' }}</b>
+                </div>
+                @if (ft.val_loss != null) {
+                  <div class="kv"><span>On validation pictures</span><b>{{ ft.val_loss | number: '1.4-4' }}</b></div>
+                }
+              } @else {
+                <div class="kv kv-main" [class.kv-good]="ft.same_split === true && !ft.warnings?.length">
+                  <span>On test rows</span><b>{{ ft.accuracy | number: '1.3-3' }}</b>
+                </div>
+                @if (ft.val_accuracy != null) {
+                  <div class="kv"><span>On validation rows</span><b>{{ ft.val_accuracy | number: '1.3-3' }}</b></div>
+                }
+                <div class="kv"><span>Test loss</span><b>{{ ft.loss | number: '1.4-4' }}</b></div>
               }
-            } @else {
-              <div class="kv kv-main" [class.kv-good]="ft.same_split === true && !ft.warnings?.length">
-                <span>On test rows</span><b>{{ ft.accuracy | number: '1.3-3' }}</b>
-              </div>
-              @if (ft.val_accuracy != null) {
-                <div class="kv"><span>On validation rows</span><b>{{ ft.val_accuracy | number: '1.3-3' }}</b></div>
+              @if (ft.note) {
+                <div class="fit" [class.fit-good]="ft.note.startsWith('Confirmed')">{{ ft.note }}</div>
               }
-              <div class="kv"><span>Test loss</span><b>{{ ft.loss | number: '1.4-4' }}</b></div>
+              @for (w of ft.warnings ?? []; track $index) {
+                <div class="train-warn">{{ w }}</div>
+              }
+            </div>
+          }
+          @if (!busy() && !trainResult() && !buildResult() && !onceResult() && !runError() && !shownTest() && !inspectOnly()) {
+            <span class="f-help">Build, Run once or Train — the result shows here, and on the Output node.</span>
+          }
+        </div>
+      }
+    </section>
+  </aside>
+</div>
+
+<!-- one field of the layer inspector: a switch, segments, a slider or a plain field, with its help -->
+<ng-template #paramField let-p let-params="params" let-node="node" let-inner="inner">
+  @switch (paramKind(p)) {
+    @case ('switch') {
+      <div class="field">
+        <label class="switch">
+          <input type="checkbox" [checked]="!!paramValue(params, p)" (change)="setP(node, inner, p, $any($event).target.checked)" />
+          <span class="track"></span><span>{{ p.label || p.name }}</span>
+        </label>
+        @if (p.help) {
+          <span class="f-help">{{ p.help }}</span>
+        }
+      </div>
+    }
+    @case ('seg') {
+      <div class="field">
+        <div class="f-label">{{ p.label || p.name }}</div>
+        <div class="seg" role="radiogroup" [attr.aria-label]="p.label || p.name">
+          @for (c of p.choices; track c) {
+            <button type="button" role="radio" [attr.aria-checked]="paramValue(params, p) === c"
+              [class.on]="paramValue(params, p) === c" (click)="setP(node, inner, p, c)">{{ c }}</button>
+          }
+        </div>
+        @if (p.help) {
+          <span class="f-help">{{ p.help }}</span>
+        }
+      </div>
+    }
+    @case ('select') {
+      <div class="field">
+        <div class="f-label">{{ p.label || p.name }}</div>
+        <select class="select" [attr.aria-label]="p.label || p.name" (change)="setP(node, inner, p, $any($event).target.value)">
+          @for (c of p.choices; track c) {
+            <option [value]="c" [selected]="paramValue(params, p) === c">{{ c }}</option>
+          }
+        </select>
+        @if (p.help) {
+          <span class="f-help">{{ p.help }}</span>
+        }
+      </div>
+    }
+    @case ('range') {
+      <div class="field">
+        <div class="f-label">{{ p.label || p.name }}</div>
+        <div class="slider-row">
+          <input class="range" type="range" [min]="p.min" [max]="p.max" [step]="rangeStep(p)" [attr.aria-label]="p.label || p.name"
+            [value]="paramValue(params, p)" [style.--pct]="rangePctOf(p, paramValue(params, p))"
+            (input)="setP(node, inner, p, $any($event).target.value)" />
+          <input class="input" type="number" [min]="p.min" [max]="p.max" [step]="rangeStep(p)" [attr.aria-label]="p.label || p.name"
+            [value]="paramValue(params, p)" (input)="setP(node, inner, p, $any($event).target.value)" />
+        </div>
+        @if (p.help) {
+          <span class="f-help">{{ p.help }}</span>
+        }
+      </div>
+    }
+    @default {
+      <div class="field">
+        <div class="f-label">{{ p.label || p.name }}</div>
+        <input class="input" [class.mono]="paramKind(p) === 'list'" [attr.aria-label]="p.label || p.name"
+          [type]="paramKind(p) === 'number' ? 'number' : 'text'" [attr.min]="p.min ?? null"
+          [value]="paramValue(params, p)" (input)="setP(node, inner, p, $any($event).target.value)" />
+        @if (p.help) {
+          <span class="f-help">{{ p.help }}</span>
+        }
+      </div>
+    }
+  }
+</ng-template>
+
+<!-- ============ data preview (Stage 8) ============ -->
+@if (dataModalOpen()) {
+  <div class="overlay" (click)="closeData()">
+    <div class="sheet" (click)="$event.stopPropagation()">
+      <div class="sheet-h">
+        <span><svg class="ico"><use href="#i-data"></use></svg>Training data</span>
+        <button type="button" class="btn ghost sm icon" title="Close" (click)="closeData()"><svg class="ico"><use href="#i-x"></use></svg></button>
+      </div>
+      <div class="sheet-body">
+        @if (dataset() === 'text') {
+          <div class="custom-ed text-ed">
+            <div class="custom-hint">
+              Your text: a book, notes, letters, code — anything. The network learns to continue it, one
+              character at a time (every character is a token), then writes from your prompt.
+            </div>
+            <textarea
+              class="textarea custom-ta text-ta"
+              rows="9"
+              placeholder="Paste your text here…"
+              [value]="textData()"
+              (input)="setTextData($any($event).target.value)"
+            ></textarea>
+            <div class="custom-actions">
+              <button type="button" class="btn primary sm" (click)="applyText()">Apply &amp; preview</button>
+              <label class="link-btn file-btn">
+                Upload .txt
+                <input type="file" accept=".txt,.md,text/*" (change)="onTextFile($event)" hidden />
+              </label>
+              <button type="button" class="link-btn" (click)="useExampleText()">Use the example</button>
+            </div>
+            @if (textData()) {
+              <div class="text-stats">
+                {{ textData().length | number }} characters · {{ textDistinct() }} different
+                @if (networkVocab(); as nv) {
+                  · the network scores {{ nv }}
+                }
+                @if (networkVocab() != null && textDistinct() > networkVocab()!) {
+                  <button type="button" class="btn sm" (click)="fitVocabulary()"
+                    title="Set the Embedding's and the LM head's vocabulary to the text's characters">
+                    Fit vocabulary ({{ textDistinct() }})
+                  </button>
+                }
+              </div>
             }
-            @if (ft.note) {
-              <div class="fit" [class.fit-good]="ft.note.startsWith('Confirmed')">{{ ft.note }}</div>
-            }
-            @for (w of ft.warnings ?? []; track $index) {
-              <div class="train-warn">{{ w }}</div>
+            @if (textError()) {
+              <div class="callout err">{{ textError() }}</div>
             }
           </div>
         }
-      </div>
-    </aside>
-  </div>
-
-  <!-- ============ data preview (Stage 8) ============ -->
-  @if (dataModalOpen()) {
-    <div class="overlay" (click)="closeData()">
-      <div class="sheet" (click)="$event.stopPropagation()">
-        <div class="sheet-h">
-          <span>Training data</span>
-          <ion-button fill="clear" size="small" (click)="closeData()">✕</ion-button>
-        </div>
-        <div class="sheet-body">
-          @if (dataset() === 'text') {
-            <div class="custom-ed text-ed">
-              <div class="custom-hint">
-                Your text: a book, notes, letters, code — anything. The network learns to continue it, one
-                character at a time (every character is a token), then writes from your prompt.
-              </div>
-              <textarea
-                class="custom-ta text-ta"
-                rows="9"
-                placeholder="Paste your text here…"
-                [value]="textData()"
-                (input)="setTextData($any($event).target.value)"
-              ></textarea>
-              <div class="custom-actions">
-                <ion-button size="small" fill="solid" (click)="applyText()">Apply &amp; preview</ion-button>
-                <label class="file-btn">
-                  Upload .txt
-                  <input type="file" accept=".txt,.md,text/*" (change)="onTextFile($event)" hidden />
-                </label>
-                <button class="file-btn as-link" (click)="useExampleText()">Use the example</button>
-              </div>
-              @if (textData()) {
-                <div class="text-stats">
-                  {{ textData().length | number }} characters · {{ textDistinct() }} different
-                  @if (networkVocab(); as nv) {
-                    · the network scores {{ nv }}
-                  }
-                  @if (networkVocab() != null && textDistinct() > networkVocab()!) {
-                    <ion-button size="small" fill="outline" (click)="fitVocabulary()"
-                      title="Set the Embedding's and the LM head's vocabulary to the text's characters">
-                      Fit vocabulary ({{ textDistinct() }})
-                    </ion-button>
-                  }
-                </div>
-              }
-              @if (textError()) {
-                <ion-note color="danger" class="block">{{ textError() }}</ion-note>
-              }
+        @if (dataset() === 'custom') {
+          <div class="custom-ed">
+            <div class="custom-hint">
+              One example per line: the features, then a whole-number class label (comma or space
+              separated). Lines starting with # are ignored. Features must match the Input shape.
             </div>
-          }
-          @if (dataset() === 'custom') {
-            <div class="custom-ed">
-              <div class="custom-hint">
-                One example per line: the features, then a whole-number class label (comma or space
-                separated). Lines starting with # are ignored. Features must match the Input shape.
-              </div>
-              <textarea
-                class="custom-ta"
-                rows="7"
-                placeholder="2, 0, 0, 0, 0&#10;0, 2, 0, 0, 1&#10;0, 0, 2, 0, 2"
-                [value]="customText()"
-                (input)="customText.set($any($event).target.value)"
-              ></textarea>
-              <div class="custom-actions">
-                <ion-button size="small" fill="solid" (click)="applyCustom()">Apply &amp; preview</ion-button>
-                <label class="file-btn">
-                  Upload CSV
-                  <input type="file" accept=".csv,.txt,text/*" (change)="onCustomFile($event)" hidden />
-                </label>
-                @if (customRows().length) {
-                  <ion-note class="muted">{{ customRows().length }} rows</ion-note>
-                }
-              </div>
-              @if (customError()) {
-                <ion-note color="danger" class="block">{{ customError() }}</ion-note>
-              }
-            </div>
-          }
-          @if (overlayBusy()) {
-            <ion-note class="muted">Loading…</ion-note>
-          }
-          @if (overlayError()) {
-            <ion-note color="danger" class="block">{{ overlayError() }}</ion-note>
-          }
-          @if (dataPreview(); as p) {
-            <div class="dp-meta">
-              <div class="dp-title"><b>{{ p.dataset_name }}</b></div>
-              <div class="dp-desc">{{ p.description }}</div>
-              <div class="dp-facts">
-                <span>input [{{ p.input_shape.join('×') }}]</span>
-                <span>{{ p.feature_count | number }} features · {{ p.dtype }}</span>
-                <span>{{ p.num_classes }} classes</span>
-                <span>{{ p.num_samples | number }} samples</span>
-                @if (p.val_samples || p.test_samples) {
-                  <span>
-                    {{ p.train_samples | number }} trained on · {{ p.val_samples | number }} held out
-                    @if (p.test_samples) {
-                      · {{ p.test_samples | number }} for the final test
-                    }
-                  </span>
-                }
-              </div>
-            </div>
-            <table class="dp-table">
-              <thead>
-                <tr><th>label</th><th>features</th><th>part</th></tr>
-              </thead>
-              <tbody>
-                @for (r of p.rows; track $index) {
-                  <tr [class.dp-held]="r.split === 'validation'" [class.dp-test]="r.split === 'test'">
-                    @if (r.text != null) {
-                      <td class="dp-label dp-char">{{ r.label_text === ' ' ? '␣' : r.label_text === '\n' ? '↵' : r.label_text }}</td>
-                      <td class="dp-vals dp-text">…{{ r.text }}</td>
-                    } @else {
-                      <td class="dp-label">{{ r.label }}</td>
-                      <td class="dp-vals">{{ rowValues(r) }}</td>
-                    }
-                    <td class="dp-split">
-                      {{ r.split === 'validation' ? 'new data' : r.split === 'test' ? 'final test' : 'training' }}
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-            @if (p.dataset === 'custom') {
-              <ion-note class="muted block">Your rows, as the model will see them.</ion-note>
-            } @else {
-              <ion-note class="muted block">The exact first rows of the data (same dataset &amp; seed).</ion-note>
-            }
-            @if (p.val_samples) {
-              <ion-note class="muted block">
-                Rows marked <b>new data</b> are held out: the network never trains on them, and they show how it does
-                on data it has not seen.
-              </ion-note>
-            }
-            @if (p.test_samples) {
-              <ion-note class="muted block">
-                Rows marked <b>final test</b> are kept for Test: used neither for training nor for judging the epochs.
-              </ion-note>
-            }
-          }
-        </div>
-      </div>
-    </div>
-  }
-
-  <!-- ============ export (Stage 8) ============ -->
-  @if (exportModalOpen()) {
-    <div class="overlay" (click)="closeExport()">
-      <div class="sheet sheet-wide" (click)="$event.stopPropagation()">
-        <div class="sheet-h">
-          <span>Export · PyTorch</span>
-          <span class="sheet-actions">
-            <ion-button fill="outline" size="small" [disabled]="!exportCode()" (click)="copyCode()">
-              {{ exportCopied() ? 'Copied ✓' : 'Copy' }}
-            </ion-button>
-            <ion-button fill="clear" size="small" (click)="closeExport()">✕</ion-button>
-          </span>
-        </div>
-        <div class="sheet-body">
-          @if (overlayBusy()) {
-            <ion-note class="muted">Generating…</ion-note>
-          }
-          @if (overlayError()) {
-            <ion-note color="danger" class="block">{{ overlayError() }}</ion-note>
-          }
-          @if (exportCode()) {
-            <ion-note class="muted block">Standalone <code>model.py</code> — depends only on torch.</ion-note>
-            <pre class="code">{{ exportCode() }}</pre>
-          }
-        </div>
-      </div>
-    </div>
-  }
-
-  <!-- ============ projects: save / open (Stage 13) ============ -->
-  @if (projectsOpen()) {
-    <div class="overlay" (click)="closeProjects()">
-      <div class="sheet sheet-wide" (click)="$event.stopPropagation()">
-        <div class="sheet-h">
-          <span>Projects</span>
-          <ion-button fill="clear" size="small" (click)="closeProjects()">✕</ion-button>
-        </div>
-        <div class="sheet-body projects">
-          <section class="pj-current">
-            <label class="pj-label" for="pj-name">Name</label>
-            <input
-              id="pj-name"
-              class="pj-input"
-              maxlength="120"
-              [value]="projectName()"
-              (input)="projectName.set($any($event).target.value)"
-            />
-            <label class="pj-label" for="pj-desc">Description</label>
             <textarea
-              id="pj-desc"
-              class="pj-input"
-              rows="2"
-              maxlength="2000"
-              placeholder="What is this network for? (optional)"
-              [value]="projectDesc()"
-              (input)="projectDesc.set($any($event).target.value)"
+              class="textarea custom-ta"
+              rows="7"
+              placeholder="2, 0, 0, 0, 0&#10;0, 2, 0, 0, 1&#10;0, 0, 2, 0, 2"
+              [value]="customText()"
+              (input)="customText.set($any($event).target.value)"
             ></textarea>
-            <div class="pj-status" [class.warn]="autosaveError()">{{ saveTooltip() }}</div>
-            <div class="pj-actions">
-              <ion-button size="small" (click)="saveProject()">Save</ion-button>
-              <ion-button size="small" fill="outline" (click)="saveLocal(true)">Save as copy</ion-button>
-              <ion-button size="small" fill="outline" (click)="downloadProject()">Download .mlc.json</ion-button>
-              @if (serverEnabled() && origin() !== 'server') {
-                <ion-button size="small" fill="outline" [disabled]="serverBusy()" (click)="saveToServer()">
-                  Save to server
-                </ion-button>
+            <div class="custom-actions">
+              <button type="button" class="btn primary sm" (click)="applyCustom()">Apply &amp; preview</button>
+              <label class="link-btn file-btn">
+                Upload CSV
+                <input type="file" accept=".csv,.txt,text/*" (change)="onCustomFile($event)" hidden />
+              </label>
+              @if (customRows().length) {
+                <span class="f-help">{{ customRows().length }} rows</span>
               }
-              <ion-button size="small" fill="clear" [disabled]="busy()" (click)="newProject()">New project</ion-button>
             </div>
-          </section>
+            @if (customError()) {
+              <div class="callout err">{{ customError() }}</div>
+            }
+          </div>
+        }
+        @if (overlayBusy()) {
+          <span class="f-help">Loading…</span>
+        }
+        @if (overlayError()) {
+          <div class="callout err">{{ overlayError() }}</div>
+        }
+        @if (dataPreview(); as p) {
+          <div class="dp-meta">
+            <div class="dp-title"><b>{{ p.dataset_name }}</b></div>
+            <div class="dp-desc">{{ p.description }}</div>
+            <div class="dp-facts">
+              <span>input [{{ p.input_shape.join('×') }}]</span>
+              <span>{{ p.feature_count | number }} features · {{ p.dtype }}</span>
+              <span>{{ p.num_classes }} classes</span>
+              <span>{{ p.num_samples | number }} samples</span>
+              @if (p.val_samples || p.test_samples) {
+                <span>
+                  {{ p.train_samples | number }} trained on · {{ p.val_samples | number }} held out
+                  @if (p.test_samples) {
+                    · {{ p.test_samples | number }} for the final test
+                  }
+                </span>
+              }
+            </div>
+          </div>
+          <table class="dp-table">
+            <thead>
+              <tr><th>label</th><th>features</th><th>part</th></tr>
+            </thead>
+            <tbody>
+              @for (r of p.rows; track $index) {
+                <tr [class.dp-held]="r.split === 'validation'" [class.dp-test]="r.split === 'test'">
+                  @if (r.text != null) {
+                    <td class="dp-label dp-char">{{ r.label_text === ' ' ? '␣' : r.label_text === '\n' ? '↵' : r.label_text }}</td>
+                    <td class="dp-vals dp-text">…{{ r.text }}</td>
+                  } @else {
+                    <td class="dp-label">{{ r.label }}</td>
+                    <td class="dp-vals">{{ rowValues(r) }}</td>
+                  }
+                  <td class="dp-split">
+                    {{ r.split === 'validation' ? 'new data' : r.split === 'test' ? 'final test' : 'training' }}
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          @if (p.dataset === 'custom') {
+            <span class="f-help">Your rows, as the model will see them.</span>
+          } @else {
+            <span class="f-help">The exact first rows of the data (same dataset &amp; seed).</span>
+          }
+          @if (p.val_samples) {
+            <span class="f-help">
+              Rows marked <b>new data</b> are held out: the network never trains on them, and they show how it does
+              on data it has not seen.
+            </span>
+          }
+          @if (p.test_samples) {
+            <span class="f-help">
+              Rows marked <b>final test</b> are kept for Test: used neither for training nor for judging the epochs.
+            </span>
+          }
+        }
+      </div>
+    </div>
+  </div>
+}
 
-          <section>
-            <div class="pj-h">Open a file</div>
-            <label class="file-btn">
-              Choose a .mlc.json file…
-              <input type="file" accept=".json,application/json" (change)="onProjectFile($event)" hidden />
-            </label>
-            <span class="muted pj-or">or drop it onto the canvas</span>
-          </section>
+<!-- ============ export (Stage 8) ============ -->
+@if (exportModalOpen()) {
+  <div class="overlay" (click)="closeExport()">
+    <div class="sheet sheet-wide" (click)="$event.stopPropagation()">
+      <div class="sheet-h">
+        <span><svg class="ico"><use href="#i-code"></use></svg>Export · PyTorch</span>
+        <span class="sheet-actions">
+          <button type="button" class="btn sm" [disabled]="!exportCode()" (click)="copyCode()">
+            <svg class="ico"><use [attr.href]="exportCopied() ? '#i-check' : '#i-copy'"></use></svg>{{ exportCopied() ? 'Copied' : 'Copy' }}
+          </button>
+          <button type="button" class="btn ghost sm icon" title="Close" (click)="closeExport()"><svg class="ico"><use href="#i-x"></use></svg></button>
+        </span>
+      </div>
+      <div class="sheet-body">
+        @if (overlayBusy()) {
+          <span class="f-help">Generating…</span>
+        }
+        @if (overlayError()) {
+          <div class="callout err">{{ overlayError() }}</div>
+        }
+        @if (exportCode()) {
+          <span class="f-help">Standalone <code>model.py</code> — depends only on torch.</span>
+          <pre class="code">{{ exportCode() }}</pre>
+        }
+      </div>
+    </div>
+  </div>
+}
 
+<!-- ============ projects: save / open (Stage 13) ============ -->
+@if (projectsOpen()) {
+  <div class="overlay" (click)="closeProjects()">
+    <div class="sheet sheet-wide" (click)="$event.stopPropagation()">
+      <div class="sheet-h">
+        <span><svg class="ico"><use href="#i-open"></use></svg>Projects</span>
+        <button type="button" class="btn ghost sm icon" title="Close" (click)="closeProjects()"><svg class="ico"><use href="#i-x"></use></svg></button>
+      </div>
+      <div class="sheet-body projects">
+        <section class="pj-current">
+          <label class="f-label" for="pj-name">Name</label>
+          <input
+            id="pj-name"
+            class="input pj-input"
+            maxlength="120"
+            [value]="projectName()"
+            (input)="projectName.set($any($event).target.value)"
+          />
+          <label class="f-label pj-label" for="pj-desc">Description</label>
+          <textarea
+            id="pj-desc"
+            class="textarea pj-input"
+            rows="2"
+            maxlength="2000"
+            placeholder="What is this network for? (optional)"
+            [value]="projectDesc()"
+            (input)="projectDesc.set($any($event).target.value)"
+          ></textarea>
+          <div class="pj-status" [class.warn]="autosaveError()">{{ saveTooltip() }}</div>
+          <div class="pj-actions">
+            <button type="button" class="btn primary sm" (click)="saveProject()"><svg class="ico"><use href="#i-save"></use></svg>Save</button>
+            <button type="button" class="btn sm" (click)="saveLocal(true)">Save as copy</button>
+            <button type="button" class="btn sm" (click)="downloadProject()">Download .mlc.json</button>
+            @if (serverEnabled() && origin() !== 'server') {
+              <button type="button" class="btn sm" [disabled]="serverBusy()" (click)="saveToServer()">Save to server</button>
+            }
+            <button type="button" class="btn ghost sm" [disabled]="busy()" (click)="newProject()">New project</button>
+          </div>
+        </section>
+
+        <section>
+          <div class="pj-h">Open a file</div>
+          <label class="link-btn file-btn">
+            Choose a .mlc.json file…
+            <input type="file" accept=".json,application/json" (change)="onProjectFile($event)" hidden />
+          </label>
+          <span class="f-help pj-or">or drop it onto the canvas</span>
+        </section>
+
+        <section>
+          <div class="pj-h">Recent · saved in this browser</div>
+          @for (p of localProjects(); track p.id) {
+            <div class="pj-row" [class.cur]="origin() === 'browser' && p.id === localId()">
+              <button type="button" class="pj-open" [disabled]="busy()" (click)="openLocal(p.id)">
+                <span class="pj-name">{{ p.name }}</span>
+                <span class="pj-meta">{{ p.node_count }} nodes · {{ p.updated_at | date: 'd MMM y, HH:mm' }}</span>
+              </button>
+              <button type="button" class="btn ghost sm icon pj-del" title="Delete from this browser" (click)="deleteLocal(p)">
+                <svg class="ico"><use href="#i-x"></use></svg>
+              </button>
+            </div>
+          } @empty {
+            <span class="f-help">Nothing saved yet — press Save (Ctrl+S) to keep this project here.</span>
+          }
+        </section>
+
+        @if (serverEnabled()) {
           <section>
-            <div class="pj-h">Recent · saved in this browser</div>
-            @for (p of localProjects(); track p.id) {
-              <div class="pj-row" [class.cur]="origin() === 'browser' && p.id === localId()">
-                <button type="button" class="pj-open" [disabled]="busy()" (click)="openLocal(p.id)">
+            <div class="pj-h">On the server</div>
+            @if (serverError()) {
+              <div class="callout err">{{ serverError() }}</div>
+            }
+            @for (p of serverProjects(); track p.slug) {
+              <div class="pj-row" [class.cur]="origin() === 'server' && p.slug === serverSlug()">
+                <button type="button" class="pj-open" [disabled]="busy()" (click)="openServer(p.slug)">
                   <span class="pj-name">{{ p.name }}</span>
-                  <span class="pj-meta">{{ p.node_count }} nodes · {{ p.updated_at | date: 'd MMM y, HH:mm' }}</span>
+                  <span class="pj-meta">
+                    {{ p.node_count }} nodes{{ p.updated_at ? ' · ' + (p.updated_at | date: 'd MMM y, HH:mm') : '' }}
+                  </span>
                 </button>
-                <ion-button fill="clear" size="small" color="danger" title="Delete from this browser" (click)="deleteLocal(p)">
-                  ✕
-                </ion-button>
+                <button type="button" class="btn ghost sm icon pj-del" title="Delete from the server" (click)="deleteServer(p)">
+                  <svg class="ico"><use href="#i-x"></use></svg>
+                </button>
               </div>
             } @empty {
-              <ion-note class="muted block">Nothing saved yet — press Save (Ctrl+S) to keep this project here.</ion-note>
+              <span class="f-help">No projects on this server yet.</span>
             }
           </section>
-
-          @if (serverEnabled()) {
-            <section>
-              <div class="pj-h">On the server</div>
-              @if (serverError()) {
-                <ion-note color="danger" class="block">{{ serverError() }}</ion-note>
-              }
-              @for (p of serverProjects(); track p.slug) {
-                <div class="pj-row" [class.cur]="origin() === 'server' && p.slug === serverSlug()">
-                  <button type="button" class="pj-open" [disabled]="busy()" (click)="openServer(p.slug)">
-                    <span class="pj-name">{{ p.name }}</span>
-                    <span class="pj-meta">
-                      {{ p.node_count }} nodes{{ p.updated_at ? ' · ' + (p.updated_at | date: 'd MMM y, HH:mm') : '' }}
-                    </span>
-                  </button>
-                  <ion-button fill="clear" size="small" color="danger" title="Delete from the server" (click)="deleteServer(p)">
-                    ✕
-                  </ion-button>
-                </div>
-              } @empty {
-                <ion-note class="muted block">No projects on this server yet.</ion-note>
-              }
-            </section>
-          }
-        </div>
+        }
       </div>
     </div>
-  }
-</ion-content>
+  </div>
+}

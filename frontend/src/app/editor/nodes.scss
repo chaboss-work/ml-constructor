@@ -1,0 +1,269 @@
+// Stage 22 — the nodes: family colour and icon, shape / parameter / result badges, ports,
+// and live training (the wave, the Output's progress ring). Colours: tokens only.
+
+// ----------------------------------------------------------------- the nodes
+.node {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px 10px 7px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  // a family-coloured top edge
+  box-shadow:
+    inset 0 3px 0 var(--fam),
+    var(--node-shadow);
+  cursor: grab;
+  user-select: none;
+  animation: node-in var(--dur-3) var(--ease-out);
+  transition:
+    box-shadow var(--dur-2) var(--ease),
+    border-color var(--dur-2) var(--ease);
+}
+.node:hover {
+  border-color: color-mix(in srgb, var(--fam) 45%, var(--border));
+  box-shadow:
+    inset 0 3px 0 var(--fam),
+    var(--node-shadow-hover);
+}
+.node.sel {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 3px 0 var(--fam),
+    0 0 0 3px color-mix(in srgb, var(--accent) 32%, transparent),
+    var(--node-shadow-hover);
+}
+.node.problem {
+  border-color: var(--danger);
+  box-shadow:
+    inset 0 3px 0 var(--fam),
+    0 0 0 3px var(--danger-soft),
+    var(--node-shadow);
+}
+.node.warn {
+  border-color: var(--warning);
+  box-shadow:
+    inset 0 3px 0 var(--fam),
+    0 0 0 3px var(--warning-soft),
+    var(--node-shadow);
+}
+.node.focus {
+  animation: node-pulse 1.1s var(--ease) 3;
+}
+@keyframes node-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+@keyframes node-pulse {
+  50% {
+    transform: scale(1.045);
+  }
+}
+@keyframes problem-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.n-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.n-ico {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fam) 16%, transparent);
+  color: var(--fam);
+}
+.n-ico .ico {
+  width: 16px;
+  height: 16px;
+}
+.n-t {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.n-title,
+.n-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.n-title {
+  color: var(--text);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semi);
+  line-height: 1.25;
+}
+.n-id {
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: 1.3;
+}
+.n-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 18px;
+}
+.b-shape,
+.b-params,
+.b-result {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  line-height: 18px;
+  white-space: nowrap;
+}
+.b-shape {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.b-params {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--fam) 13%, transparent);
+  color: var(--fam);
+}
+.b-result {
+  margin-left: auto;
+  background: var(--surface-3);
+  color: var(--text);
+  font-weight: var(--fw-bold);
+  animation: mlc-pop-in var(--dur-3) var(--ease-out);
+}
+.b-result.good {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.b-result.live {
+  background: color-mix(in srgb, var(--glow-fwd) 15%, transparent);
+  color: var(--glow-fwd);
+}
+
+// ports: in on top, out at the bottom
+.port {
+  position: absolute;
+  left: 50%;
+  z-index: 3;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  box-sizing: border-box;
+  border: 2px solid var(--fam);
+  border-radius: 50%;
+  background: var(--surface-2);
+  cursor: crosshair;
+  transition:
+    transform var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease),
+    box-shadow var(--dur-2) var(--ease);
+}
+.port.in {
+  top: -7px;
+}
+.port.out {
+  bottom: -7px;
+}
+.port:hover {
+  background: var(--fam);
+  transform: scale(1.35);
+}
+.port.live {
+  border-color: var(--success);
+  background: var(--success);
+  animation: port-pulse 1.2s var(--ease) infinite;
+}
+.port.from {
+  background: var(--fam);
+  transform: scale(1.3);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--fam) 28%, transparent);
+}
+@keyframes port-pulse {
+  50% {
+    box-shadow: 0 0 0 5px var(--success-soft);
+  }
+}
+
+.issue-dot {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: var(--surface-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  line-height: 18px;
+  text-align: center;
+  box-shadow: var(--shadow-1);
+  animation: mlc-pop-in var(--dur-2) var(--ease-out);
+}
+.issue-dot.warn {
+  background: var(--warning);
+}
+
+// ------------------------------------------------ live training (Stage 22)
+// A batch flows top to bottom (forward pass), the gradients flow back up (backward pass): each
+// node lights up when the wave reaches it. Two glow elements per node, shown while a run streams;
+// the page sets their opacity 20 times a second (core/live.ts, glowAt) and nothing else — no CSS
+// animation runs, so the browser draws those changes only, and the compositor alone draws them.
+.glow {
+  position: absolute;
+  inset: -5px;
+  border-radius: 16px;
+  opacity: 0.002; // never quite 0: an invisible layer is dropped and drawn anew at every flash
+  pointer-events: none;
+  will-change: opacity;
+}
+.glow.fwd {
+  box-shadow:
+    0 0 0 2px var(--glow-fwd),
+    0 0 22px 3px color-mix(in srgb, var(--glow-fwd) 55%, transparent);
+}
+.glow.bwd {
+  box-shadow:
+    0 0 0 2px var(--glow-bwd),
+    0 0 22px 3px color-mix(in srgb, var(--glow-bwd) 50%, transparent);
+}
+
+// the Output's progress ring
+.n-ico .ring {
+  position: absolute;
+  inset: -5px;
+  width: calc(100% + 10px);
+  height: calc(100% + 10px);
+  transform: rotate(-90deg);
+}
+.ring-bg,
+.ring-fg {
+  fill: none;
+  stroke-width: 3;
+}
+.ring-bg {
+  stroke: color-mix(in srgb, var(--fam) 22%, transparent);
+}
+.ring-fg {
+  stroke: var(--fam);
+  stroke-linecap: round;
+}

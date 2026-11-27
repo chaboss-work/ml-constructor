@@ -48,7 +48,8 @@ class Block(nn.Module):
     ):
         super().__init__()
         if repeat < 1:
-            raise ValueError(f"repeat must be >= 1, got {repeat}")
+            from .shapes import GraphError
+            raise GraphError(f"repeat must be at least 1, got {repeat}", code="param_range")
         from .assembly import build_chain  # local import avoids an import cycle
 
         modules: list[nn.Module] = []

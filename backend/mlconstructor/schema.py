@@ -204,6 +204,72 @@ class BuildResult(BaseModel):
     task: str | None = None
 
 
+class FixInfo(BaseModel):
+    """Stage 21 — a one-click fix: what the button says, and the graph edits it makes
+    (see :mod:`mlconstructor.fixes` for every edit)."""
+
+    label: str
+    ops: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class Problem(BaseModel):
+    """Stage 21 — one error or warning, explained: what happened (``title`` and the
+    exact ``message``), ``why``, what to do (``todo``), the glossary words they use,
+    where it is, and ready fixes — each checked to remove the problem before it is
+    offered."""
+
+    code: str
+    severity: Literal["error", "warning"] = "error"
+    category: str
+    title: str
+    message: str
+    why: str
+    todo: str
+    #: the glossary words ``why`` and ``todo`` mark ``[[like this]]`` -> what they mean
+    terms: dict[str, str] = Field(default_factory=dict)
+    node_id: str | None = None
+    edge: list[str] | None = None
+    #: a layer inside a Repeat block (``node_id`` is the block)
+    inner: int | None = None
+    param: str | None = None
+    fixes: list[FixInfo] = Field(default_factory=list)
+
+
+class Diagnosis(BaseModel):
+    """Stage 21 — everything the editor shows while you edit: every problem at once
+    (not just the first), warnings for graphs that build but are probably wrong, the
+    build when there is one, and the shapes worked out so far even when there is not."""
+
+    ok: bool
+    problems: list[Problem] = Field(default_factory=list)
+    warnings: list[Problem] = Field(default_factory=list)
+    build: BuildResult | None = None
+    #: why this network cannot be trained here (several inputs, a picture as output…), with its fixes
+    train_issue: Problem | None = None
+    #: every node's output shape the graph could work out (upstream of a problem too)
+    shapes: dict[str, list[int]] = Field(default_factory=dict)
+
+
+class CatalogEntryInfo(BaseModel):
+    code: str
+    category: str
+    severity: str
+    title: str
+    why: str
+    todo: str
+    terms: list[str] = Field(default_factory=list)
+    #: fixes that always apply (most are made for the very case)
+    fixes: list[FixInfo] = Field(default_factory=list)
+
+
+class ErrorCatalog(BaseModel):
+    """Stage 21 — ``GET /errors``: every error and warning code with its words, and the glossary."""
+
+    entries: list[CatalogEntryInfo]
+    glossary: dict[str, str]
+    categories: dict[str, str]
+
+
 class ConnectionOption(BaseModel):
     """One choice for a connection's transform, as the editor's selector shows it."""
 

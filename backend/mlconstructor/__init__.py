@@ -19,6 +19,8 @@ from . import layers  # noqa: F401  (import-time side effect: registers all laye
 from .adapters import apply_adapter, suggest_for_graph
 from .architectures import get_architecture, list_architectures
 from .builder import build_model, connection_options
+from .diagnostics import describe_error, diagnose, error_catalog, lint
+from .fixes import apply_fix
 from .datasets import list_datasets, make_dataset, make_rows, split_indices, split_parts, split_rows
 from .example_text import EXAMPLE_TEXT
 from .export import generate_pytorch
@@ -54,11 +56,16 @@ from .weights import MAX_WEIGHTS_BYTES, RunNotFound, read_weights, run_path, wei
 __version__ = "0.1.0"
 #: The latest stage whose HTTP contract this backend serves (``GET /health`` reports
 #: it), so the editor can tell when the server runs an older backend than the page.
-API_LEVEL = 20
+API_LEVEL = 21
 
 __all__ = [
     "build_model",
     "connection_options",
+    "diagnose",
+    "describe_error",
+    "error_catalog",
+    "lint",
+    "apply_fix",
     "train_model",
     "train_iter",
     "data_preview",

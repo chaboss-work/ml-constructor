@@ -30,7 +30,7 @@ import numpy as np
 import torch
 
 from .schema import DatasetInfo, TrainSpec
-from .shapes import Shape, numel
+from .shapes import GraphError, Shape, numel
 from .text import text_vocab, text_windows
 
 _MAX_CUSTOM_ROWS = 10000  # bound the payload / memory for pasted-or-uploaded data
@@ -101,14 +101,7 @@ def _tokens(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple
     before and copying what followed it. The vocabulary is the network's own output
     size, so the head scores every possible next token.
     """
-    if len(in_shape) != 1:
-        raise ValueError(
-            f"the 'next token' dataset needs an Input of token ids, shape [L]; your graph's input is "
-            f"{list(in_shape)} — put an Embedding after a 1-D Input"
-        )
-    length = int(in_shape[0])
-    if length < 3:
-        raise ValueError("the 'next token' dataset needs sequences of at least 3 tokens (Input [L] with L >= 3)")
+    length = _check_tokens(in_shape)
     g = torch.Generator().manual_seed(spec.seed)
     n = spec.samples
     period = torch.randint(2, min(4, length - 1) + 1, (n,), generator=g)
@@ -116,6 +109,42 @@ def _tokens(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple
     position = torch.arange(length + 1)
     seq = pattern.gather(1, position[None, :] % period[:, None])
     return seq[:, :length].float().to(device), seq[:, length].to(device)
+
+
+def _check_tokens(in_shape: Shape) -> int:
+    if len(in_shape) != 1:
+        raise GraphError(
+            f"the 'next token' dataset needs an Input of token ids, shape [L]; your graph's input is "
+            f"{list(in_shape)} — put an Embedding after a 1-D Input",
+            code="dataset_needs_tokens", facts={"dataset": "tokens"},
+        )
+    length = int(in_shape[0])
+    if length < 3:
+        raise GraphError("the 'next token' dataset needs sequences of at least 3 tokens (Input [L] with L >= 3)",
+                         code="tokens_too_short", facts={"length": length})
+    return length
+
+
+def _check_text(in_shape: Shape, spec: TrainSpec) -> int:
+    text = spec.text or ""
+    if len(in_shape) != 1:
+        raise GraphError(
+            f"'Your text' needs an Input of token ids, shape [L]; your graph's input is {list(in_shape)}. "
+            "Take a language model from the library (e.g. Your GPT, or a flagship's mini version)",
+            code="dataset_needs_tokens", facts={"dataset": "text"},
+        )
+    length = int(in_shape[0])
+    if not text.strip():
+        raise GraphError("'Your text' has no text yet: open Data, paste or upload a text (or use the example), Apply",
+                         code="text_missing")
+    need = 8 * (length + 1)
+    if len(text) < need:
+        raise GraphError(
+            f"the text is too short: {len(text):,} characters, and windows of {length} need at least {need:,}. "
+            "Paste more text, or make the Input shorter",
+            code="text_too_short", facts={"chars": len(text), "length": length},
+        )
+    return length
 
 
 def _text(in_shape: Shape, num_classes: int, spec: TrainSpec, device):
@@ -128,20 +157,7 @@ def _text(in_shape: Shape, num_classes: int, spec: TrainSpec, device):
     near-copy among the training rows.
     """
     text = spec.text or ""
-    if len(in_shape) != 1:
-        raise ValueError(
-            f"'Your text' needs an Input of token ids, shape [L]; your graph's input is {list(in_shape)}. "
-            "Take a language model from the library (e.g. Your GPT, or a flagship's mini version)"
-        )
-    length = int(in_shape[0])
-    if not text.strip():
-        raise ValueError("'Your text' has no text yet: open Data, paste or upload a text (or use the example), Apply")
-    need = 8 * (length + 1)
-    if len(text) < need:
-        raise ValueError(
-            f"the text is too short: {len(text):,} characters, and windows of {length} need at least {need:,}. "
-            "Paste more text, or make the Input shorter"
-        )
+    length = _check_text(in_shape, spec)
     X, y, groups = text_windows(text, length, num_classes, int(spec.samples), int(spec.seed))
     return X.to(device), y.to(device), groups
 
@@ -153,37 +169,77 @@ def _custom(in_shape: Shape, num_classes: int, spec: TrainSpec, device) -> tuple
     an integer class label. Rows are validated against the graph's input shape and
     the network's class count, so a mismatch is a clear message, not a torch crash.
     """
-    rows = spec.custom_rows or []
-    if not rows:
-        raise ValueError(
-            "the 'custom' dataset needs rows — paste or upload training examples "
-            "(each row = the features, then a whole-number class label)"
-        )
-    if len(rows) > _MAX_CUSTOM_ROWS:
-        raise ValueError(f"too many custom rows ({len(rows)}); the limit is {_MAX_CUSTOM_ROWS}")
-    feat = numel(in_shape)
-    xs: list[list[float]] = []
-    ys: list[int] = []
-    for i, row in enumerate(rows):
-        if len(row) != feat + 1:
-            raise ValueError(
-                f"custom row {i + 1}: expected {feat} feature(s) + 1 label = {feat + 1} values, got {len(row)}"
-            )
-        if any(not math.isfinite(float(v)) for v in row):
-            raise ValueError(f"custom row {i + 1}: contains a non-finite value (NaN/inf)")
-        if int(row[-1]) != row[-1]:
-            raise ValueError(f"custom row {i + 1}: label {row[-1]} must be a whole number")
-        label = int(row[-1])
-        if not (0 <= label < num_classes):
-            raise ValueError(
-                f"custom row {i + 1}: label {label} out of range [0, {num_classes}) — "
-                f"the network's output layer has {num_classes} classes"
-            )
-        xs.append([float(v) for v in row[:-1]])
-        ys.append(label)
+    rows = _check_custom(in_shape, num_classes, spec)
+    xs = [[float(v) for v in row[:-1]] for row in rows]
+    ys = [int(row[-1]) for row in rows]
     X = torch.tensor(xs, dtype=torch.float32).reshape(len(rows), *in_shape)
     y = torch.tensor(ys, dtype=torch.long)
     return X.to(device), y.to(device)
+
+
+def _whole(v) -> int | None:
+    try:
+        f = float(v)
+        return int(f) if math.isfinite(f) and int(f) == f else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _check_custom(in_shape: Shape, num_classes: int, spec: TrainSpec) -> list:
+    """Stage 21 — every row checked against the Input's shape and the class count
+    (training and the live diagnosis both run this)."""
+    rows = spec.custom_rows or []
+    if not rows:
+        raise GraphError(
+            "the 'custom' dataset needs rows — paste or upload training examples "
+            "(each row = the features, then a whole-number class label)",
+            code="custom_missing",
+        )
+    if len(rows) > _MAX_CUSTOM_ROWS:
+        raise GraphError(f"too many custom rows ({len(rows)}); the limit is {_MAX_CUSTOM_ROWS}", code="custom_too_many")
+    feat = numel(in_shape)
+    for i, row in enumerate(rows):
+        if len(row) != feat + 1:
+            lengths = {len(r) for r in rows}
+            raise GraphError(
+                f"custom row {i + 1}: expected {feat} feature(s) + 1 label = {feat + 1} values, got {len(row)}",
+                code="custom_row_length",
+                # every row agrees with the others: the Input is what is off
+                facts={"row": i + 1, "features": feat, "row_features": lengths.pop() - 1 if len(lengths) == 1 else None},
+            )
+        if any(not math.isfinite(float(v)) for v in row):
+            raise GraphError(f"custom row {i + 1}: contains a non-finite value (NaN/inf)", code="custom_value",
+                             facts={"row": i + 1})
+        if int(row[-1]) != row[-1]:
+            raise GraphError(f"custom row {i + 1}: label {row[-1]} must be a whole number", code="custom_label",
+                             facts={"row": i + 1})
+        label = int(row[-1])
+        if not (0 <= label < num_classes):
+            labels = [_whole(r[-1]) for r in rows if len(r) == feat + 1]
+            top = max([v for v in labels if v is not None] or [label])
+            raise GraphError(
+                f"custom row {i + 1}: label {label} out of range [0, {num_classes}) — "
+                f"the network's output layer has {num_classes} classes",
+                code="custom_label_range", facts={"row": i + 1, "classes": num_classes, "needed": top + 1},
+            )
+    return rows
+
+
+def check_dataset(name: str, in_shape: Shape, num_classes: int, spec: TrainSpec) -> None:
+    """Stage 21 — would training on ``name`` refuse this network? The same checks the
+    datasets run before making their rows (raises their :class:`GraphError`), with
+    nothing generated or downloaded: the editor runs it on every edit."""
+    d = get_dataset(name)
+    if d.id == "tokens":
+        _check_tokens(in_shape)
+    elif d.id == "text":
+        _check_text(in_shape, spec)
+    elif d.id == "custom":
+        _check_custom(in_shape, num_classes, spec)
+    elif d.id == "mnist":
+        _check_fixed("MNIST", (1, 28, 28), in_shape, num_classes)
+    elif d.id == "cifar10":
+        _check_fixed("CIFAR-10", (3, 32, 32), in_shape, num_classes)
 
 
 # --------------------------------------------------------------------------- #
@@ -253,10 +309,12 @@ def _subsample(imgs: np.ndarray, lbls: np.ndarray, spec: TrainSpec, device):
 
 def _check_fixed(name: str, want: tuple[int, ...], in_shape: Shape, num_classes: int):
     if tuple(int(x) for x in in_shape) != want:
-        raise ValueError(f"{name} needs an Input of shape {list(want)}; your graph's input is {list(in_shape)}")
+        raise GraphError(f"{name} needs an Input of shape {list(want)}; your graph's input is {list(in_shape)}",
+                         code="dataset_shape", facts={"want": list(want), "dataset": name})
     if num_classes < 10:
-        raise ValueError(
-            f"{name} has 10 classes; your network outputs {num_classes} — make the last layer output at least 10"
+        raise GraphError(
+            f"{name} has 10 classes; your network outputs {num_classes} — make the last layer output at least 10",
+            code="dataset_classes", facts={"classes": 10, "got": num_classes},
         )
 
 
@@ -351,8 +409,9 @@ def get_dataset(name: str) -> DatasetDef:
         return _BY_ID[key]
     except KeyError:
         known = ", ".join(sorted(_BY_ID))
-        raise ValueError(
-            f"unknown dataset {name!r}; known: {known} (alias 'synthetic' = blobs)"
+        raise GraphError(
+            f"unknown dataset {name!r}; known: {known} (alias 'synthetic' = blobs)",
+            code="unknown_dataset",
         ) from None
 
 

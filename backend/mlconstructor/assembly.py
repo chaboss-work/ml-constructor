@@ -56,6 +56,7 @@ def build_chain(
                 raise ShapeError(
                     f"{node.id} ({node.type_name}) needs the input(s) {', '.join(missing)}, which this chain does not get",
                     node_id=node.id,
+                    code="block_needs_input",
                 )
             shapes = [node.check_port(0, shape)] + [node.check_port(i + 1, extra[n]) for i, n in enumerate(ports[1:])]
             out = node.out_shape_ports(shapes)

@@ -70,6 +70,8 @@ class TaskPlan:
 
     task: str | None
     reason: str | None = None
+    #: Stage 21 — the catalogue code of ``reason``
+    code: str | None = None
     #: the Input with the pictures (reconstruction: the only one; diffusion: the noisy picture)
     image_input: str | None = None
     timestep_input: str | None = None
@@ -119,16 +121,18 @@ def resolve_task(spec, build) -> TaskPlan:
     if len(inputs) == 1 and want in ("auto", "reconstruction") and any_shape:
         if in_shapes[inputs[0].id] == out_shape:
             return TaskPlan("reconstruction", image_input=inputs[0].id, vae=_has_sampler(spec), **plan)
-        return TaskPlan(None, reason=(
+        return TaskPlan(None, code="task_output_shape", reason=(
             f"This network's output is {_shape(out_shape)} — a picture, a latent or points, not one score per class. "
             f"To learn to reconstruct its input, the output must have the input's shape ({_shape(in_shapes[inputs[0].id])})."
             " As it is, it builds, runs once on random inputs (Run once) and exports."), **plan)
     if len(inputs) == 1:
         if want == "reconstruction":
-            return TaskPlan(None, reason="To learn to reconstruct its input, set the Output to “Any shape” and give it the "
-                                         "input's shape.", **plan)
-        return TaskPlan(None, reason="Classification needs one score per class: switch the Output's “Any shape” off "
-                                     "(or let the task be chosen automatically).", **plan)
+            return TaskPlan(None, code="task_needs_any_shape",
+                            reason="To learn to reconstruct its input, set the Output to “Any shape” and give it the "
+                                   "input's shape.", **plan)
+        return TaskPlan(None, code="task_any_shape_on",
+                        reason="Classification needs one score per class: switch the Output's “Any shape” off "
+                               "(or let the task be chosen automatically).", **plan)
 
     # several inputs: diffusion is the only way to train them here
     roles = input_roles(spec, build)
@@ -159,7 +163,7 @@ def resolve_task(spec, build) -> TaskPlan:
             rows = int(emb.params.get("num_embeddings", 0)) if emb is not None else 0
         return TaskPlan("diffusion", image_input=images[0].id, timestep_input=times[0].id,
                         class_input=classes[0].id if classes else None, class_rows=rows, **plan)
-    return TaskPlan(None, reason=(
+    return TaskPlan(None, code="task_inputs", reason=(
         f"This network takes {len(inputs)} inputs ({names}). Training here learns from one input (to classify it or to "
         "reconstruct it), or learns to generate by diffusion — a noisy picture, a timestep and maybe a class in, a "
         f"picture of the same shape out — but {problem}. It builds, runs once on random inputs (Run once) and exports."

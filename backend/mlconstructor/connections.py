@@ -23,6 +23,7 @@ import torch
 import torch.nn as nn
 
 from .schema import ParamDef
+from . import fixes as fx
 from .shapes import Shape, ShapeError
 
 AUTO = "auto"
@@ -130,7 +131,7 @@ class Transform(ABC):
         try:
             return int(self.params.get(name, default))
         except (TypeError, ValueError):
-            raise ShapeError(f"parameter {name!r} of “{self.label}” must be a whole number") from None
+            raise ShapeError(f"parameter {name!r} of “{self.label}” must be a whole number", code="transform_param") from None
 
 
 class Direct(Transform):
@@ -159,7 +160,7 @@ class Flatten(Transform):
 
     def out_shape(self, in_shape: Shape) -> Shape:
         if len(in_shape) < 2:
-            raise ShapeError("it is already a flat vector")
+            raise ShapeError("it is already a flat vector", code="transform_param")
         return (int(prod(in_shape)),)
 
     def build(self, in_shape: Shape) -> nn.Module:
@@ -189,12 +190,12 @@ class GlobalPool(Transform):
     def _mode(self) -> str:
         mode = str(self.params.get("mode", "avg"))
         if mode not in ("avg", "max"):
-            raise ShapeError(f"pooling mode must be 'avg' or 'max', got {mode!r}")
+            raise ShapeError(f"pooling mode must be 'avg' or 'max', got {mode!r}", code="transform_param")
         return mode
 
     def out_shape(self, in_shape: Shape) -> Shape:
         if len(in_shape) != 3:
-            raise ShapeError("it needs an image (C×H×W)")
+            raise ShapeError("it needs an image (C×H×W)", code="transform_param")
         self._mode()
         return (int(in_shape[0]),)
 
@@ -231,12 +232,12 @@ class SequenceToVector(Transform):
     def _mode(self) -> str:
         mode = str(self.params.get("mode", "last"))
         if mode not in ("last", "first", "mean", "max"):
-            raise ShapeError(f"mode must be last, first, mean or max, got {mode!r}")
+            raise ShapeError(f"mode must be last, first, mean or max, got {mode!r}", code="transform_param")
         return mode
 
     def out_shape(self, in_shape: Shape) -> Shape:
         if len(in_shape) != 2:
-            raise ShapeError("it needs a sequence (L×F)")
+            raise ShapeError("it needs a sequence (L×F)", code="transform_param")
         self._mode()
         return (int(in_shape[1]),)
 
@@ -254,9 +255,8 @@ def _image_factorizations(n: int, limit: int = 8) -> list[tuple[int, int, int]]:
     """(C, H, W) with C·H·W = n, H and W ≥ 2, best first: square pictures with few
     channels, then near-square ones. 128 → (2, 8, 8) first; 784 → (1, 28, 28)."""
     found: list[tuple[int, int, int]] = []
-    for c in range(1, n + 1):
-        if n % c:
-            continue
+    small = [c for c in range(1, isqrt(n) + 1) if n % c == 0]  # every divisor, from its pairs (Stage 21: fast)
+    for c in sorted(set(small + [n // c for c in small])):
         hw = n // c
         for h in range(2, isqrt(hw) + 1):
             if hw % h == 0 and hw // h >= 2:
@@ -303,7 +303,7 @@ class ToImage(Transform):
         c, h, w = self._dims(in_shape)
         n = int(prod(in_shape))
         if min(c, h, w) < 1 or c * h * w != n:
-            raise ShapeError(f"C×H×W must multiply to {n} (the number of values arriving); {c}×{h}×{w} = {c * h * w}")
+            raise ShapeError(f"C×H×W must multiply to {n} (the number of values arriving); {c}×{h}×{w} = {c * h * w}", code="transform_param")
         return (c, h, w)
 
     def build(self, in_shape: Shape) -> nn.Module:
@@ -349,11 +349,11 @@ class ToSequence(Transform):
 
     def out_shape(self, in_shape: Shape) -> Shape:
         if len(in_shape) != 1:
-            raise ShapeError("it needs a flat vector")
+            raise ShapeError("it needs a flat vector", code="transform_param")
         n = int(in_shape[0])
         length = self._int("length", 1)
         if length < 1 or n % length:
-            raise ShapeError(f"the number of steps must divide {n}; {length} does not")
+            raise ShapeError(f"the number of steps must divide {n}; {length} does not", code="transform_param")
         return (length, n // length)
 
     def build(self, in_shape: Shape) -> nn.Module:
@@ -398,12 +398,12 @@ class ImageToSequence(Transform):
     def _mode(self) -> str:
         mode = str(self.params.get("mode", "rows"))
         if mode not in ("rows", "columns", "pixels", "patches"):
-            raise ShapeError(f"read-by must be rows, columns, pixels or patches, got {mode!r}")
+            raise ShapeError(f"read-by must be rows, columns, pixels or patches, got {mode!r}", code="transform_param")
         return mode
 
     def out_shape(self, in_shape: Shape) -> Shape:
         if len(in_shape) != 3:
-            raise ShapeError("it needs an image (C×H×W)")
+            raise ShapeError("it needs an image (C×H×W)", code="transform_param")
         c, h, w = (int(d) for d in in_shape)
         mode = self._mode()
         if mode == "rows":
@@ -414,7 +414,7 @@ class ImageToSequence(Transform):
             return (h * w, c)
         p = self._int("patch", 4)
         if p < 1 or h % p or w % p:
-            raise ShapeError(f"the patch size must divide the image height {h} and width {w}; {p} does not")
+            raise ShapeError(f"the patch size must divide the image height {h} and width {w}; {p} does not", code="transform_param")
         return ((h // p) * (w // p), c * p * p)
 
     def build(self, in_shape: Shape) -> nn.Module:
@@ -439,9 +439,9 @@ def _target_shape(params: dict, name: str = "shape") -> Shape:
     try:
         shape = tuple(int(d) for d in (raw or []))
     except (TypeError, ValueError):
-        raise ShapeError("the target shape must be whole numbers, e.g. 64 or 1, 8, 8") from None
+        raise ShapeError("the target shape must be whole numbers, e.g. 64 or 1, 8, 8", code="transform_param") from None
     if not shape or any(d < 1 for d in shape) or len(shape) > 3:
-        raise ShapeError("the target shape must be 1 to 3 positive numbers, e.g. 64 or 1, 8, 8")
+        raise ShapeError("the target shape must be 1 to 3 positive numbers, e.g. 64 or 1, 8, 8", code="transform_param")
     return shape
 
 
@@ -462,7 +462,8 @@ class Reshape(Transform):
         shape = _target_shape(self.params) if self.params.get("shape") else (int(prod(in_shape)),)
         if prod(shape) != prod(in_shape):
             raise ShapeError(
-                f"the new shape must hold the same {int(prod(in_shape))} values; {fmt_shape(shape)} holds {int(prod(shape))}"
+                f"the new shape must hold the same {int(prod(in_shape))} values; {fmt_shape(shape)} holds {int(prod(shape))}",
+                code="transform_param",
             )
         return shape
 
@@ -554,7 +555,7 @@ def make_transform(kind: str, params: dict | None = None) -> Transform:
         return TRANSFORMS[kind](params)
     except KeyError:
         known = ", ".join([AUTO, *TRANSFORMS])
-        raise ValueError(f"unknown connection transform {kind!r}; known: {known}") from None
+        raise ShapeError(f"unknown connection transform {kind!r}; known: {known}", code="bad_transform") from None
 
 
 # --------------------------------------------------------------------------- #
@@ -568,29 +569,29 @@ class Resolved:
     auto: bool
 
 
-def _auto_plan(in_shape: Shape) -> list[tuple[str, dict]]:
-    """Transforms "auto" tries for a single-input layer, simplest first."""
-    plan: list[tuple[str, dict]] = [("none", {})]
+def _auto_plan(in_shape: Shape):
+    """Transforms "auto" tries for a single-input layer, simplest first — made one at a
+    time (Stage 21), so the picture foldings are only worked out when "none" does not fit."""
+    yield ("none", {})
     rank = len(in_shape)
     if rank == 3:
-        plan += [
-            ("flatten", {}),
-            ("image_to_sequence", {"mode": "rows"}),
-            ("image_to_sequence", {"mode": "pixels"}),
-            ("image_to_sequence", {"mode": "columns"}),
-            ("global_pool", {"mode": "avg"}),
-        ]
+        yield ("flatten", {})
+        yield ("image_to_sequence", {"mode": "rows"})
+        yield ("image_to_sequence", {"mode": "pixels"})
+        yield ("image_to_sequence", {"mode": "columns"})
+        yield ("global_pool", {"mode": "avg"})
     elif rank == 2:
-        plan += [("flatten", {}), ("to_image", ToImage.presets(in_shape)[0]), ("seq_pool", {"mode": "last"})]
+        yield ("flatten", {})
+        yield ("to_image", ToImage.presets(in_shape)[0])
+        yield ("seq_pool", {"mode": "last"})
     elif rank == 1:
-        plan += [("to_sequence", {"length": 1})]
-        plan += [("to_image", p) for p in ToImage.presets(in_shape)]
+        yield ("to_sequence", {"length": 1})
+        yield from (("to_image", p) for p in ToImage.presets(in_shape))
         if in_shape[0] > 1:
-            plan += [("to_sequence", {"length": int(in_shape[0])})]
+            yield ("to_sequence", {"length": int(in_shape[0])})
         # last resort for a vector into an image layer: learn an 8×8 picture from it
         if projection_params(tuple(in_shape), (1, 8, 8)) <= MAX_AUTO_PARAMS:
-            plan += [("project", {"shape": [1, 8, 8]})]
-    return plan
+            yield ("project", {"shape": [1, 8, 8]})
 
 
 def _why(exc: Exception) -> str:
@@ -598,36 +599,66 @@ def _why(exc: Exception) -> str:
     return str(exc) or "it does not fit"
 
 
+def _settings_error(exc: ShapeError, dst: str) -> ShapeError:
+    """The layer's own settings clash: reported as it is (its code and fixes kept) —
+    not the connection's fault."""
+    if exc.node_id is None:
+        exc.node_id = dst
+    exc.edge = None
+    return exc
+
+
+def _make(kind: str, params: dict, edge: tuple[str, str]) -> Transform:
+    """``make_transform`` for one connection: an unknown transform points at it."""
+    try:
+        return make_transform(kind, params)
+    except ShapeError as exc:
+        src, dst = edge
+        exc.edge, exc.node_id = edge, dst
+        exc.fixes = [_auto_fix(src, dst)]
+        raise
+
+
+def _auto_fix(src: str, dst: str) -> dict:
+    return fx.fix(f"Set the connection {src} → {dst} back to Auto", fx.op_set_transform(src, dst, AUTO))
+
+
+def _pinned(message: str, edge: tuple[str, str], in_shape: Shape, kind: str) -> ShapeError:
+    src, dst = edge
+    return ShapeError(
+        message, code="pinned_transform", edge=edge, node_id=dst,
+        hint="Pick another transform for this connection, or set it back to Auto.",
+        fixes=[_auto_fix(src, dst)], facts={"in_shape": list(in_shape), "transform": kind},
+    )
+
+
 def resolve_single(kind: str, params: dict, in_shape: Shape, target, edge: tuple[str, str]) -> Resolved:
     """The transform an edge into a single-input layer uses. Raises
     :class:`ShapeError` (pointing at the edge) when nothing makes the shapes fit."""
     src, dst = edge
     if kind != AUTO:
-        t = make_transform(kind, params)
+        t = _make(kind, params, edge)
         try:
             adapted = t.out_shape(in_shape)
         except ShapeError as exc:
-            raise ShapeError(
+            raise _pinned(
                 f"the connection {src} → {dst} is set to “{t.label}”, which cannot take {fmt_shape(in_shape)}: {_why(exc)}",
-                edge=edge,
-                node_id=dst,
-                hint="Pick another transform for this connection, or set it back to Auto.",
+                edge, in_shape, kind,
             ) from None
         try:
             target.out_shape(adapted)
         except ShapeError as exc:
             if getattr(exc, "settings", False):  # the layer's own settings clash: not the connection's fault
-                raise ShapeError(str(exc), node_id=dst, hint=exc.hint, settings=True) from None
-            raise ShapeError(
+                raise _settings_error(exc, dst) from None
+            raise _pinned(
                 f"the connection {src} → {dst} is set to “{t.label}”, which gives {fmt_shape(adapted)}, "
                 f"but {dst} ({target.type_name}) cannot take that: {_why(exc)}",
-                edge=edge,
-                node_id=dst,
-                hint="Pick another transform for this connection, or set it back to Auto.",
+                edge, in_shape, kind,
             ) from None
         return Resolved(t, tuple(in_shape), tuple(adapted), auto=False)
 
-    first_error: Exception | None = None
+    first_error: ShapeError | None = None
+    tried_fixes: list[dict] = []  # Stage 21: what each try's refusal suggests (e.g. padding for a folded picture)
     for k, p in _auto_plan(in_shape):
         t = make_transform(k, p)
         try:
@@ -635,17 +666,29 @@ def resolve_single(kind: str, params: dict, in_shape: Shape, target, edge: tuple
             target.out_shape(adapted)
         except ShapeError as exc:
             if getattr(exc, "settings", False):  # the layer's own settings clash: no transform can help
-                raise ShapeError(str(exc), node_id=dst, hint=exc.hint, settings=True) from None
+                raise _settings_error(exc, dst) from None
             if first_error is None:
                 first_error = exc
+            tried_fixes += list(exc.fixes)
             continue
         return Resolved(t, tuple(in_shape), tuple(adapted), auto=True)
+    if first_error is not None and first_error.code not in (None, "wrong_rank", "transform_param"):
+        # Stage 21: the data arrives in a form the layer reads, but its size does not fit the
+        # layer's settings (heads, patches…): that is the problem to report, with the layer's fixes
+        if first_error.node_id is None:
+            first_error.node_id = dst
+        raise first_error
     raise ShapeError(
         f"{dst} ({target.type_name}) cannot take what {src} sends ({fmt_shape(in_shape)}), "
         f"and no automatic transform fits: {_why(first_error) if first_error else 'no transform applies'}",
+        code="no_auto_transform",
         edge=edge,
         node_id=dst,
         hint="Change the layer's settings, or connect it to a layer with a fitting output.",
+        # the layer's own fixes for what arrived, as it is or as auto would fold it (checked by the diagnosis)
+        fixes=tried_fixes,
+        param=first_error.param if first_error is not None else None,
+        facts={"in_shape": list(in_shape), "reason_code": first_error.code if first_error is not None else None},
     )
 
 
@@ -659,7 +702,8 @@ def _add_auto(in_shape: Shape, ref: Shape) -> Transform:
         return make_transform("project", {"shape": list(ref)})
     raise ShapeError(
         f"a learnable projection {fmt_shape(in_shape)} → {fmt_shape(ref)} would need "
-        f"{projection_params(in_shape, ref):,} weights — too many to add automatically"
+        f"{projection_params(in_shape, ref):,} weights — too many to add automatically",
+        code="no_auto_transform",
     )
 
 
@@ -675,16 +719,14 @@ def resolve_merge(
     chosen: list[Resolved | None] = [None] * n
     for i, (kind, params) in enumerate(settings):
         if kind != AUTO:
-            t = make_transform(kind, params)
+            t = _make(kind, params, (sources[i], dst))
             try:
                 adapted = t.out_shape(in_shapes[i])
             except ShapeError as exc:
-                raise ShapeError(
+                raise _pinned(
                     f"the connection {sources[i]} → {dst} is set to “{t.label}”, which cannot take "
                     f"{fmt_shape(in_shapes[i])}: {_why(exc)}",
-                    edge=(sources[i], dst),
-                    node_id=dst,
-                    hint="Pick another transform for this connection, or set it back to Auto.",
+                    (sources[i], dst), in_shapes[i], kind,
                 ) from None
             chosen[i] = Resolved(t, tuple(in_shapes[i]), tuple(adapted), auto=False)
 
@@ -730,6 +772,8 @@ def resolve_merge(
     raise ShapeError(
         f"{dst} ({node.type_name}) cannot combine its inputs ({shapes}), and no automatic transform fits: "
         f"{_why(first_error)}",
+        code="merge_shapes",
         node_id=dst,
         hint="Set a transform on one of the connections into it, or change the layers that feed it.",
+        facts={"sources": list(sources), "shapes": [list(x) for x in in_shapes]},
     )

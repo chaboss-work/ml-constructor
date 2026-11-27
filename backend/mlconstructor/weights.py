@@ -33,7 +33,7 @@ import torch.nn as nn
 
 from .datasets import canonical_dataset_id
 from .schema import TrainSpec
-from .shapes import Shape
+from .shapes import GraphError, Shape
 
 WEIGHTS_FORMAT = "mlconstructor.weights"
 WEIGHTS_VERSION = 1
@@ -51,6 +51,8 @@ _DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 
 class RunNotFound(KeyError):
     """The run id is unknown here (never existed, malformed, or already pruned)."""
+
+    code = "run_missing"  # Stage 21: its catalogue entry
 
     def __str__(self) -> str:  # KeyError would quote the message
         return str(self.args[0]) if self.args else "unknown run"
@@ -114,29 +116,32 @@ def read_weights(raw: bytes) -> dict:
     ``weights_only=True`` lets through tensors and plain values only, so a file that
     tries to run code on loading is refused before anything in it runs."""
     if len(raw) > MAX_WEIGHTS_BYTES:
-        raise ValueError(f"the weights file is over {MAX_WEIGHTS_BYTES // 2**20} MB")
+        raise GraphError(f"the weights file is over {MAX_WEIGHTS_BYTES // 2**20} MB", code="weights_file")
     if not (raw[:4] == b"PK\x03\x04" or raw[:1] == b"\x80"):  # a torch.save zip, or the legacy pickle format
-        raise ValueError("this is not a PyTorch weights file (.pt): load a file saved by Save weights or torch.save")
+        raise GraphError("this is not a PyTorch weights file (.pt): load a file saved by Save weights or torch.save",
+                         code="weights_file")
     try:
         obj = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=True)
     except Exception as exc:  # broken, or holding more than tensors and plain values
         if "weights only" in str(exc).lower() or "weights_only" in str(exc):
-            raise ValueError(
+            raise GraphError(
                 "this file holds more than weights (Python objects, possibly code), and the app only opens files "
                 "with plain tensors, for safety: nothing in it was run. Save the weights alone (a state_dict) and "
-                "load that"
+                "load that",
+                code="weights_unsafe",
             ) from None
-        raise ValueError("this PyTorch file is damaged or incomplete: save the weights again") from None
+        raise GraphError("this PyTorch file is damaged or incomplete: save the weights again", code="weights_file") from None
     if isinstance(obj, dict) and obj.get("format") == WEIGHTS_FORMAT:
         if int(obj.get("version") or 0) > WEIGHTS_VERSION:
-            raise ValueError("this weights file comes from a newer version of the app")
+            raise GraphError("this weights file comes from a newer version of the app", code="weights_newer")
         sd, bare = obj.get("state_dict"), False
     else:
         sd, bare = obj, True
     if not isinstance(sd, dict) or not sd:
-        raise ValueError("the file holds no weights (expected tensor names mapped to tensors)")
+        raise GraphError("the file holds no weights (expected tensor names mapped to tensors)", code="weights_file")
     if not all(isinstance(k, str) and isinstance(v, torch.Tensor) for k, v in sd.items()):
-        raise ValueError("the file holds something other than weights (every entry must be a named tensor)")
+        raise GraphError("the file holds something other than weights (every entry must be a named tensor)",
+                         code="weights_file")
     meta = obj if not bare else {}
     data = meta.get("data")
     return {
@@ -165,18 +170,21 @@ def fit_state_dict(model: nn.Module, sd: dict) -> tuple[dict, str]:
             f"{_pretty(k)} is {list(sd[k].shape)} in the file but {list(target[k].shape)} here" for k in bad[:3]
         )
         more = f" (and {len(bad) - 3} more)" if len(bad) > 3 else ""
-        raise ValueError(
+        raise GraphError(
             f"these weights do not fit this graph: {shown}{more}. A layer's size was changed since they were "
-            "saved — set it back, or train again"
+            "saved — set it back, or train again",
+            code="weights_mismatch",
+            facts={"sizes": [[_pretty(k), list(sd[k].shape), list(target[k].shape)] for k in bad]},
         )
     if len(sd) == len(target) and all(tuple(a.shape) == tuple(b.shape) for a, b in zip(sd.values(), target.values())):
         return dict(zip(target.keys(), sd.values())), "order"
     n_file = sum(int(t.numel()) for t in sd.values())
     n_here = sum(int(t.numel()) for t in target.values())
-    raise ValueError(
+    raise GraphError(
         f"these weights belong to a different network: the file has {len(sd)} tensors ({n_file:,} values), "
         f"this graph needs {len(target)} ({n_here:,}). Load weights saved from this same graph "
-        "(same layers, same sizes)"
+        "(same layers, same sizes)",
+        code="weights_mismatch",
     )
 
 

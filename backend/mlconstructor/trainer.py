@@ -68,7 +68,7 @@ from .schema import (
     TrainSpec,
     WeightsInfo,
 )
-from .shapes import Shape, ShapeError, numel
+from .shapes import GraphError, Shape, ShapeError, numel
 from .text import UNKNOWN, generate_text, text_vocab
 from .weights import arch_key, data_key, fit_state_dict, load_run, read_weights, save_run, weights_bytes
 
@@ -115,15 +115,16 @@ def check_trainable(spec: GraphSpec, what: str = "train") -> int:
     build = build_model(spec, meta=True)[1]
     n = build.total_params
     if n > MAX_TRAIN_PARAMS:
-        raise ValueError(
+        raise GraphError(
             f"this network has {n:,} parameters ({_human(n)}), far too big to {what} on this server (the limit is "
             f"{_human(MAX_TRAIN_PARAMS)}). It is here to inspect: every layer and shape of the real model. The "
-            "flagships in the library come with a mini version that trains here; or shrink the layers"
+            "flagships in the library come with a mini version that trains here; or shrink the layers",
+            code="too_big", facts={"params": n, "limit": MAX_TRAIN_PARAMS},
         )
     if what in ("train", "test"):
-        reason = train_block_reason(spec, build)
-        if reason:
-            raise ValueError(reason)
+        plan = resolve_task(spec, build)
+        if plan.reason:
+            raise GraphError(plan.reason, code=plan.code or "task_inputs")
     return n
 
 
@@ -207,7 +208,8 @@ def _infer_num_classes(model: nn.Module, in_shape: Shape) -> int:
         raise ShapeError(
             f"network output must be 2-D (batch, classes) for the v1 classification "
             f"task; got {tuple(probe.shape)} — add a Flatten + Linear so the last "
-            f"layer outputs class logits"
+            f"layer outputs class logits",
+            code="output_not_classes", facts={"got": list(probe.shape[1:])},
         )
     return int(probe.shape[-1])  # Stage 18: (batch, L, vocab) scores every position
 
@@ -218,9 +220,10 @@ def _fit_labels(out: torch.Tensor, y: torch.Tensor) -> tuple[torch.Tensor, torch
     classifier) from the last label."""
     if out.dim() == 3:
         if y.dim() != 2:
-            raise ValueError(
+            raise GraphError(
                 "the network scores every position, but this dataset gives one label per row: switch the "
-                "Output's \"Every position\" off, or train on Your text"
+                "Output's \"Every position\" off, or train on Your text",
+                code="every_position",
             )
         return out.reshape(-1, out.shape[-1]), y.reshape(-1)
     return out, (y[:, -1] if y.dim() == 2 else y)
@@ -232,13 +235,14 @@ def _input_shape(build) -> Shape:
     inputs = list(getattr(build, "inputs", None) or [])
     if len(inputs) > 1:  # Stage 19
         names = ", ".join(i.name or i.id for i in inputs)
-        raise ValueError(
+        raise GraphError(
             f"this network takes {len(inputs)} inputs ({names}); the data, training and the test work with one input "
-            "so far. Run once feeds it random inputs"
+            "so far. Run once feeds it random inputs",
+            code="task_inputs",
         )
     first = build.layers[0]
     if not build.layers or first.out_shape is None:
-        raise ShapeError("graph has no Input node to take a shape from")
+        raise ShapeError("graph has no Input node to take a shape from", code="no_input")
     return tuple(int(d) for d in first.out_shape)
 
 
@@ -260,10 +264,11 @@ def _device(want: str = "cpu") -> "torch.device":
     (:mod:`~mlconstructor.gpu`)."""
     if want == "cuda":
         if CUDA_HIDDEN:
-            raise ValueError(hidden_message())
+            raise GraphError(hidden_message(), code="no_gpu")
         if not cuda_available():
-            raise ValueError(
-                "GPU (CUDA) training was requested, but no CUDA device is available on this backend"
+            raise GraphError(
+                "GPU (CUDA) training was requested, but no CUDA device is available on this backend",
+                code="no_gpu",
             )
         return torch.device("cuda")
     if want == "auto":
@@ -611,11 +616,12 @@ def test_run(spec: GraphSpec, run_id: str) -> TestResult:
     X, y, groups = make_rows(t.dataset, in_shape, num_classes, t, torch.device("cpu"))
     tr, va, te = split_rows(y, groups, t.val_fraction, t.test_fraction, t.seed)
     if not te.numel():
-        raise ValueError(
+        raise GraphError(
             "there is no test part to measure: set Final test to 10 % or more and train again (the test rows "
             "have to be kept out of training), then press Test"
             if not t.test_fraction else
-            "too few rows to keep a test part aside: add rows (every class needs a row to train on first)"
+            "too few rows to keep a test part aside: add rows (every class needs a row to train on first)",
+            code="no_test_part" if not t.test_fraction else "few_rows",
         )
     loss_fn = nn.CrossEntropyLoss()
 
@@ -708,10 +714,11 @@ class _Gen:
             self.alphas = noise_schedule(int(spec.diffusion_steps)).to(device)
             if plan.class_input:
                 if plan.class_rows < self.classes:
-                    raise ValueError(
+                    raise GraphError(
                         f"the class embedding has {plan.class_rows} rows, but the data has {self.classes} classes: give "
                         f"it at least {self.classes} (one more, {self.classes + 1}, lets it also draw without a class, "
-                        "which makes the pictures sharper)"
+                        "which makes the pictures sharper)",
+                        code="class_rows", facts={"classes": self.classes, "input": plan.class_input},
                     )
                 if plan.class_rows > self.classes:
                     self.null = plan.class_rows - 1  # the spare row: "no class"
@@ -1000,9 +1007,10 @@ def _generative_test(spec: GraphSpec, run_id: str, payload: dict, model: nn.Modu
     g = _Gen(model, model.task_plan, t, torch.device("cpu"))
     tr, va, te = split_rows(g.y, g.groups, t.val_fraction, t.test_fraction, t.seed)
     if not te.numel():
-        raise ValueError(
+        raise GraphError(
             "there is no test part to measure: set Final test to 10 % or more and train again (the test rows have to be "
-            "kept out of training), then press Test"
+            "kept out of training), then press Test",
+            code="no_test_part",
         )
     test_loss = g.evaluate(g.X[te], g.y[te])[0]
     val_loss = g.evaluate(g.X[va], g.y[va])[0] if va.numel() else None
@@ -1028,7 +1036,8 @@ def draw(spec: GraphSpec, run_id: str, count: int = 10, label: int | None = None
     model, _build = build_model(spec)
     plan = model.task_plan
     if plan.task not in ("reconstruction", "diffusion"):
-        raise ValueError("Draw needs a network that learned to generate: a VAE (reconstruction) or a diffusion model")
+        raise GraphError("Draw needs a network that learned to generate: a VAE (reconstruction) or a diffusion model",
+                         code="draw_needs_generative")
     mapped, _how = fit_state_dict(model, payload["state_dict"])
     model.load_state_dict(mapped)
     g = _Gen(model, plan, spec.train, torch.device("cpu"))
@@ -1040,7 +1049,7 @@ def draw(spec: GraphSpec, run_id: str, count: int = 10, label: int | None = None
         if plan.class_input and g.classes:
             if label is not None:
                 if not 0 <= int(label) < g.classes:
-                    raise ValueError(f"the class must be between 0 and {g.classes - 1}")
+                    raise GraphError(f"the class must be between 0 and {g.classes - 1}", code="draw_class")
                 labels = torch.full((count,), int(label))
             else:
                 labels = torch.arange(count) % g.classes
@@ -1112,14 +1121,16 @@ def generate(spec: GraphSpec, run_id: str, prompt: str = "", length: int = 200, 
     payload = load_run(run_id)  # a stale id is "not found", whatever the graph
     t = spec.train
     if canonical_dataset_id(t.dataset) != "text" or not (t.text or "").strip():
-        raise ValueError(
-            "Generate continues text: choose \"Your text\" as the dataset, add a text in Data, train, then generate"
+        raise GraphError(
+            "Generate continues text: choose \"Your text\" as the dataset, add a text in Data, train, then generate",
+            code="generate_needs_text",
         )
     check_trainable(spec, "run")
     model, build = build_model(spec)
     in_shape = _input_shape(build)
     if len(in_shape) != 1:
-        raise ValueError("Generate needs a language model: Input [L] -> Embedding -> ... -> LM head")
+        raise GraphError("Generate needs a language model: Input [L] -> Embedding -> ... -> LM head",
+                         code="generate_needs_lm")
     mapped, _how = fit_state_dict(model, payload["state_dict"])
     model.load_state_dict(mapped)
     model.eval()

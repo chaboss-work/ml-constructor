@@ -9,6 +9,7 @@ import {
   DataPreview,
   DatasetInfo,
   ExportResult,
+  DrawResult,
   GenerateResult,
   GraphSpec,
   HealthInfo,
@@ -110,6 +111,20 @@ export class ApiService {
       prompt,
       length,
       temperature,
+      seed,
+    });
+  }
+
+  /** Stage 20 — draw pictures with a run's weights (a diffusion model or a VAE). */
+  draw(spec: GraphSpec, runId: string, count: number, label: number | null, steps: number, guidance: number,
+       seed: number): Observable<DrawResult> {
+    return this.http.post<DrawResult>(`${API_BASE}/generate/images`, {
+      spec,
+      run_id: runId,
+      count,
+      label,
+      steps,
+      guidance,
       seed,
     });
   }

@@ -173,7 +173,12 @@ export interface GenerateResult {
 
 /** Stage 11 — one streamed progress event from POST /train/stream. */
 export interface TrainEvent {
-  type: 'start' | 'step' | 'epoch' | 'done' | 'error';
+  type: 'start' | 'step' | 'epoch' | 'done' | 'error' | 'samples';
+  /** Stage 20 — the gallery after an epoch (generative training). */
+  images?: GalleryImage[];
+  recon?: number | null;
+  kl?: number | null;
+  task?: string;
   step?: number;
   loss?: number;
   epoch?: number;
@@ -228,6 +233,8 @@ export interface BuildResult {
   runnable?: boolean;
   /** Stage 19 — why it cannot be trained here yet (several inputs, a picture as output…). */
   train_note?: string | null;
+  /** Stage 20 — what training will teach it (null: nothing yet). */
+  task?: string | null;
 }
 
 export interface TrainResult {
@@ -260,6 +267,33 @@ export interface TrainResult {
   /** Stage 16 — rows kept for the final test, and the id the trained weights are kept under. */
   test_samples?: number;
   run_id?: string | null;
+  /** Stage 20 — what was learned; for reconstruction / diffusion the loss tells the story. */
+  task?: string;
+  loss_name?: string | null;
+  final_recon?: number | null;
+  final_kl?: number | null;
+  gallery?: GalleryImage[];
+  draw_classes?: number;
+  draw_free?: boolean;
+}
+
+/** Stage 20 — one picture of the gallery: pixels as base64 bytes (channels last). */
+export interface GalleryImage {
+  label: string;
+  w: number;
+  h: number;
+  c: number;
+  data: string;
+}
+
+/** Stage 20 — pictures drawn with a run's weights (POST /generate/images). */
+export interface DrawResult {
+  ok: boolean;
+  run_id: string;
+  task: string;
+  images: GalleryImage[];
+  ms: number;
+  note?: string | null;
 }
 
 /** Stage 16 — the final test: a run's weights on the rows used for nothing else. */
@@ -277,6 +311,10 @@ export interface TestResult {
   same_split?: boolean | null;
   note?: string | null;
   warnings?: string[];
+  /** Stage 20 — a generative network is tested by its error, not accuracy. */
+  task?: string;
+  val_loss?: number | null;
+  train_loss?: number | null;
 }
 
 /** Stage 16 — a weights file loaded into the graph (kept on the server as a run). */

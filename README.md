@@ -17,11 +17,23 @@ the instructions below — no account, no cloud, no dataset download for the v1 
 
 ## Demo
 
-![ML Constructor node editor](docs/v1-editor-demo.jpg)
+![ML Constructor node editor](docs/editor-stage22.jpg)
+
+*The MLP from the library while it trains (dark theme, detailed nodes): a wave runs down
+the graph as a batch passes and back up with the gradients, the Output node shows the
+progress ring and the accuracy, the inspector the live curves. Every layer family has its
+colour and icon; the shape of the data sits on every wire.*
+
+<details>
+<summary>v1, for comparison</summary>
+
+![ML Constructor v1 node editor](docs/v1-editor-demo.jpg)
 
 *The seeded example (Input → Flatten → Linear → ReLU → Linear → Output) after
 **Build** (inferred shapes on every node, 50,890 parameters) and **Train**
 (accuracy 1.000 on the synthetic demo task, loss → 0, loss curve) — all in the browser.*
+
+</details>
 
 ---
 
@@ -48,6 +60,11 @@ The core is deliberately OOP:
   `Block` (a reusable group you can repeat *N×*, à la "N× transformer blocks").
 * The **node editor** is a lightweight custom SVG/Angular layer (no heavy graph
   dependency), driven entirely by Angular signals.
+* Its **look** is a small design system (`frontend/src/theme/tokens.css`): every colour,
+  size and motion is a token, in a light and a dark theme (a switch in the top bar).
+  Layers are coloured and iconed by family, and training plays on the canvas — a wave
+  runs down the graph as a batch passes and back up with the gradients — without slowing
+  training down (measured).
 
 ## Repository layout
 
@@ -175,6 +192,9 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
   short lists of graph edits, each tried on a copy of the graph before it is offered.
   `GET /errors` lists all 72 codes and the glossary; every 422 (and the 404 of weights
   that are gone) carries the same explanation in `error`.
+* Live training on the canvas: the stream's first event says how many steps the run takes
+  (`total_steps`, `epochs`), and every training result says how long it took on the server
+  (`seconds`).
 * `GET /layers` → the palette the editor renders.
 * `edge_settings` (optional) → how a connection reshapes its data; without it every
   connection adapts by itself (flatten, fold into an image, read an image as a

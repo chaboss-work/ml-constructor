@@ -209,10 +209,10 @@ the original later stages moved up by seven; the same day the flagships and your
 | 16 | A | The same seed, the same numbers; save / load weights; a final test — **done** | Train, check, test — and keep it |
 | 17 | B | Flagship language models: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma — **done** | Qwen and DeepSeek from the inside |
 | 18 | B | Your text → your GPT: train it on your own text, then let it write — **done** | Make your own GPT |
-| 19 | B | Flagships for images, 3D, sound, vision: Stable Diffusion, DiT, ViT, Whisper | What is inside Stable Diffusion |
-| 20 | B | Teach it to generate: autoencoder, VAE, diffusion | A network draws digits |
-| 21 | C | Clear errors: plain words, why, what to do, one-click fixes | Errors you understand without a degree |
-| 22 | C | A new look: design system, themes, live training on the canvas | Before / after |
+| 19 | B | Flagships for images, 3D, sound, vision: Stable Diffusion, DiT, ViT, Whisper — **done** | What is inside Stable Diffusion |
+| 20 | B | Teach it to generate: autoencoder, VAE, diffusion — **done** | A network draws digits |
+| 21 | C | Clear errors: plain words, why, what to do, one-click fixes — **done** | Errors you understand without a degree |
+| 22 | C | A new look: design system, themes, live training on the canvas — **done** | Before / after |
 | 23 | C | Interactive editor: drag & drop, multi-select, undo / redo, mini-map | A ResNet in under a minute |
 | 24 | C | Russian interface (EN / RU) | The app in Russian |
 | 25 | D | Try the model: draw a digit, see the prediction | Draw a digit — it guesses |
@@ -552,22 +552,59 @@ Every message says what happened, why, and what to do — in plain words.
   makes exactly the backend's graph); the tests caught all 20 bugs planted on purpose in a
   copy of the code; checked live in the browser.
 
-### Stage 22 — A new look · *planned*
-An editor that is attractive at first sight.
-- A design system — palette, typography, spacing, elevation — with **dark and light
-  themes** and a switch.
-- Nodes colour-coded by family (input / output, convolution, dense, activation,
-  normalization, sequence, attention, merge, block), with icons, a compact and a
-  detailed view, and tensor-shape and parameter-count badges.
-- Edges as smooth curves with an animated **data flow**, a hover highlight and the
-  tensor shape shown right on the wire.
-- **Live training on the canvas:** nodes glow as a batch passes through, a progress
-  ring, and the final accuracy shown on the Output node.
-- A cleaner inspector — grouped parameters, sliders and toggles, inline help — with
-  smooth transitions and micro-interactions throughout.
-- *Done when:* every screen uses the design system in both themes, and the training
-  animation does not slow training down.
+### Stage 22 — A new look · **DONE (2026-11-28)**
+An editor that is attractive at first sight — in a dark and a light theme.
+- **A design system:** every colour, font size, spacing, radius, shadow and motion of the
+  app is a token in one file (`src/theme/tokens.css`), in a light and a dark theme, with a
+  switch in the top bar — light, dark or as the system says — remembered per browser and
+  painted before the first frame (no flash). Buttons, fields, switches, segmented
+  controls, sliders, badges and notes are shared components on the tokens.
+- **Nodes by family:** 17 families (input / output, dense, convolution, pooling,
+  activation, normalization, regularization, reshape, sequence, attention, merge, block,
+  language model, generative, vision, 3D), each with its colour, its icon and a coloured
+  top edge; ports and wires take the colour of the layer they leave; a small legend names
+  the families on the canvas. A **compact** view (the layer, its id, its output shape) and
+  a **detailed** one (its key settings, its parameter count, the shape on every wire).
+- **Wires:** smooth curves; hovering a node or a wire lights its wires and shows the data
+  flowing along them; the tensor shape sits right on the wire.
+- **Live training on the canvas:** a wave runs down the graph as a batch passes (the
+  forward pass, blue) and back up (the backward pass — the gradients, orange); the Output
+  node shows a progress ring and the accuracy after each epoch, then the final accuracy
+  (green when it generalises); the Train button fills up; the step and the epoch in the
+  corner.
+- **A cleaner inspector:** collapsible sections; a layer's settings grouped — settings,
+  switches, and the rarely touched ones (eps, RoPE base…) folded under "Advanced", for a
+  block's inner layers too; sliders where a setting has a range, switches for yes / no,
+  segments for short choices, the layer's description on a click; the training schedule
+  on sliders that move along round values (epochs, learning rate, batch, samples).
+- **Micro-interactions:** hover and press states, nodes, cards and sheets appearing, the
+  colours fading over when the theme changes; "animations off" on the canvas and the
+  system's "reduce motion" are respected.
+- **The animation does not slow training down — measured.** The browser shares the
+  processor with training, so the page draws as little as it can: the stream is read
+  without drawing, the steps are taken 20 times a second (not at the screen's 144–300 Hz),
+  the loss curve redraws 220 points (not thousands), and no CSS animation runs while a
+  run streams — the wave is two glow elements per node whose opacity is set 20 times a
+  second (0.02 ms a tick, where a CSS variable on the canvas cost ~4 ms). The same run, 8
+  alternating pairs with the animation on and off: +0.025 s on a 2.3-s run (≈ 1 %, once,
+  at the start); the first version cost 0.5 s of 12 s.
 - *Video:* before / after.
+- **Shipped:** `src/theme/tokens.css` and the components in `src/styles.scss`;
+  `core/theme.ts` (theme, node view, animations — remembered per browser),
+  `core/families.ts` + `families.json` (families, icons, the detailed line, the inspector's
+  groups, the wave's order), `core/live.ts` (the frame batcher, the step count, the
+  sliders' ladders, the wave); the editor's template and styles rebuilt on the design
+  system (no Ionic widgets left in it: the start bundle went from 710 to 474 kB, and the
+  build has no warnings); the stream's first event says `total_steps` and `epochs`, a
+  run's result says `seconds`; API level 22. Tested: the editor's unit tests — every
+  colour on every screen comes from a token, every colour token exists in both themes,
+  text contrast (WCAG AA) on every surface in both themes, every icon exists, the first
+  paint agrees with the app, the frame batcher (10 000 steps in one hand-over, about 20
+  hand-overs a second on a 144 Hz screen, nothing lost), the wave; 4 new backend tests
+  (the step count = the steps streamed, for classification and generation; `seconds`
+  counts a slow reader; every layer category has a family and a colour in both themes;
+  HTTP); the tests caught all 23 bugs planted on purpose in the code; checked live in the
+  browser in both themes.
 
 ### Stage 23 — An interactive editor · *planned*
 Editing that feels like a real tool.
@@ -841,10 +878,10 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
 | 16 | A | Один seed — одни цифры; сохранить / загрузить веса; финальный тест — **готово** | Обучили, проверили, протестировали — и сохранили |
 | 17 | B | Флагманские языковые модели: Qwen3, DeepSeek-V3, Llama, Mistral, Gemma — **готово** | Qwen и DeepSeek изнутри |
 | 18 | B | Свой текст → свой GPT: учим на своём тексте и даём писать — **готово** | Сделай свой GPT |
-| 19 | B | Флагманы для картинок, 3D, звука и зрения: Stable Diffusion, DiT, ViT, Whisper | Что внутри у Stable Diffusion |
-| 20 | B | Учим генерировать: автоэнкодер, VAE, диффузия | Нейросеть рисует цифры |
-| 21 | C | Понятные ошибки: простыми словами, почему, что делать, исправление в один клик | Ошибки, понятные без диплома |
-| 22 | C | Новый облик: дизайн-система, темы, живое обучение на холсте | Было / стало |
+| 19 | B | Флагманы для картинок, 3D, звука и зрения: Stable Diffusion, DiT, ViT, Whisper — **готово** | Что внутри у Stable Diffusion |
+| 20 | B | Учим генерировать: автоэнкодер, VAE, диффузия — **готово** | Нейросеть рисует цифры |
+| 21 | C | Понятные ошибки: простыми словами, почему, что делать, исправление в один клик — **готово** | Ошибки, понятные без диплома |
+| 22 | C | Новый облик: дизайн-система, темы, живое обучение на холсте — **готово** | Было / стало |
 | 23 | C | Интерактивный редактор: перетаскивание, мультивыделение, отмена, мини-карта | ResNet меньше чем за минуту |
 | 24 | C | Русский интерфейс (EN / RU) | Приложение на русском |
 | 25 | D | Проверка модели: нарисуй цифру — увидишь предсказание | Нарисовал цифру — сеть угадала |
@@ -1184,22 +1221,57 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   юнит-тесты редактора на 70 случаях, записанных бэкендом (редактор строит ровно тот же
   граф); тесты поймали все 20 ошибок, нарочно внесённых в копию кода; вживую в браузере.
 
-#### Этап 22 — Новый облик
-Редактор, который цепляет с первого взгляда.
-- Дизайн-система — палитра, типографика, отступы, тени — с **тёмной и светлой темами** и
-  переключателем.
-- Ноды раскрашены по семействам (вход / выход, свёртки, плотные, активации, нормализация,
-  последовательности, внимание, слияния, блоки), с иконками, компактным и подробным видом,
-  бейджами формы тензора и числа параметров.
-- Рёбра — плавные кривые с анимацией **потока данных**, подсветкой при наведении и формой
-  тензора прямо на связи.
-- **Живое обучение на холсте:** ноды светятся, когда через них проходит батч, кольцо
-  прогресса, итоговая точность на ноде Output.
-- Аккуратный инспектор — группы параметров, слайдеры и переключатели, подсказки на месте —
-  и плавные переходы с микроанимациями повсюду.
-- *Готово, когда:* все экраны на дизайн-системе в обеих темах, а анимация обучения не
-  замедляет само обучение.
+#### Этап 22 — Новый облик · ГОТОВО (28.11)
+Редактор, который цепляет с первого взгляда, — в тёмной и в светлой теме.
+- **Дизайн-система:** каждый цвет, размер шрифта, отступ, скругление, тень и движение
+  приложения — токен в одном файле (`src/theme/tokens.css`), в светлой и тёмной теме, с
+  переключателем на верхней панели — светлая, тёмная или как в системе; выбор запоминается
+  в браузере и применяется до первой отрисовки (без мигания). Кнопки, поля, переключатели,
+  сегменты, слайдеры, бейджи и заметки — общие компоненты на токенах.
+- **Ноды по семействам:** 17 семейств (вход / выход, плотные, свёртки, пулинг, активации,
+  нормализация, регуляризация, изменение формы, последовательности, внимание, слияния,
+  блоки, языковые модели, генеративные, зрение, 3D) — у каждого свой цвет, иконка и цветная
+  верхняя кромка ноды; порты и провода окрашены в цвет слоя, из которого выходят; маленькая
+  легенда называет семейства на холсте. **Компактный** вид (слой, его имя, форма выхода) и
+  **подробный** (ключевые настройки, число параметров, форма на каждом проводе).
+- **Провода:** плавные кривые; при наведении на ноду или провод её провода подсвечиваются и
+  по ним бегут данные; форма тензора — прямо на проводе.
+- **Живое обучение на холсте:** волна идёт по графу вниз, когда проходит батч (прямой
+  проход, синий), и обратно вверх (обратный проход — градиенты, оранжевый); нода Output
+  показывает кольцо прогресса и точность после каждой эпохи, затем итоговую (зелёную, если
+  сеть обобщает); кнопка Train заполняется; шаг и эпоха — в углу.
+- **Аккуратный инспектор:** сворачиваемые разделы; настройки слоя сгруппированы —
+  основные, переключатели и редкие (eps, база RoPE…) свёрнуты в «Advanced», и у внутренних
+  слоёв блока тоже; слайдеры там, где у настройки есть диапазон, переключатели для да / нет,
+  сегменты для коротких выборов, описание слоя по клику; расписание обучения — на
+  слайдерах, которые ходят по круглым значениям (эпохи, скорость обучения, батч, строки).
+- **Микроанимации:** наведение и нажатие, появление нод, карточек и окон, плавная смена
+  цветов при смене темы; учитываются «анимации выкл.» на холсте и системное «меньше
+  движения».
+- **Анимация не замедляет обучение — измерено.** Браузер делит процессор с обучением,
+  поэтому страница рисует как можно меньше: поток читается без отрисовки, шаги
+  принимаются 20 раз в секунду (а не с частотой экрана 144–300 Гц), кривая потерь
+  перерисовывает 220 точек (а не тысячи), а пока идёт обучение, не работает ни одна
+  CSS-анимация — волна — это два элемента свечения в каждой ноде, которым 20 раз в секунду
+  задаётся прозрачность (0,02 мс на такт; CSS-переменная на холсте стоила ~4 мс). Один и
+  тот же прогон, 8 пар с анимацией и без вперемешку: +0,025 с на прогоне 2,3 с (≈ 1 %,
+  один раз, на старте); первая версия стоила 0,5 с из 12 с.
 - *Ролик:* было / стало.
+- **Сделано:** `src/theme/tokens.css` и компоненты в `src/styles.scss`; `core/theme.ts`
+  (тема, вид нод, анимации — запоминаются в браузере), `core/families.ts` + `families.json`
+  (семейства, иконки, строка подробного вида, группы инспектора, порядок волны),
+  `core/live.ts` (пакетная доставка шагов, число шагов, лестницы слайдеров, волна); шаблон
+  и стили редактора перестроены на дизайн-системе (виджетов Ionic в нём не осталось:
+  стартовый бандл 710 → 474 кБ, сборка без предупреждений); первое событие потока сообщает
+  `total_steps` и `epochs`, результат обучения — `seconds`; уровень API 22. Проверено:
+  юнит-тесты редактора — каждый цвет на каждом экране из токена, каждый цветовой токен есть
+  в обеих темах, контраст текста (WCAG AA) на каждой поверхности в обеих темах, каждая
+  иконка на месте, первая отрисовка согласна с приложением, пакетная доставка (10 000
+  шагов одной порцией, около 20 порций в секунду на экране 144 Гц, ничего не теряется),
+  волна; 4 новых теста бэкенда (число шагов = присланные шаги, для классификации и
+  генерации; `seconds` учитывает медленного читателя; у каждой категории слоёв есть
+  семейство и цвет в обеих темах; HTTP); тесты поймали все 23 ошибки, нарочно внесённые в
+  код; вживую в браузере в обеих темах.
 
 #### Этап 23 — Интерактивный редактор
 Редактирование, как в настоящем инструменте.

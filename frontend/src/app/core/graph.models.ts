@@ -240,6 +240,9 @@ export interface TrainEvent {
   device?: string;
   resumed?: boolean;
   total_params?: number;
+  /** Stage 22 — the start event says how many steps the run takes (the canvas's progress ring). */
+  total_steps?: number;
+  epochs?: number;
   samples?: number;
   /** Stage 15 — how the rows split: trained on vs held out. */
   train_samples?: number;
@@ -301,6 +304,8 @@ export interface TrainResult {
   steps: number;
   device: string;
   total_params: number;
+  /** Stage 22 — how long training took on the server, in seconds. Optional: older backends omit it. */
+  seconds?: number | null;
   /** Stage 11 — saved checkpoint key (or null), best accuracy (held-out when there is a
    * validation part), resumed flag. */
   checkpoint?: string | null;

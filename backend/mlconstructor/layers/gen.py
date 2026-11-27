@@ -506,14 +506,15 @@ def _levels(node: _Gen, name: str, default: list[int], groups: int) -> list[int]
 
 @register("UNet2D")
 class UNet2DNode(_Ported):
-    """Stable Diffusion's denoiser: from a noisy latent, its timestep and the text
+    """Stable Diffusion's denoiser: from a noisy latent, its timestep and a context
     it predicts the noise. Levels of ResNet blocks go down and back up with skip
-    connections across; transformers read the text by cross-attention.
-    Inputs: the latent (C, H, W), the timestep, the text (L, D)."""
+    connections across; transformers read the context by cross-attention.
+    Inputs: the latent (C, H, W), the timestep, the context (L, D) — the text from a
+    text encoder, or a class embedding (a digit to draw)."""
 
     category = "diffusion"
     label = "U-Net (Stable Diffusion)"
-    ports = ("latent", "timestep", "text")
+    ports = ("latent", "timestep", "context")
 
     @classmethod
     def param_defs(cls) -> list[ParamDef]:
@@ -532,7 +533,9 @@ class UNet2DNode(_Ported):
             return self._rank(0, shape, 3, "a latent image (C, H, W)")
         if index == 1:
             return self._one_number(1, shape)
-        return self._rank(2, shape, 2, "the text (L, D) from a text encoder")
+        if len(shape) == 1:  # one vector: a class, added to the timestep's embedding too
+            return tuple(int(d) for d in shape)
+        return self._rank(2, shape, 2, "a context (L, D) — the text from a text encoder — or one vector (a class)")
 
     def _geom(self, shapes: list[Shape]) -> dict:
         lat, _t, txt = (self.check_port(i, s) for i, s in enumerate(shapes))
@@ -550,9 +553,12 @@ class UNet2DNode(_Ported):
         if lat[1] % factor or lat[2] % factor:
             self._bad(f"the latent {lat[1]}×{lat[2]} must divide by {factor} (it is halved {len(chans) - 1} times)",
                       hint="Use a latent size that is a multiple of that, or fewer levels.")
-        return dict(in_channels=lat[0], out_channels=self._int("out_channels", 4), block_channels=chans,
+        geom = dict(in_channels=lat[0], out_channels=self._int("out_channels", 4), block_channels=chans,
                     layers_per_block=self._int("layers_per_block", 2), attention_levels=[1 if a else 0 for a in attn],
-                    heads=heads, context_dim=txt[1], groups=groups)
+                    heads=heads, context_dim=txt[-1], groups=groups)
+        if len(txt) == 1:
+            geom["class_dim"] = txt[0]
+        return geom
 
     def out_shape_ports(self, shapes: list[Shape]) -> Shape:
         g = self._geom(shapes)
@@ -677,6 +683,34 @@ class PredictCleanNode(_NoiseNode):
 
     label = "Predict the clean latent"
     ports = ("noisy latent", "predicted noise", "timestep")
+
+
+@register("Reparameterize")
+class ReparameterizeNode(_Gen):
+    """A VAE's sampling step: half of its input is a mean, half a log-variance. It
+    passes on a sample while training, the mean otherwise, and random codes when
+    drawing new pictures; its KL term, added to the loss, keeps the codes near
+    N(0, I) — where new pictures come from. (2k, …) -> (k, …)."""
+
+    category = "diffusion"
+    label = "VAE sampling"
+
+    @classmethod
+    def param_defs(cls) -> list[ParamDef]:
+        return [ParamDef(name="kl_weight", type="float", default=1.0, min=0.0, label="KL weight (beta)",
+                         help="How strongly the codes are kept near N(0, I): 1 = a standard VAE, 0 = a plain "
+                              "autoencoder, more = smoother but blurrier pictures")]
+
+    def out_shape(self, in_shape: Shape | None) -> Shape:
+        sh = self._require_shape(in_shape)
+        if int(sh[0]) % 2:
+            self._bad(f"its first axis ({sh[0]}) must be even: half a mean, half a log-variance",
+                      hint="Give the layer before it twice the code size (e.g. a Linear of 32 for a code of 16).")
+        return (int(sh[0]) // 2, *[int(d) for d in sh[1:]])
+
+    def build(self, in_shape: Shape | None) -> nn.Module:
+        self.out_shape(in_shape)
+        return G.Reparameterize(float(self.p("kl_weight", 1.0)))
 
 
 # --------------------------------------------------------------------------- #

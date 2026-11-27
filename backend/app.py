@@ -46,6 +46,8 @@ from mlconstructor.schema import (
     ProjectLoadResult,
     ProjectSaveResult,
     ProjectSummary,
+    DrawRequest,
+    DrawResult,
     RunResult,
     GenerateRequest,
     GenerateResult,
@@ -107,12 +109,24 @@ def build(spec: GraphSpec) -> BuildResult:
     made, so even a 671-billion-parameter flagship is sized in seconds."""
     try:
         _model, result = mlc.build_model(spec, meta=True)
+        result.task = _model.task_plan.task  # Stage 20
         result.runnable = result.total_params <= mlc.MAX_TRAIN_PARAMS
         # Stage 19: several inputs, or a picture as output — it builds and runs, not trains (yet)
         result.train_note = mlc.train_block_reason(spec, result) if result.runnable else None
         result.trainable = result.runnable and result.train_note is None
         result.max_train_params = mlc.MAX_TRAIN_PARAMS
         return result
+    except _USER_ERRORS as exc:
+        return _unprocessable(exc)
+
+
+@app.post("/generate/images", response_model=DrawResult)
+def generate_images(req: DrawRequest) -> DrawResult:
+    """Stage 20 — draw pictures with a run's weights (a diffusion model or a VAE)."""
+    try:
+        return mlc.draw(req.spec, req.run_id, req.count, req.label, req.steps, req.guidance, req.seed)
+    except mlc.RunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
     except _USER_ERRORS as exc:
         return _unprocessable(exc)
 

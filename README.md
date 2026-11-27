@@ -163,6 +163,11 @@ A model is a JSON graph of `nodes` + directed `edges` + a `train` block:
   (`edges[].port`) and lists the inputs (`inputs`). `POST /run` runs the network once on
   random inputs; `/build` says whether it can run here (`runnable`) and, when it cannot
   be trained here yet, why (`train_note`).
+* Teach it to generate: `train.task` (default `auto`) picks classification, reconstruction
+  (an autoencoder; a VAE with the `Reparameterize` layer) or diffusion (a noisy picture, a
+  timestep and an optional class in, the noise out) from the graph. `/train/stream` sends
+  a `samples` event with pictures after every epoch; `POST /generate/images`
+  (`{spec, run_id, count, label, steps, guidance}`) draws with the trained weights.
 * `GET /layers` → the palette the editor renders.
 * `edge_settings` (optional) → how a connection reshapes its data; without it every
   connection adapts by itself (flatten, fold into an image, read an image as a

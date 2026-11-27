@@ -474,15 +474,43 @@ The models behind images, 3D, speech and vision — as plain, editable graphs.
   18 bugs planted on purpose in a copy of the code (two of them only after the tests were
   sharpened); checked live in the browser.
 
-### Stage 20 — Teach it to generate · *planned*
-Training beyond classification.
-- New training tasks: **reconstruction** (autoencoder, VAE) and **denoising diffusion**,
-  with the right losses and samplers.
-- Generate pictures right in the app: MNIST digits from a small VAE and a small
-  diffusion model, with a gallery that fills in as training goes.
-- *Done when:* a small diffusion model trained here draws recognizable digits, and a
-  VAE reconstructs them.
+### Stage 20 — Teach it to generate · **DONE (2026-11-27)**
+Training beyond classification: networks that give back what they see, and networks that draw.
+- **The task comes from the graph** (`train.task = "auto"`): one input and class scores —
+  classification, as before; one input and an output of its shape — **reconstruction** (an
+  autoencoder; with the new **VAE sampling** layer a VAE, whose codes a KL term keeps near
+  N(0, I), so random codes become new pictures); a noisy picture, a timestep and maybe a
+  class in, a picture of the same shape out — **diffusion** (the network learns to see the
+  noise that was added, as DDPM does). Anything else is explained in plain words.
+- **Diffusion done properly:** a DDPM noise schedule; a DDIM sampler (50 steps by default);
+  the class dropped one time in ten, so the same network also draws without one, which
+  gives **classifier-free guidance** (how strongly the class steers the picture); averaged
+  weights (EMA) to draw with; a learning rate that falls along a cosine.
+- **A gallery that fills in as training goes:** after every epoch the stream sends
+  pictures — one digit of each class, or originals over their reconstructions and new
+  pictures from a VAE.
+- **Draw:** after training, ask for a digit (or one of each), how many, the sampler's
+  steps and the guidance; a VAE decodes random codes.
+- Two library entries: **Digit VAE** (220 thousand parameters; learns MNIST in about 2 minutes on a laptop CPU: its reconstructions are close to the originals and most new digits read) and **Digit
+  diffusion** (a 440-thousand-parameter U-Net that reads the digit by cross-attention;
+  after 16 epochs — about a quarter of an hour on a laptop CPU, a minute an epoch — it draws digits you can recognize; 8 epochs give rougher ones. At this size guidance adds little, so it starts at 1).
+- The final test of a generative network measures its error on pictures it never saw.
+- The export trains a VAE or a diffusion model exactly like the app — the same losses,
+  epoch by epoch — then draws `samples.png`; exported MNIST models read the very digits the
+  app trains on (downloaded once from the official source).
 - *Video:* a network draws digits.
+- **Shipped:** `generative.py` (the task from the graph; the self-contained schedule,
+  sampler, guidance, losses, averaged weights and learning-rate curve, copied verbatim by
+  the export); the `Reparameterize` layer ("VAE sampling"); `TrainSpec.task`,
+  `diffusion_steps`, `sample_steps`, `guidance`, `recon_loss`; `TrainResult.task`,
+  `loss_name`, `final_recon`, `final_kl`, `gallery`, `draw_classes`, `draw_free`; the
+  stream's `samples` event; `POST /generate/images`; `BuildResult.task`; the U-Net's third
+  input is now "context" (a text or a class); API level 20. Tested: 7 new backend tests
+  (the task from the graph; the math — a perfect noise predictor gives the picture back;
+  a VAE learns and draws; a diffusion model learns and draws the class it is asked for; the
+  export trains exactly like the app; an exported MNIST model reads the same digits; HTTP);
+  the tests caught all 16 bugs planted on purpose in a copy of the code; checked live
+  in the browser.
 
 ### Stage 21 — Clear errors with fixes · *planned*
 Every message says what happened, why, and what to do — in plain words.
@@ -1057,15 +1085,41 @@ Python-бэкенд на **PyTorch** собирает граф в настоящ
   нарочно внесённых в копию кода (две — лишь после того, как тесты стали строже); вживую в
   браузере.
 
-#### Этап 20 — Учим генерировать (в планах)
-Обучение не только классификации.
-- Новые задачи обучения: **восстановление** (автоэнкодер, VAE) и **диффузионное
-  шумоподавление** — с правильными функциями потерь и сэмплерами.
-- Картинки генерируются прямо в приложении: цифры MNIST от маленького VAE и маленькой
-  диффузионной модели, галерея пополняется по ходу обучения.
-- *Готово, когда:* маленькая диффузионная модель, обученная здесь, рисует узнаваемые
-  цифры, а VAE их восстанавливает.
+#### Этап 20 — Учим генерировать · ГОТОВО (27.11)
+Обучение не только классификации: сети, которые возвращают увиденное, и сети, которые рисуют.
+- **Задача берётся из графа** (`train.task = "auto"`): один вход и оценки классов —
+  классификация, как раньше; один вход и выход его формы — **восстановление** (автоэнкодер;
+  с новым слоем **VAE sampling** — VAE: член KL держит его коды около N(0, I), и случайные
+  коды становятся новыми картинками); на входе зашумлённая картинка, шаг и, если нужно,
+  класс, на выходе картинка той же формы — **диффузия** (сеть учится видеть добавленный шум,
+  как DDPM). Всё остальное объясняется простыми словами.
+- **Диффузия как положено:** расписание шума DDPM; сэмплер DDIM (по умолчанию 50 шагов);
+  класс выбрасывается в одном случае из десяти, поэтому та же сеть рисует и без него, а
+  это даёт **classifier-free guidance** (насколько сильно класс ведёт картинку);
+  рисование усреднёнными весами (EMA); скорость обучения, падающая по косинусу.
+- **Галерея пополняется по ходу обучения:** после каждой эпохи поток присылает картинки —
+  по цифре каждого класса или оригиналы над восстановлениями и новые картинки VAE.
+- **Draw:** после обучения можно попросить цифру (или по одной каждой), сколько штук, число
+  шагов сэмплера и силу guidance; VAE рисует из случайных кодов.
+- В библиотеке два шаблона: **Digit VAE** (220 тыс. параметров; учится на MNIST примерно за 2 минуты на процессоре ноутбука: восстановления близки к оригиналам, большинство новых цифр читается) и **Digit
+  diffusion** (U-Net на 440 тыс. параметров, читающий цифру перекрёстным вниманием;
+  за 16 эпох — около четверти часа на процессоре ноутбука, примерно минута на эпоху — рисует узнаваемые цифры; 8 эпох дают более корявые. При таком размере guidance почти ничего не добавляет, поэтому по умолчанию она 1).
+- Финальный тест генеративной сети меряет её ошибку на картинках, которых она не видела.
+- Экспорт учит VAE или диффузионную модель ровно как приложение — те же потери, эпоха за
+  эпохой, — и рисует `samples.png`; экспортированные модели на MNIST читают те же самые
+  цифры, что и приложение (скачиваются один раз с официального источника).
 - *Ролик:* нейросеть рисует цифры.
+- **Сделано:** `generative.py` (задача из графа; самодостаточные расписание, сэмплер,
+  guidance, потери, усреднённые веса и кривая скорости обучения — экспорт копирует их
+  дословно); слой `Reparameterize` («VAE sampling»); `TrainSpec.task`, `diffusion_steps`,
+  `sample_steps`, `guidance`, `recon_loss`; `TrainResult.task`, `loss_name`, `final_recon`,
+  `final_kl`, `gallery`, `draw_classes`, `draw_free`; событие потока `samples`;
+  `POST /generate/images`; `BuildResult.task`; третий вход U-Net теперь «context» (текст или
+  класс); уровень API 20. Проверено: 7 новых тестов бэкенда (задача из графа; математика —
+  идеальный предсказатель шума возвращает картинку; VAE учится и рисует; диффузионная модель
+  учится и рисует нужный класс; экспорт учится ровно как приложение; экспортированный MNIST
+  читает те же цифры; HTTP); тесты поймали все 16 ошибок, нарочно внесённых в копию
+  кода; вживую в браузере.
 
 #### Этап 21 — Понятные ошибки с исправлениями (в планах)
 Каждое сообщение говорит, что случилось, почему и что сделать — простыми словами.

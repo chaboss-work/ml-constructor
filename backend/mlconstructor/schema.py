@@ -337,6 +337,9 @@ class TrainResult(BaseModel):
     steps: int
     device: str
     total_params: int
+    #: Stage 22 — how long training took on the server, in seconds (the reading of the
+    #: stream included: a page that read too slowly would show here).
+    seconds: float | None = None
     #: Stage 11 — the saved checkpoint's key (None if none saved), the best accuracy
     #: seen during training (since Stage 15: on the validation rows when there are
     #: some — the checkpoint keeps those weights — else on the training rows), and

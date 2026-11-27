@@ -56,7 +56,7 @@ from .weights import MAX_WEIGHTS_BYTES, RunNotFound, read_weights, run_path, wei
 __version__ = "0.1.0"
 #: The latest stage whose HTTP contract this backend serves (``GET /health`` reports
 #: it), so the editor can tell when the server runs an older backend than the page.
-API_LEVEL = 21
+API_LEVEL = 22
 
 __all__ = [
     "build_model",

@@ -290,6 +290,7 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
     if plan is not None and plan.task in ("reconstruction", "diffusion"):  # Stage 20
         yield from _generative_iter(model, plan, spec)
         return
+    t0 = time.perf_counter()  # Stage 22: the result says how long training took on the server
     torch.manual_seed(spec.seed)
     device = _device(spec.device)
     model = model.to(device)
@@ -327,11 +328,16 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
     )
     loss_fn = nn.CrossEntropyLoss()
     total_params = int(sum(p.numel() for p in model.parameters()))
+    # Stage 22: how many steps the run takes (the editor's progress ring on the canvas)
+    total_steps = spec.epochs * math.ceil(n / bs)
+    if spec.steps:
+        total_steps = min(total_steps, int(spec.steps))
 
     yield {
         "type": "start", "device": str(device), "resumed": resumed,
         "num_classes": num_classes, "samples": n_rows, "total_params": total_params,
         "train_samples": int(n), "val_samples": n_val, "test_samples": n_test,
+        "total_steps": total_steps, "epochs": spec.epochs,
     }
 
     def _evaluate(Xs: torch.Tensor, ys: torch.Tensor) -> tuple[float, float]:
@@ -437,6 +443,7 @@ def train_iter(model: nn.Module, in_shape: Shape, spec: TrainSpec) -> Iterator[d
         fit_note=fit_note,
         warnings=warnings,
         test_samples=n_test,
+        seconds=round(time.perf_counter() - t0, 3),
     )
     yield {"type": "done", "result": result}
 
@@ -872,6 +879,7 @@ def _generative_iter(model: nn.Module, plan, spec: TrainSpec) -> Iterator[dict]:
     as classification (start / step / epoch / done; the epoch carries losses, no
     accuracy) plus ``{"type": "samples", "epoch", "images"}`` — the gallery after
     every epoch."""
+    t0 = time.perf_counter()
     torch.manual_seed(spec.seed)
     device = _device(spec.device)
     model = model.to(device)
@@ -910,7 +918,7 @@ def _generative_iter(model: nn.Module, plan, spec: TrainSpec) -> Iterator[dict]:
     yield {
         "type": "start", "device": str(device), "resumed": resumed, "task": plan.task, "num_classes": g.classes,
         "samples": n_rows, "total_params": total_params, "train_samples": n, "val_samples": n_val,
-        "test_samples": n_test,
+        "test_samples": n_test, "total_steps": total_steps, "epochs": spec.epochs,
     }
 
     def _save() -> str:
@@ -988,6 +996,7 @@ def _generative_iter(model: nn.Module, plan, spec: TrainSpec) -> Iterator[dict]:
         final_recon=val_rec if val_rec is not None else final_rec, final_kl=val_kl if val_kl is not None else final_kl,
         gallery=[GalleryImage(**it) for it in gallery], draw_classes=draw_classes,
         draw_free=(plan.task == "diffusion" and (not plan.class_input or g.null is not None)) or bool(plan.vae),
+        seconds=round(time.perf_counter() - t0, 3),
     )
     if device.type == "cuda":
         model.to("cpu")
